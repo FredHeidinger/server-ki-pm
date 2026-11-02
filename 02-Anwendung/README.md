@@ -10,7 +10,7 @@ Django 5.2 (LTS) mit einer SQLite-Datei. Oberfläche und HTTP-Schnittstelle für
 | `steuerung/api.py` | HTTP-Schnittstelle für Chat-Bindungen (`Authorization: Bearer kipm_…`), Wiederholungsschutz über `anfrage_kennung` (Kennung wird vor der Ausführung reserviert, gleichzeitige Wiederholungen erhalten 409) |
 | `steuerung/views.py`, `templates/`, `static/` | Oberfläche: Posteingang, Meine Aufträge, Alle Aufträge, Entscheidungen, Verlauf, Projekte als Arbeitsbereiche mit Reitern, Verbindungen als Katalog mit Anleitung; Auftrag als Seitenpanel (Fragment `auftrag_panel`) oder Seite; serverseitig gerendert, ohne JavaScript bedienbar |
 | `steuerung/static/client/kipm.py` | Kommandozeile für Projektchats, nur Standardbibliothek |
-| `tests/` | 103 Tests: Dienstregeln, Schnittstelle, Oberfläche, Kommandozeile gegen Live-Server, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung |
+| `tests/` | 110 Tests: Dienstregeln, Schnittstelle, Oberfläche, Kommandozeile gegen Live-Server, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung, Spiegelerzeugung |
 | `requirements.txt` | Aus `uv.lock` exportiert für die Serverinstallation (`uv export --no-dev --extra server`) |
 
 Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [03-Server/INSTALLATION.md](../03-Server/INSTALLATION.md) vorbereitet.
