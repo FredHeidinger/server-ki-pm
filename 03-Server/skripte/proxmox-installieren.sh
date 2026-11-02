@@ -15,7 +15,11 @@ HOSTNAME_CT=${KIPM_HOSTNAME:-kipm}
 BRIDGE=${KIPM_BRIDGE:-vmbr0}
 KONTO=${KIPM_KONTO:-fred}
 
-[ "$(id -u)" = 0 ] || exec sudo -E bash "$0" "$@"
+SKRIPT_URL=${KIPM_SKRIPT_URL:-https://raw.githubusercontent.com/FredHeidinger/server-ki-pm/$ZWEIG/03-Server/skripte/proxmox-installieren.sh}
+if [ "$(id -u)" != 0 ]; then
+  echo "== Neustart mit sudo"
+  exec sudo -E bash -c "$(curl -fsSL "$SKRIPT_URL")"
+fi
 command -v pct >/dev/null || { echo "Dieses Skript läuft nur auf einem Proxmox-Wirt."; exit 1; }
 
 echo "== Vorlage Debian 13"
