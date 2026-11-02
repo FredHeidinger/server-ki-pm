@@ -1,0 +1,50 @@
+{% load static %}<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titel %}Server-KI-PM{% endblock %} – Server-KI-PM</title>
+<link rel="stylesheet" href="{% static 'steuerung/stil.css' %}">
+</head>
+<body>
+<a class="sprung" href="#inhalt">Zum Inhalt springen</a>
+<div class="app">
+<nav class="seitenleiste" aria-label="Bereiche">
+  <p class="marke">Server-KI-PM</p>
+  {% url 'uebersicht' as u_ueb %}{% url 'auftraege' as u_auf %}{% url 'pruefung' as u_pr %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}
+  <a href="{{ u_ueb }}" {% if request.path == u_ueb or request.path|slice:":9" == "/projekt/" or request.path|slice:":9" == "/bindung/" %}aria-current="page"{% endif %}>Übersicht</a>
+  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}>Aufträge</a>
+  <a href="{{ u_pr }}" {% if request.path|slice:":9" == "/pruefung" %}aria-current="page"{% endif %}>Prüfung</a>
+  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}>Entscheidungen</a>
+  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}>Verlauf</a>
+</nav>
+<main id="inhalt">
+<header class="kopfzeile">
+  <form method="post" action="{% url 'projekt_filter' %}" class="projektfilter">
+    {% csrf_token %}
+    <input type="hidden" name="zurueck" value="{{ request.path }}">
+    <label for="projektfilter">Projekt</label>
+    <select id="projektfilter" name="projekt" onchange="this.form.requestSubmit()">
+      <option value="" {% if not aktives_projekt %}selected{% endif %}>Alle Projekte</option>
+      {% for p in alle_projekte %}
+      <option value="{{ p.kennung }}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit" class="knopf zweit">Anwenden</button></noscript>
+  </form>
+  <form method="post" action="{% url 'abmelden' %}" class="benutzer">
+    {% csrf_token %}
+    <span>Angemeldet: <strong>{{ user.get_username }}</strong></span>
+    <button type="submit" class="knopf zweit">Abmelden</button>
+  </form>
+</header>
+{% if messages %}
+<ul class="meldungen" aria-live="polite">
+  {% for m in messages %}<li class="meldung {{ m.tags }}">{{ m }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% block inhalt %}{% endblock %}
+</main>
+</div>
+</body>
+</html>

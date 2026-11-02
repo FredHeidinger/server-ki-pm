@@ -1,0 +1,25 @@
+{% load static %}<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anmelden – Server-KI-PM</title>
+<link rel="stylesheet" href="{% static 'steuerung/stil.css' %}">
+</head>
+<body class="anmeldung">
+<main class="anmeldekarte">
+  <h1>Server-KI-PM</h1>
+  <p class="gedaempft">Anmeldung für den menschlichen Betreiber. Projektchats melden sich nicht hier an.</p>
+  {% if form.non_field_errors %}
+  <div class="fehler" role="alert">{{ form.non_field_errors.0 }}</div>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <p><label for="id_username">Anmeldename</label><br><input type="text" name="username" id="id_username" autocomplete="username" autofocus required></p>
+    <p><label for="id_password">Passwort</label><br><input type="password" name="password" id="id_password" autocomplete="current-password" required></p>
+    <input type="hidden" name="next" value="{{ next }}">
+    <p><button type="submit" class="knopf">Anmelden</button></p>
+  </form>
+</main>
+</body>
+</html>

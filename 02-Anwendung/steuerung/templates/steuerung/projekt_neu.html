@@ -1,0 +1,22 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Projekt registrieren{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'uebersicht' %}">← Übersicht</a></p>
+<h1>Projekt registrieren</h1>
+<p class="gedaempft">Registrieren legt nur den Datensatz an. Rechte für Chats werden später je Bindung vergeben.</p>
+{% if form.non_field_errors %}
+<div class="fehler" role="alert">{{ form.non_field_errors.0 }}</div>
+{% endif %}
+<form method="post" class="formular" novalidate>
+  {% csrf_token %}
+  {% for feld in form %}
+  <div class="feld{% if feld.errors %} ungueltig{% endif %}">
+    <label for="{{ feld.id_for_label }}">{{ feld.label }}</label>
+    {{ feld }}
+    {% if feld.help_text %}<p class="hilfe" id="{{ feld.id_for_label }}_hilfe">{{ feld.help_text }}</p>{% endif %}
+    {% for fehler in feld.errors %}<p class="fehlertext" role="alert">{{ fehler }}</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <p><button type="submit" class="knopf">Registrieren</button> <a class="knopf zweit" href="{% url 'uebersicht' %}">Abbrechen</a></p>
+</form>
+{% endblock %}

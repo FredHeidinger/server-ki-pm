@@ -1,0 +1,13 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}{{ auftrag.nummer }} bearbeiten{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">← {{ auftrag.nummer }}</a></p>
+<h1>{{ auftrag.nummer }} konkretisieren – ergibt Revision {{ auftrag.revision_nr|add:1 }}</h1>
+{% if folge %}<div class="box warn"><strong>Folge:</strong> {{ folge }}</div>{% endif %}
+<p class="gedaempft">Für die Freigabe sind Ziel, Nicht-Ziele, Arbeitsort mit Schreibumfang, mindestens ein Abnahmekriterium und ein Prüfer nötig. Du kannst auch unvollständig speichern.</p>
+<form method="post" class="formular" novalidate>
+  {% csrf_token %}
+  {% include "steuerung/formular_felder.html" %}
+  <p><button type="submit" class="knopf">Revision {{ auftrag.revision_nr|add:1 }} speichern</button> <a class="knopf zweit" href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">Abbrechen</a></p>
+</form>
+{% endblock %}

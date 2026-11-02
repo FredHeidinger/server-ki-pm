@@ -1,0 +1,60 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}{{ e.nummer }} {{ e.titel }}{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'entscheidungen' %}">← Entscheidungen</a></p>
+<div class="kopf"><span class="id">{{ e.nummer }}</span>{{ e.zustand|zustand }}<span>Stand {{ e.stand }}</span><span>vorgeschlagen von {{ e.vorgeschlagen_von_name }} am {{ e.vorgeschlagen_am|date:"d.m.Y" }}</span>{% if e.entschieden_am %}<span>entschieden am {{ e.entschieden_am|date:"d.m.Y H:i" }} von {{ e.entschieden_von.get_username }}</span>{% endif %}</div>
+<h1>{{ e.titel }}</h1>
+
+<div class="detail">
+<div class="haupt">
+  <section class="box">
+    <p>{{ e.text|linebreaksbr }}</p>
+    {% if e.verweis %}<p class="gedaempft">Verweis: {{ e.verweis }}</p>{% endif %}
+  </section>
+  <section class="box">
+    <h2>Betroffene Projekte und Übernahme</h2>
+    <table><thead><tr><th>Projekt</th><th>Stand {{ e.stand }} übernommen</th><th></th></tr></thead><tbody>
+    {% for p, b in projekte %}
+    <tr>
+      <td>{{ p.name }} <code>{{ p.kennung }}</code></td>
+      <td>{% if b %}✔ {{ b.bestaetigt_von_name }}, {{ b.zeitpunkt|date:"d.m.Y H:i" }}{% elif e.zustand == "ENTSCHIEDEN" %}offen{% else %}–{% endif %}</td>
+      <td>{% if e.zustand == "ENTSCHIEDEN" %}
+        {% if not b %}<form method="post" action="{% url 'entscheidung_aktion' entscheidung_id=e.pk aktion='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ p.pk }}"><button type="submit" class="knopf zweit">Übernahme bestätigen</button></form>{% endif %}
+        <form method="post" action="{% url 'entscheidung_aktion' entscheidung_id=e.pk aktion='umsetzungsauftrag' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ p.pk }}"><button type="submit" class="knopf zweit">Umsetzungsauftrag anlegen</button></form>
+      {% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody></table>
+  </section>
+  {% if auftraege %}
+  <section class="box">
+    <h2>Verknüpfte Aufträge</h2>
+    <table><tbody>{% for a in auftraege %}<tr><td><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}">{{ a.nummer }}</a></td><td>{{ a.titel }}</td><td>{{ a.projekt.kennung }}</td><td>{{ a.zustand|zustand }}</td><td>Stand {{ a.entscheidung_stand }}{% if a.entscheidung_stand != e.stand %} <span class="alt">(überholt)</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+  </section>
+  {% endif %}
+</div>
+<aside class="seite">
+  <section class="box">
+    <h2>Aktionen</h2>
+    {% if e.zustand != "ZURUECKGEZOGEN" %}
+    <form method="post" action="{% url 'entscheidung_aktion' entscheidung_id=e.pk aktion='entscheiden' %}" class="aktion">
+      {% csrf_token %}
+      <label>Entscheidungstext <span class="gedaempft">(leer = Text übernehmen)</span><br><textarea name="text" rows="3"></textarea></label>
+      <button type="submit" class="knopf">{% if e.zustand == "ENTSCHIEDEN" %}Neu entscheiden → Stand {{ e.stand|add:1 }}{% else %}Entscheiden → Stand 1{% endif %}</button>
+      {% if e.zustand == "ENTSCHIEDEN" %}<p class="gedaempft">Ein neuer Stand verlangt von allen Projekten eine neue Bestätigung.</p>{% endif %}
+    </form>
+    <form method="post" action="{% url 'entscheidung_aktion' entscheidung_id=e.pk aktion='zurueckziehen' %}" class="aktion">
+      {% csrf_token %}
+      <label>Begründung<br><textarea name="grund" rows="2" required></textarea></label>
+      <button type="submit" class="knopf zweit gefahr">Zurückziehen</button>
+    </form>
+    {% else %}<p class="gedaempft">Zurückgezogen; keine Aktionen.</p>{% endif %}
+  </section>
+  <section class="box">
+    <h2>Verlauf</h2>
+    <table class="klein"><tbody>{% for ev in ereignisse %}<tr><td>{{ ev.zeitpunkt|date:"d.m. H:i" }}</td><td>{{ ev.akteur_name }}</td><td>{{ ev.ereignis }} <span class="gedaempft">{{ ev.anlass }}</span></td></tr>{% endfor %}</tbody></table>
+  </section>
+</aside>
+</div>
+{% endblock %}

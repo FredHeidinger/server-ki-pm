@@ -1,0 +1,38 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Übersicht{% endblock %}
+{% block inhalt %}
+<h1>Übersicht</h1>
+
+<h2>Was braucht mich?</h2>
+<div class="kacheln">
+  <a class="kachel" href="{% url 'pruefung' %}"><span class="zahl">{{ kacheln.zur_pruefung }}</span><span>Ergebnisse zur Prüfung</span></a>
+  <a class="kachel" href="{% url 'auftraege' %}?reifegrad=wunsch&zustand=ENTWURF"><span class="zahl">{{ kacheln.wuensche }}</span><span>Wünsche ohne Arbeitspaket</span></a>
+  <a class="kachel" href="{% url 'auftraege' %}?zustand=BLOCKIERT"><span class="zahl">{{ kacheln.blockiert }}</span><span>Blockiert</span></a>
+  <a class="kachel" href="{% url 'entscheidungen' %}"><span class="zahl">{{ kacheln.entscheidungen }}</span><span>Offene Entscheidungen</span></a>
+  <a class="kachel" href="{% url 'auftraege' %}?zustand=KLAERUNG_ERFORDERLICH"><span class="zahl">{{ kacheln.klaerung }}</span><span>Klärung erforderlich</span></a>
+</div>
+
+<h2>Projekte und Module</h2>
+{% if zeilen %}
+<table>
+  <thead>
+    <tr><th scope="col">Projekt / Modul</th><th scope="col">Entwurf</th><th scope="col">Freigegeben</th><th scope="col">In Arbeit</th><th scope="col">Zur Prüfung</th><th scope="col">Zuletzt gemeldet (Bearbeiter)</th><th scope="col">Zuletzt geprüft (Mensch)</th></tr>
+  </thead>
+  <tbody>
+  {% for z in zeilen %}
+    <tr {% if z.ist_modul %}class="modul"{% endif %}>
+      {% if z.ist_modul %}<td>{{ z.name }}</td>{% else %}<th scope="row"><a href="{% url 'projekt_detail' kennung=z.kennung %}">{{ z.name }}</a></th>{% endif %}
+      <td>{{ z.entwurf|default:"–" }}</td><td>{{ z.freigegeben|default:"–" }}</td><td>{{ z.in_arbeit|default:"–" }}</td><td>{{ z.zur_pruefung|default:"–" }}</td>
+      <td>{% if z.gemeldet_am %}{{ z.gemeldet_am|date:"d.m. H:i" }} · {{ z.gemeldet_von }}{% if z.gemeldet_alt %} <span class="alt">(älter als 7 Tage)</span>{% endif %}{% else %}nie{% endif %}</td>
+      <td>{% if z.geprueft_am %}{{ z.geprueft_am|date:"d.m. H:i" }} · {{ z.geprueft_von }}{% else %}nie{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="leer">
+  {% if aktives_projekt %}Das gewählte Projekt ist nicht aktiv.{% else %}Noch kein Projekt registriert. Projekte und Module sind Daten, keine Programmteile; jedes Projekt erhält eigene Arbeitsorte und Chat-Bindungen.{% endif %}
+</div>
+{% endif %}
+<p><a class="knopf" href="{% url 'projekt_neu' %}">Projekt registrieren</a> <a class="knopf zweit" href="{% url 'wunsch_neu' %}">Wunsch erfassen</a></p>
+{% endblock %}

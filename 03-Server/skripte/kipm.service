@@ -1,0 +1,23 @@
+[Unit]
+Description=Server-KI-PM (Django hinter gunicorn, nur localhost)
+After=network.target
+
+[Service]
+Type=simple
+User=kipm
+Group=kipm
+WorkingDirectory=/opt/kipm/app
+EnvironmentFile=/etc/kipm/kipm.env
+ExecStart=/opt/kipm/venv/bin/gunicorn kipm.wsgi:application --bind 127.0.0.1:8765 --workers 2 --timeout 60
+Restart=on-failure
+RestartSec=5
+# Härtung: nur Datenordner beschreibbar, kein Zugriff auf fremde Bereiche
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kipm
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

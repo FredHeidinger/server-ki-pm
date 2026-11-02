@@ -1,0 +1,12 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Ergebnis zu {{ auftrag.nummer }}{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">← {{ auftrag.nummer }}</a></p>
+<h1>Ergebnis zu {{ auftrag.nummer }} einreichen (Revision {{ auftrag.revision_nr }})</h1>
+<p class="gedaempft">Dieselben Pflichtangaben wie für einen Chat: Zusammenfassung, geänderte Dateien mit Revision, ausgeführte Prüfungen. Dein Ergebnis prüft ein anderer Mensch.</p>
+<form method="post" class="formular" novalidate>
+  {% csrf_token %}
+  {% include "steuerung/formular_felder.html" %}
+  <p><button type="submit" class="knopf">Einreichen – zur Prüfung</button> <a class="knopf zweit" href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">Abbrechen</a></p>
+</form>
+{% endblock %}

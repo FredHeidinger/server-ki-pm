@@ -1,0 +1,26 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Prüfung{% endblock %}
+{% block inhalt %}
+<h1>Prüfung und Abnahme</h1>
+<p class="gedaempft">Eingereichte Ergebnisse, älteste zuerst. Abnehmen darf nur ein Mensch, und nie der Einreicher selbst.</p>
+{% if zeilen %}
+<table>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col">Projekt / Modul</th><th scope="col">Eingereicht</th><th scope="col">Bearbeiter</th><th scope="col">Prüfer</th><th scope="col"></th></tr></thead>
+  <tbody>
+  {% for z in zeilen %}
+    <tr>
+      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
+      <td>{{ z.a.titel }}</td>
+      <td>{{ z.a.projekt.kennung }}{% if z.a.modul %} / {{ z.a.modul.kennung }}{% endif %}</td>
+      <td>{{ z.e.eingereicht_am|date:"d.m.Y H:i" }}</td>
+      <td>{{ z.e.eingereicht_von_name }}</td>
+      <td>{{ z.a.pruefer.get_username|default:"–" }}</td>
+      <td>{% if z.selbst %}<span class="gedaempft">dein eigenes Ergebnis – prüft ein anderer</span>{% else %}<a class="knopf" href="{% url 'pruefung_detail' ergebnis_id=z.e.pk %}">Prüfen</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="leer">Nichts wartet auf Prüfung.</div>
+{% endif %}
+{% endblock %}

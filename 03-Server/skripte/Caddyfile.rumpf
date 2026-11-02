@@ -1,0 +1,12 @@
+    tls internal
+    encode gzip
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+    handle_path /static/* {
+        root * /var/lib/kipm/static
+        file_server
+    }
+    reverse_proxy 127.0.0.1:8765

@@ -1,0 +1,11 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Entscheidung vorschlagen{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'entscheidungen' %}">← Entscheidungen</a></p>
+<h1>Entscheidung vorschlagen</h1>
+<form method="post" class="formular" novalidate>
+  {% csrf_token %}
+  {% include "steuerung/formular_felder.html" %}
+  <p><button type="submit" class="knopf">Speichern</button> <a class="knopf zweit" href="{% url 'entscheidungen' %}">Abbrechen</a></p>
+</form>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% if form.non_field_errors %}<div class="fehler" role="alert">{{ form.non_field_errors.0 }}</div>{% endif %}
+{% for feld in form %}
+<div class="feld{% if feld.errors %} ungueltig{% endif %}">
+  {% if feld.field.widget.input_type == "checkbox" and not feld.field.choices %}
+    <label>{{ feld }} {{ feld.label }}</label>
+  {% else %}
+    <label for="{{ feld.id_for_label }}">{{ feld.label }}</label>
+    {{ feld }}
+  {% endif %}
+  {% if feld.help_text %}<p class="hilfe">{{ feld.help_text }}</p>{% endif %}
+  {% for fehler in feld.errors %}<p class="fehlertext" role="alert">{{ fehler }}</p>{% endfor %}
+</div>
+{% endfor %}

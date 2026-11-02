@@ -1,0 +1,33 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Verlauf{% endblock %}
+{% block inhalt %}
+<h1>Verlauf</h1>
+<p class="gedaempft">Jede Änderung, die der Dienst ausgeführt hat: wer, wann, was, warum. Einträge sind nicht änderbar.{% if aktives_projekt %} Gefiltert auf {{ aktives_projekt.name }}.{% endif %}</p>
+<form method="get" class="filterzeile">
+  <label>Objekt <select name="objekt" onchange="this.form.submit()"><option value="">Alle</option>{% for o in objekte %}<option value="{{ o }}" {% if filter.objekt == o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
+  <label>Akteur <select name="akteur" onchange="this.form.submit()"><option value="">Alle</option>{% for a in akteure %}<option value="{{ a }}" {% if filter.akteur == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></label>
+  <label>Zeitraum <select name="tage" onchange="this.form.submit()"><option value="">Alles</option><option value="1" {% if filter.tage == "1" %}selected{% endif %}>Heute</option><option value="7" {% if filter.tage == "7" %}selected{% endif %}>7 Tage</option><option value="30" {% if filter.tage == "30" %}selected{% endif %}>30 Tage</option></select></label>
+  <label>Kennung <input type="text" name="kennung" value="{{ filter.kennung }}" size="10" placeholder="A-12"></label>
+  <button type="submit" class="knopf zweit">Filtern</button>
+</form>
+{% if ereignisse %}
+<table>
+  <thead><tr><th scope="col">Zeitpunkt</th><th scope="col">Akteur</th><th scope="col">Projekt</th><th scope="col">Objekt</th><th scope="col">Ereignis</th><th scope="col">Anlass / Begründung</th><th scope="col">Revision</th></tr></thead>
+  <tbody>
+  {% for e in ereignisse %}
+    <tr>
+      <td><time datetime="{{ e.zeitpunkt|date:'c' }}">{{ e.zeitpunkt|date:"d.m.Y H:i" }}</time></td>
+      <td>{{ e.akteur_name }}</td>
+      <td>{{ e.projekt.kennung|default:"–" }}</td>
+      <td>{{ e.objekt_typ }} <code>{{ e.objekt_kennung }}</code></td>
+      <td>{{ e.ereignis }}</td>
+      <td>{{ e.anlass|default:"–" }}</td>
+      <td>{{ e.revision|default:"–" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="leer">Keine Ereignisse für diese Auswahl.</div>
+{% endif %}
+{% endblock %}

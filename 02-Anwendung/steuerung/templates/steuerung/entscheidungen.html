@@ -1,0 +1,28 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}Entscheidungen{% endblock %}
+{% block inhalt %}
+<h1>Gemeinsame Entscheidungen</h1>
+<p class="gedaempft">Festlegungen, die mehr als ein Projekt oder Modul betreffen. Entscheiden darf nur ein Mensch; Chats dürfen vorschlagen und die Übernahme für ihr Projekt bestätigen.</p>
+{% if zeilen %}
+<table>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col">Betroffen</th><th scope="col">Zustand</th><th scope="col">Stand</th><th scope="col">Übernahme bestätigt</th><th scope="col">Aufträge</th></tr></thead>
+  <tbody>
+  {% for z in zeilen %}
+    <tr>
+      <td><a href="{% url 'entscheidung_detail' entscheidung_id=z.e.pk %}">{{ z.e.nummer }}</a></td>
+      <td><a href="{% url 'entscheidung_detail' entscheidung_id=z.e.pk %}">{{ z.e.titel }}</a></td>
+      <td>{% for p, ok in z.projekte %}{{ p.kennung }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+      <td>{{ z.e.zustand|zustand }}</td>
+      <td>{{ z.e.stand }}</td>
+      <td>{% if z.e.zustand == "ENTSCHIEDEN" %}{% for p, ok in z.projekte %}{{ p.kennung }}: {% if ok %}✔{% else %}offen{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}{% else %}–{% endif %}</td>
+      <td>{% for a in z.e.auftraege.all %}<a href="{% url 'auftrag_detail' auftrag_id=a.pk %}">{{ a.nummer }}</a> {% empty %}–{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="leer">Noch keine Entscheidungen.</div>
+{% endif %}
+<p><a class="knopf" href="{% url 'entscheidung_neu' %}">Entscheidung vorschlagen</a></p>
+{% endblock %}

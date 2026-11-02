@@ -1,0 +1,116 @@
+/* Server-KI-PM – ein Stylesheet, keine Abhängigkeiten. Zustände immer als Wort, nie nur als Farbe. */
+:root {
+  --hintergrund: #f6f7f9; --flaeche: #ffffff; --text: #1d2229; --gedaempft: #5a6370; --linie: #d9dee5;
+  --akzent: #1f5fa8; --akzent-text: #ffffff; --warn-flaeche: #fff4d6; --warn-linie: #d9a400;
+  --ok-flaeche: #e4f3e6; --fehler-flaeche: #fbe3e3; --fehler-linie: #c62828; --fokus: #e07b00;
+}
+* { box-sizing: border-box; }
+html { font: 15px/1.45 system-ui, "Segoe UI", sans-serif; color: var(--text); background: var(--hintergrund); }
+body { margin: 0; }
+a { color: var(--akzent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--fokus); outline-offset: 2px;
+}
+.sprung { position: absolute; left: -999px; top: 0; background: var(--flaeche); padding: 8px; }
+.sprung:focus { left: 8px; z-index: 10; }
+
+/* Rahmen */
+.app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.seitenleiste { background: var(--flaeche); border-right: 1px solid var(--linie); padding: 16px; }
+.seitenleiste .marke { font-weight: 700; font-size: 16px; margin: 0 0 16px; }
+.seitenleiste a { display: block; padding: 8px 10px; margin-bottom: 4px; border-radius: 6px; text-decoration: none; color: var(--text); }
+.seitenleiste a:hover { background: var(--hintergrund); }
+.seitenleiste a[aria-current="page"] { background: var(--akzent); color: var(--akzent-text); }
+main { padding: 0 24px 40px; min-width: 0; }
+.kopfzeile { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--linie); margin-bottom: 20px; flex-wrap: wrap; }
+.kopfzeile form { display: flex; align-items: center; gap: 8px; margin: 0; }
+.kopfzeile label { color: var(--gedaempft); }
+
+h1 { font-size: 22px; margin: 0 0 12px; }
+h2 { font-size: 16px; margin: 22px 0 8px; }
+.gedaempft { color: var(--gedaempft); }
+code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 0.95em; }
+
+/* Bedienelemente */
+select, input[type="text"], input[type="password"], textarea {
+  font: inherit; padding: 6px 8px; border: 1px solid var(--linie); border-radius: 6px; background: var(--flaeche); color: var(--text);
+}
+textarea { width: 100%; max-width: 640px; }
+input[type="text"], input[type="password"] { width: 100%; max-width: 420px; }
+.knopf { display: inline-block; font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--akzent);
+  background: var(--akzent); color: var(--akzent-text); cursor: pointer; text-decoration: none; }
+.knopf.zweit { background: var(--flaeche); color: var(--akzent); }
+.knopf[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+
+/* Tabellen, Kacheln, Zustände */
+table { width: 100%; border-collapse: collapse; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--linie); vertical-align: top; }
+thead th { background: #eef1f5; font-weight: 600; }
+tbody th { font-weight: 600; }
+tr.modul td:first-child { padding-left: 28px; color: var(--gedaempft); }
+.kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kachel { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; }
+.kachel .zahl { font-size: 26px; font-weight: 600; }
+.leer { background: var(--flaeche); border: 1px dashed var(--linie); border-radius: 8px; padding: 16px; color: var(--gedaempft); }
+.meldungen { list-style: none; padding: 0; margin: 0 0 16px; }
+.meldung { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--linie); background: var(--flaeche); }
+.meldung.success { background: var(--ok-flaeche); }
+.meldung.error { background: var(--fehler-flaeche); }
+.fehler { background: var(--fehler-flaeche); border: 1px solid var(--fehler-linie); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+
+/* Formulare */
+.formular { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 8px; padding: 16px; max-width: 720px; }
+.feld { margin-bottom: 14px; }
+.feld label { display: block; font-weight: 600; margin-bottom: 4px; }
+.feld .hilfe { margin: 4px 0 0; color: var(--gedaempft); font-size: 13px; }
+.feld .fehlertext { margin: 4px 0 0; color: var(--fehler-linie); font-size: 13px; }
+.feld.ungueltig input, .feld.ungueltig textarea { border-color: var(--fehler-linie); }
+
+/* Anmeldung */
+body.anmeldung { display: grid; place-items: center; min-height: 100vh; }
+.anmeldekarte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 10px; padding: 24px 28px; width: min(420px, 92vw); }
+.anmeldekarte h1 { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .seitenleiste { border-right: 0; border-bottom: 1px solid var(--linie); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .seitenleiste .marke { width: 100%; margin-bottom: 8px; }
+  main { padding: 0 16px 32px; }
+}
+
+/* Detailseiten: Hauptspalte und Seitenspalte */
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.seite .box { margin-bottom: 12px; }
+.seite h2 { margin-top: 0; }
+.seite .aktion { margin: 0 0 10px; }
+.seite .aktion textarea { width: 100%; }
+.seite .aktion .knopf, .seite .knopf { display: block; width: 100%; text-align: center; margin-top: 6px; }
+.seite table.klein { font-size: 13px; }
+.box { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+.box.warn { background: var(--warn-flaeche); border-color: var(--warn-linie); }
+.box h2 { margin-top: 0; }
+.kopf { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.kopf .id { font-weight: 700; font-size: 18px; }
+.felder { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 6px 14px; margin: 0; }
+.felder.eng { grid-template-columns: 110px minmax(0, 1fr); }
+.felder dt { color: var(--gedaempft); } .felder dd { margin: 0; overflow-wrap: anywhere; }
+ol.kriterien { margin: 0; padding-left: 20px; }
+ul.pruefliste { list-style: none; padding: 0; margin: 0; } ul.pruefliste li { padding: 4px 0; }
+.status.fertig { background: var(--ok-flaeche); } .status.aus { color: var(--gedaempft); }
+.knopf.gefahr { border-color: var(--fehler-linie); color: var(--fehler-linie); }
+button.leise { font: inherit; font-size: 12px; background: none; border: 0; color: var(--akzent); cursor: pointer; padding: 0 4px; }
+form.inline { display: inline; }
+.zwei { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.zeile { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 10px; }
+.zeile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gedaempft); }
+.formular.klein { padding: 10px 12px; margin-top: 10px; }
+.filterzeile { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+.filterzeile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gedaempft); }
+.kachel { text-decoration: none; color: var(--text); }
+a.kachel:hover { border-color: var(--akzent); }
+.meldungseintrag { border-top: 1px solid var(--linie); padding-top: 8px; margin-top: 8px; }
+fieldset { border: 1px solid var(--linie); border-radius: 6px; margin: 8px 0; padding: 8px 12px; }
+label.radio { margin-right: 10px; }
+code.schluessel { display: block; font-size: 15px; padding: 8px; overflow-wrap: anywhere; user-select: all; }
+ul.liste { margin: 0; padding-left: 18px; }
+@media (max-width: 1000px) { .detail { grid-template-columns: 1fr; } .zwei { grid-template-columns: 1fr; } }

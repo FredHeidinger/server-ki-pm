@@ -1,0 +1,78 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}{{ projekt.name }}{% endblock %}
+{% block inhalt %}
+<p><a href="{% url 'uebersicht' %}">← Übersicht</a></p>
+<h1>{{ projekt.name }} <code>{{ projekt.kennung }}</code></h1>
+{% if projekt.beschreibung %}<p>{{ projekt.beschreibung }}</p>{% endif %}
+
+{% if neuer_schluessel %}
+<div class="box warn" role="alert">
+  <strong>Zugangsschlüssel für „{{ neuer_schluessel.name }}“ – wird nur jetzt angezeigt.</strong>
+  <p>Dem Chat als Umgebungsvariable <code>KIPM_SCHLUESSEL</code> übergeben; nicht in Dokumente oder Chatverläufe kopieren.</p>
+  <p><code class="schluessel">{{ neuer_schluessel.schluessel }}</code></p>
+</div>
+{% endif %}
+
+<div class="zwei">
+<section class="box">
+  <h2>Module</h2>
+  {% if module %}<ul class="liste">{% for m in module %}<li>{{ m.name }} <code>{{ m.kennung }}</code></li>{% endfor %}</ul>{% else %}<p class="gedaempft">Keine Module.</p>{% endif %}
+  <form method="post" action="{% url 'modul_neu' kennung=projekt.kennung %}" class="zeile">
+    {% csrf_token %}
+    <label for="{{ modul_form.kennung.id_for_label }}">Kennung {{ modul_form.kennung }}</label>
+    <label for="{{ modul_form.name.id_for_label }}">Name {{ modul_form.name }}</label>
+    <button type="submit" class="knopf zweit">Modul anlegen</button>
+  </form>
+</section>
+
+<section class="box">
+  <h2>Arbeitsorte</h2>
+  <p class="gedaempft">Wo Bearbeiter Dateien ändern dürfen. Der Dienst selbst öffnet keine Pfade.</p>
+  {% if arbeitsorte %}
+  <table><thead><tr><th>Name</th><th>Kennung</th><th>Rechner</th><th>Pfad / Repository</th></tr></thead><tbody>
+  {% for o in arbeitsorte %}<tr><td>{{ o.name }}</td><td><code>{{ o.kennung }}</code></td><td>{{ o.rechner|default:"–" }}</td><td>{{ o.pfad|default:"–" }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="gedaempft">Noch kein Arbeitsort. Ohne Arbeitsort kann kein Arbeitspaket freigegeben werden.</p>{% endif %}
+  <form method="post" action="{% url 'arbeitsort_neu' kennung=projekt.kennung %}" class="formular klein">
+    {% csrf_token %}
+    {% for feld in arbeitsort_form %}<div class="feld"><label for="{{ feld.id_for_label }}">{{ feld.label }}</label>{{ feld }}{% if feld.help_text %}<p class="hilfe">{{ feld.help_text }}</p>{% endif %}</div>{% endfor %}
+    <button type="submit" class="knopf zweit">Arbeitsort anlegen</button>
+  </form>
+</section>
+</div>
+
+<section class="box">
+  <h2>Chat-Bindungen</h2>
+  <p class="gedaempft">Der Zugang eines Projektchats: genau dieses Projekt, Rolle Bearbeiter, widerrufbar. Der Schlüssel wird nur einmal angezeigt.</p>
+  {% if bindungen %}
+  <table><thead><tr><th>Name</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Gültig bis</th><th>Zustand</th><th></th></tr></thead><tbody>
+  {% for b in bindungen %}
+  <tr>
+    <td>{{ b.name }}</td><td>{{ b.get_rolle_display }}</td>
+    <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% else %}nie{% endif %}</td>
+    <td>{{ b.gueltig_bis|date:"d.m.Y" }}</td>
+    <td>{% if b.widerrufen_am %}<span class="status aus">widerrufen {{ b.widerrufen_am|date:"d.m.Y" }}</span>{% elif b.gueltig_bis < jetzt %}<span class="status aus">abgelaufen</span>{% else %}<span class="status ok">aktiv</span>{% endif %}</td>
+    <td>{% if not b.widerrufen_am %}<form method="post" action="{% url 'bindung_widerrufen' bindung_id=b.pk %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit gefahr">Widerrufen</button></form>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% else %}<p class="gedaempft">Noch keine Bindung.</p>{% endif %}
+  <form method="post" action="{% url 'bindung_neu' kennung=projekt.kennung %}" class="zeile">
+    {% csrf_token %}
+    <label for="{{ bindung_form.name.id_for_label }}">Name der Bindung {{ bindung_form.name }}</label>
+    <label for="{{ bindung_form.gueltig_tage.id_for_label }}">Gültig (Tage) {{ bindung_form.gueltig_tage }}</label>
+    <button type="submit" class="knopf">Bindung anlegen und Schlüssel anzeigen</button>
+  </form>
+</section>
+
+<section class="box">
+  <h2>Offene Aufträge</h2>
+  {% if auftraege %}
+  <table><thead><tr><th>Nr.</th><th>Titel</th><th>Zustand</th><th>Bearbeiter</th></tr></thead><tbody>
+  {% for a in auftraege %}<tr><td><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}">{{ a.nummer }}</a></td><td>{{ a.titel }}</td><td>{{ a.zustand|zustand }}</td><td>{{ a.bearbeiter_name|default:"–" }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="gedaempft">Keine offenen Aufträge.</p>{% endif %}
+  <p><a class="knopf zweit" href="{% url 'wunsch_neu' %}">Wunsch erfassen</a></p>
+</section>
+{% endblock %}
