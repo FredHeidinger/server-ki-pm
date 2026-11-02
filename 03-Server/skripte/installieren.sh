@@ -22,7 +22,9 @@ apt-get install -y -q python3 python3-venv python3-pip rsync caddy >/dev/null
 
 echo "== Dienstkonto und Ordner"
 id kipm >/dev/null 2>&1 || useradd --system --home-dir /opt/kipm --shell /usr/sbin/nologin kipm
-install -d -o kipm -g kipm -m 0750 "$DATEN" "$DATEN/static"
+# Datenordner nur durchquerbar (Caddy liest static), Datenbank bleibt 0640 kipm:kipm
+install -d -o kipm -g kipm -m 0751 "$DATEN"
+install -d -o kipm -g kipm -m 0755 "$DATEN/static"
 install -d -o root -g kipm -m 0750 /etc/kipm "$SICHERUNG"
 install -d -o root -g root -m 0755 /opt/kipm "$APP"
 chown root:kipm /etc/kipm/kipm.env; chmod 0640 /etc/kipm/kipm.env
@@ -40,6 +42,7 @@ echo "== Python-Umgebung"
 echo "== Datenbank migrieren und statische Dateien sammeln"
 runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" migrate --noinput
 runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" collectstatic --noinput >/dev/null
+chmod -R a+rX "$DATEN/static"
 
 echo "== TLS-Proxy (Caddy) für: ${KIPM_ALLOWED_HOSTS:-localhost}"
 {
