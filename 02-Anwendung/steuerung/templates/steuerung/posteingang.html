@@ -1,0 +1,47 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}Posteingang{% endblock %}
+{% block brotkrumen %}Posteingang{% endblock %}
+{% block inhalt %}
+<div class="seitenkopf">
+  <h1>Posteingang</h1>
+  <div class="werkzeuge"><a class="knopf" href="{% url 'wunsch_neu' %}">+ Wunsch</a></div>
+</div>
+<p class="gedaempft">Alles, was jetzt deine Entscheidung braucht. Erledigtes verschwindet von selbst.</p>
+{% if eintraege %}
+<ul class="eingang">
+{% for e in eintraege %}
+  <li class="eintrag eintrag-{{ e.art }}">
+    <div class="eintragkopf">
+      <span class="eintragart">{% if e.art == "pruefung" %}Prüfung{% elif e.art == "blockade" %}Blockiert{% elif e.art == "klaerung" %}Klärung{% elif e.art == "vorschlag" %}Vorschlag{% elif e.art == "wunsch" %}Wunsch{% else %}Entscheidung{% endif %}</span>
+      <span class="eintragzeit">{{ e.zeit|date:"d.m. H:i" }}{% if e.von %} · {{ e.von }}{% endif %}{% if e.auftrag %} · {{ e.auftrag.projekt.name }}{% endif %}</span>
+    </div>
+    <p class="eintragtitel">
+      {% if e.auftrag %}<a href="{% url 'auftrag_detail' auftrag_id=e.auftrag.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=e.auftrag.pk %}">{{ e.titel }}</a>
+      {% else %}<a href="{% url 'entscheidung_detail' entscheidung_id=e.entscheidung.pk %}">{{ e.titel }}</a>{% endif %}
+    </p>
+    {% if e.text %}<p class="eintragtext">{{ e.text|truncatechars:240 }}</p>{% endif %}
+    <div class="eintragaktionen">
+      {% if e.art == "pruefung" %}
+        {% if e.selbst %}<span class="gedaempft">Eigene Arbeit, ein anderer Mensch prüft.</span>{% else %}<a class="knopf klein" href="{% url 'auftrag_detail' auftrag_id=e.auftrag.pk %}#pruefen" data-panel="{% url 'auftrag_panel' auftrag_id=e.auftrag.pk %}">Prüfen</a>{% endif %}
+      {% elif e.art == "blockade" %}
+        <form method="post" action="{% url 'antwort' auftrag_id=e.auftrag.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{% url 'posteingang' %}"><input type="text" name="text" placeholder="Antwort an {{ e.von }}" required aria-label="Antwort"><button type="submit" class="knopf klein">Antworten und freigeben</button></form>
+      {% elif e.art == "klaerung" %}
+        <a class="knopf klein" href="{% url 'auftrag_detail' auftrag_id=e.auftrag.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=e.auftrag.pk %}">Klären</a>
+      {% elif e.art == "vorschlag" %}
+        <form method="post" action="{% url 'vorschlag_bewerten' auftrag_id=e.auftrag.pk meldung_id=e.meldung.pk wahl='uebernehmen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf klein">Übernehmen und bearbeiten</button></form>
+        <form method="post" action="{% url 'vorschlag_bewerten' auftrag_id=e.auftrag.pk meldung_id=e.meldung.pk wahl='ablehnen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{% url 'posteingang' %}"><button type="submit" class="knopf zweit klein">Ablehnen</button></form>
+      {% elif e.art == "wunsch" %}
+        <a class="knopf klein" href="{% url 'auftrag_bearbeiten' auftrag_id=e.auftrag.pk %}">Konkretisieren</a>
+        <form method="post" action="{% url 'auftrag_aktion' auftrag_id=e.auftrag.pk aktion='abbrechen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{% url 'posteingang' %}"><input type="hidden" name="grund" value="Wunsch abgelehnt"><button type="submit" class="knopf zweit klein gefahr">Ablehnen</button></form>
+      {% else %}
+        <a class="knopf klein" href="{% url 'entscheidung_detail' entscheidung_id=e.entscheidung.pk %}">Entscheiden</a>
+      {% endif %}
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% else %}
+<div class="leer">{% if projekte_vorhanden %}Nichts offen. Neue Wünsche erfasst du mit „+ Wunsch“, Projekte findest du links.{% else %}Noch kein Projekt. Mit „+“ neben Projekte beginnst du.{% endif %}</div>
+{% endif %}
+{% endblock %}

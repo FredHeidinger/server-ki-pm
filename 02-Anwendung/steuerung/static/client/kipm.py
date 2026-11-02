@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """kipm – Kommandozeile für Projektchats. Spricht nur mit der HTTP-Schnittstelle.
 
-Einrichtung (vom Owner je Chat): Datei .kipm im Projektordner (oder Benutzerordner) mit
+Einrichtung: Datei .kipm im Projektordner (Chat-Schlüssel je Projekt) oder
+%USERPROFILE%\.kipm\konfig.ini (PC-Zugang, legt die Einrichtungsdatei aus Server-KI-PM an) mit
   [kipm]
   url = https://<server>/
   schluessel = kipm_...          Zugangsschlüssel der Chat-Bindung, nie in den Chat kopieren
@@ -19,6 +20,8 @@ Befehle:
   uebernehmen A-12 --revision 3          exklusive Übernahme
   fortschritt A-12 --revision 3 "Text"   Fortschritt melden
   hindernis A-12 --revision 3 "Text"     Hindernis melden (Auftrag wird BLOCKIERT)
+  rueckfrage A-12 --revision 3 "Text"    Rückfrage an den Menschen (blockiert, Antwort steht in "lesen")
+  fehler A-12 --revision 3 "Text"        Fehler melden (blockiert)
   vorschlag A-12 --revision 3 "Text"     Änderungsvorschlag, wird nicht wirksam
   pruefbericht A-12 --revision 3 "Text"  Prüfbericht zu fremdem Auftrag
   ergebnis A-12 --revision 3 --zusammenfassung "…" --datei "pfad@commit" --pruefung "befehl: ergebnis" [--luecken "…"]
@@ -59,7 +62,7 @@ def _konfig() -> dict:
         ca = kipm-root.crt
     """
     werte: dict = {}
-    for pfad in (Path.cwd() / ".kipm", Path.home() / ".kipm"):
+    for pfad in (Path.cwd() / ".kipm", Path.home() / ".kipm" / "konfig.ini", Path.home() / ".kipm"):
         if pfad.is_file():
             cp = configparser.ConfigParser()
             cp.read(pfad, encoding="utf-8")
@@ -122,7 +125,11 @@ def _nummer(text: str) -> int:
 def anfrage(pfad: str, daten: dict | None = None) -> tuple[int, dict]:
     url = f"{_basis()}/api/{pfad.lstrip('/')}"
     koerper = None
-    kopf = {"Authorization": f"Bearer {_schluessel()}", "Accept": "application/json"}
+    kopf = {
+        "Authorization": f"Bearer {_schluessel()}",
+        "Accept": "application/json",
+        "X-KIPM-Ordner": os.environ.get("KIPM_ORDNER") or os.getcwd(),
+    }
     if daten is not None:
         koerper = json.dumps(daten).encode("utf-8")
         kopf["Content-Type"] = "application/json"
@@ -195,6 +202,8 @@ def _ausgeben(status: int, antwort: dict, roh: bool) -> int:
                     + ", ".join(f"{v['nummer']} ({v['zustand']})" for v in a["vorgaenger"])
                 )
             print(f"Prüfer: {a.get('pruefer') or '–'}   Bearbeiter: {a.get('bearbeiter') or '–'}")
+            for m in a.get("meldungen", [])[:8]:
+                print(f"  [{m['art']}] {m['zeit']} {m['von']}: {m['text']}")
             lp = a.get("letzte_pruefung")
             if lp and lp.get("entscheidung"):
                 print(f"Letzte Prüfung: {lp['entscheidung']} – {lp.get('begruendung') or ''}")
@@ -235,7 +244,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--erzwingen", action="store_true")
     s = unter.add_parser("lesen", parents=[gemeinsam])
     s.add_argument("auftrag")
-    for name in ("uebernehmen", "fortschritt", "hindernis", "vorschlag", "pruefbericht"):
+    for name in (
+        "uebernehmen",
+        "fortschritt",
+        "hindernis",
+        "rueckfrage",
+        "fehler",
+        "vorschlag",
+        "pruefbericht",
+    ):
         s = unter.add_parser(name, parents=[gemeinsam])
         s.add_argument("auftrag")
         s.add_argument("--revision", type=int, required=True)
@@ -284,7 +301,14 @@ def main(argv: list[str] | None = None) -> int:
             f"auftraege/{_nummer(a.auftrag)}/uebernehmen/",
             {"revision": a.revision, "anfrage_kennung": kennung},
         )
-    elif a.befehl in ("fortschritt", "hindernis", "vorschlag", "pruefbericht"):
+    elif a.befehl in (
+        "fortschritt",
+        "hindernis",
+        "rueckfrage",
+        "fehler",
+        "vorschlag",
+        "pruefbericht",
+    ):
         status, antwort = anfrage(
             f"auftraege/{_nummer(a.auftrag)}/{a.befehl}/",
             {"revision": a.revision, "text": a.text, "anfrage_kennung": kennung},

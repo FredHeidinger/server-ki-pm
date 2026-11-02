@@ -1,0 +1,6 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Prüfung{% endblock %}
+{% block projektinhalt %}
+<p class="gedaempft">Eingereichte Ergebnisse dieses Projekts, älteste zuerst.</p>
+{% include "steuerung/pruefliste.html" %}
+{% endblock %}

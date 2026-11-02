@@ -47,3 +47,27 @@ def filterlink(context, **neu) -> str:
         else:
             params[k] = v
     return "?" + params.urlencode() if params else "?"
+
+
+@register.simple_tag
+def datei_link(zeile: str, arbeitsort) -> str:
+    """„pfad@commit“ als Links auf Datei und Commit im Repository des Arbeitsorts, sonst Text."""
+    from django.utils.html import escape, format_html
+
+    repo = (getattr(arbeitsort, "repository", "") or "").rstrip("/")
+    if "@" not in zeile or not repo:
+        return format_html("<code>{}</code>", zeile)
+    pfad, _, commit = zeile.rpartition("@")
+    commit = commit.strip()
+    if not commit or any(z in commit for z in "/ \\"):
+        return format_html("<code>{}</code>", zeile)
+    return format_html(
+        '<code><a href="{}/blob/{}/{}">{}</a>@<a href="{}/commit/{}">{}</a></code>',
+        repo,
+        commit,
+        escape(pfad.strip().replace("\\", "/")),
+        pfad,
+        repo,
+        commit,
+        commit[:12],
+    )

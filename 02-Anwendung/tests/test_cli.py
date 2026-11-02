@@ -10,7 +10,7 @@ import pytest
 from steuerung import dienst
 from steuerung.models import Auftrag
 
-KIPM = Path(__file__).resolve().parents[1] / "client" / "kipm.py"
+KIPM = Path(__file__).resolve().parents[1] / "steuerung" / "static" / "client" / "kipm.py"
 
 
 def kipm(live_server, schluessel, *argumente):
@@ -103,3 +103,40 @@ def test_cli_liest_konfigurationsdatei(live_server, owner, tmp_path):
         timeout=60,
     )
     assert ergebnis.returncode == 0 and "CLI Konfig" in ergebnis.stdout
+
+
+def test_mcp_server_antwortet_auf_initialize_und_werkzeugliste():
+    import json
+
+    eingabe = (
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18"},
+            }
+        )
+        + chr(10)
+        + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        + chr(10)
+    )
+    ergebnis = subprocess.run(
+        [sys.executable, "-I", str(KIPM.parent / "kipm_mcp.py")],
+        input=eingabe,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+    zeilen = [json.loads(z) for z in ergebnis.stdout.splitlines() if z.strip()]
+    assert zeilen[0]["result"]["serverInfo"]["name"] == "kipm"
+    namen = {w["name"] for w in zeilen[1]["result"]["tools"]}
+    assert {
+        "kipm_projekt",
+        "kipm_auftraege",
+        "kipm_auftrag_anlegen",
+        "kipm_uebernehmen",
+        "kipm_ergebnis",
+    } <= namen
+    assert not any(n in namen for n in ("kipm_freigeben", "kipm_abnehmen"))

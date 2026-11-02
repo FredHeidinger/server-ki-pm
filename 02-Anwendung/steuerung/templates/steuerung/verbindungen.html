@@ -1,0 +1,43 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Verbindungen{% endblock %}
+{% block brotkrumen %}Verbindungen{% endblock %}
+{% block inhalt %}
+<h1>Verbindungen</h1>
+<p class="gedaempft">Wie Chats und Werkzeuge an Server-KI-PM angebunden werden. Jede Verbindungsart erklärt sich selbst; nichts verbindet sich ohne Eintrag hier.</p>
+
+<div class="katalog">
+{% for kennung, a in arten.items %}
+  <a class="katalogkarte" href="{% url 'verbindung' art=kennung %}">
+    <h3>{{ a.titel }}</h3>
+    <p>{{ a.kurz }}</p>
+    <span class="knopf zweit klein">Einrichten und verwalten</span>
+  </a>
+{% endfor %}
+  <div class="katalogkarte geplant">
+    <h3>GitHub Pull Requests</h3>
+    <p>Chat arbeitet auf einem Branch, der Dienst legt den Pull Request an, Abnahme führt zusammen.</p>
+    <span class="status aus">geplant</span>
+  </div>
+</div>
+
+<h2>Alle Zugänge</h2>
+{% if bindungen %}
+<table>
+  <thead><tr><th scope="col">Name</th><th scope="col">Art</th><th scope="col">Projekt</th><th scope="col">Wo gespeichert</th><th scope="col">Zuletzt verwendet</th><th scope="col">Gültig bis</th><th scope="col">Zustand</th><th scope="col"></th></tr></thead>
+  <tbody>
+  {% for b in bindungen %}
+  <tr>
+    <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span></td>
+    <td>{{ b.get_art_display }}</td>
+    <td>{% if b.projekt %}{{ b.projekt.name }}{% elif b.letztes_projekt %}zuletzt {{ b.letztes_projekt.name }}{% else %}je nach Ordner{% endif %}</td>
+    <td>{{ b.notiz|default:"–" }}</td>
+    <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% else %}nie{% endif %}</td>
+    <td>{{ b.gueltig_bis|date:"d.m.Y" }}</td>
+    <td>{% if b.widerrufen_am %}<span class="status aus">widerrufen</span>{% elif b.gueltig_bis < jetzt %}<span class="status aus">abgelaufen</span>{% else %}<span class="status ok">aktiv</span>{% endif %}</td>
+    <td><a class="knopf zweit klein" href="{% url 'zugang_pruefen' bindung_id=b.pk %}">Prüfen</a> {% if not b.widerrufen_am %}<form method="post" action="{% url 'bindung_widerrufen' bindung_id=b.pk %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="leer">Noch kein Zugang. Wähle oben eine Verbindungsart.</div>{% endif %}
+{% endblock %}

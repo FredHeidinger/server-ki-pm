@@ -41,7 +41,7 @@ echo "== Python-Umgebung"
 
 echo "== Datenbank migrieren und statische Dateien sammeln"
 runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" migrate --noinput
-runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" collectstatic --noinput >/dev/null
+runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" collectstatic --noinput --ignore __pycache__ >/dev/null
 chmod -R a+rX "$DATEN/static"
 
 echo "== TLS-Proxy (Caddy) für: ${KIPM_ALLOWED_HOSTS:-localhost}"

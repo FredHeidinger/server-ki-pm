@@ -1,0 +1,5 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Aufträge{% endblock %}
+{% block projektinhalt %}
+{% include "steuerung/auftragsliste.html" %}
+{% endblock %}

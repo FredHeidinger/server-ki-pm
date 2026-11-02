@@ -1,12 +1,12 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}Projekt registrieren{% endblock %}
 {% block inhalt %}
-<p><a href="{% url 'uebersicht' %}">← Übersicht</a></p>
+<p><a href="{% url 'projekte' %}">← Projekte</a></p>
 <h1>Projekt registrieren</h1>
 <p class="gedaempft">Registrieren legt nur den Datensatz an. Arbeitsorte und Chat-Zugänge kommen danach auf der Projektseite dazu.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}
   {% include "steuerung/formular_felder.html" %}
-  <p><button type="submit" class="knopf">Registrieren</button> <a class="knopf zweit" href="{% url 'uebersicht' %}">Abbrechen</a></p>
+  <p><button type="submit" class="knopf">Registrieren</button> <a class="knopf zweit" href="{% url 'projekte' %}">Abbrechen</a></p>
 </form>
 {% endblock %}

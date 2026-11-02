@@ -1,0 +1,6 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Entscheidungen{% endblock %}
+{% block projektinhalt %}
+<p class="gedaempft">Entscheidungen, die dieses Projekt betreffen.</p>
+{% include "steuerung/entscheidungsliste.html" %}
+{% endblock %}

@@ -158,7 +158,7 @@ def test_fremdes_projekt_ist_nicht_sichtbar(akteur, projekt, projekt_b, freigege
         dienst.auftrag_uebernehmen(fremd, freigegeben, 2)
     with pytest.raises(dienst.KeinZugriff):
         dienst.fortschritt_melden(fremd, freigegeben, 2, "hallo")
-    assert list(dienst.auftraege_fuer_bindung(bindung_b)) == []
+    assert list(dienst.auftraege_fuer_bindung(bindung_b, bindung_b.projekt)) == []
 
 
 def test_bearbeiten_nach_uebernahme_fuehrt_zu_klaerung(akteur, projekt, freigegeben, bindung):

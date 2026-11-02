@@ -1,0 +1,25 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}Meine Aufträge{% endblock %}
+{% block brotkrumen %}Meine Aufträge{% endblock %}
+{% block inhalt %}
+<h1>Meine Aufträge</h1>
+<p class="gedaempft">Aufträge, die du selbst bearbeitest oder als Prüfer offen hast.</p>
+{% if auftraege %}
+<table>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col">Projekt</th><th scope="col">Zustand</th><th scope="col">Meine Rolle</th><th scope="col">Rev</th></tr></thead>
+  <tbody>
+  {% for a in auftraege %}
+    <tr>
+      <td><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}">{{ a.nummer }}</a></td>
+      <td><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}">{{ a.titel }}</a></td>
+      <td>{{ a.projekt.name }}</td>
+      <td>{{ a.zustand|zustand }}</td>
+      <td>{% if a.bearbeiter_benutzer_id == user.pk %}Bearbeiter{% else %}Prüfer{% endif %}</td>
+      <td>{{ a.revision_nr }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="leer">Du bearbeitest gerade nichts selbst und nichts wartet auf deine Prüfung.</div>{% endif %}
+{% endblock %}

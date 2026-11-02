@@ -61,10 +61,23 @@ class ArbeitsortForm(forms.Form):
         label="Rechner", max_length=120, required=False, help_text="z. B. Freds PC"
     )
     pfad = forms.CharField(
-        label="Pfad oder Repository",
+        label="Ordner auf dem Rechner",
         max_length=300,
         required=False,
-        help_text="Nur zur Orientierung; der Dienst öffnet keine Pfade.",
+        help_text=(
+            "z. B. W:/Projekte/Nexus. Ein PC-Zugang erkennt daran das Projekt; "
+            "der Dienst öffnet den Ordner nicht."
+        ),
+    )
+    repository = forms.URLField(
+        label="Repository",
+        max_length=300,
+        required=False,
+        assume_scheme="https",
+        help_text=(
+            "z. B. https://github.com/FredHeidinger/nexus; "
+            "macht Datei@Commit in Ergebnissen anklickbar."
+        ),
     )
 
     def __init__(self, *args, **kwargs):
@@ -72,12 +85,28 @@ class ArbeitsortForm(forms.Form):
         _stufen(self)
 
 
-class BindungForm(forms.Form):
-    name = forms.CharField(label="Name des Chats", max_length=120, help_text="z. B. Chat Nexus")
+class ZugangForm(forms.Form):
+    """Zugang anlegen: Name, Pflichtnotiz „wo gespeichert“, Gültigkeit; Projekt je nach Art."""
+
+    name = forms.CharField(
+        label="Name", max_length=120, help_text="Wer oder was diesen Zugang nutzt."
+    )
+    projekt = NamensAuswahl(
+        label="Projekt", queryset=Projekt.objects.filter(aktiv=True), required=False
+    )
+    notiz = forms.CharField(
+        label="Wo wird der Schlüssel gespeichert?",
+        max_length=200,
+        help_text="Damit du ihn später wiederfindest oder sicher löschen kannst.",
+    )
     gueltig_tage = forms.IntegerField(label="Gültig (Tage)", min_value=1, max_value=365, initial=90)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, projektpflicht: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
+        if projektpflicht:
+            self.fields["projekt"].required = True
+        else:
+            del self.fields["projekt"]
         _stufen(self)
 
 

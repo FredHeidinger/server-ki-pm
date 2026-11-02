@@ -63,10 +63,10 @@ def test_formular_registriert_und_zeigt_projekt(owner_client):
         },
     )
     assert antwort.status_code == 302
-    seite = owner_client.get(reverse("uebersicht")).content.decode()
+    seite = owner_client.get(reverse("projekte")).content.decode()
     assert "Synthetisches A" in seite and "Kern" in seite and "Doku" in seite
     detail = owner_client.get(antwort["Location"]).content.decode()
-    assert "synth-a" in detail and "Chat-Zugänge" in detail
+    assert "synth-a" in detail and "Einstellungen" in detail
     verlauf = owner_client.get(reverse("verlauf")).content.decode()
     assert "Projekt registriert" in verlauf
 
@@ -79,29 +79,21 @@ def test_formular_zeigt_fehler_bei_doppelter_kennung(owner_client):
     assert Projekt.objects.count() == 1
 
 
-def test_projektfilter_wirkt_auf_uebersicht_und_verlauf(owner_client, owner):
+def test_projektseiten_grenzen_auf_das_projekt_ein(owner_client, owner):
     akteur = dienst.Akteur.aus_benutzer(owner)
     dienst.projekt_registrieren(akteur, kennung="synth-a", name="Synthetisches A")
     dienst.projekt_registrieren(akteur, kennung="synth-b", name="Synthetisches B")
-    owner_client.post(
-        reverse("projekt_filter"), {"projekt": "synth-b", "zurueck": reverse("verlauf")}
-    )
-    uebersicht = owner_client.get(reverse("uebersicht")).content.decode()
-    assert "Synthetisches B" in uebersicht and '<th scope="row">Synthetisches A' not in uebersicht
-    verlauf = owner_client.get(reverse("verlauf")).content.decode()
-    assert "synth-b" in verlauf and "<code>synth-a</code>" not in verlauf
-    owner_client.post(reverse("projekt_filter"), {"projekt": "", "zurueck": "/"})
-    assert "Synthetisches A" in owner_client.get(reverse("uebersicht")).content.decode()
-
-
-def test_projektfilter_lehnt_fremde_rueckziele_ab(owner_client):
-    antwort = owner_client.post(
-        reverse("projekt_filter"), {"projekt": "", "zurueck": "https://boese.example/"}
-    )
-    assert antwort["Location"] == "/"
+    verlauf_b = owner_client.get(
+        reverse("projekt_verlauf", kwargs={"kennung": "synth-b"})
+    ).content.decode()
+    assert "<code>synth-b</code>" in verlauf_b and "<code>synth-a</code>" not in verlauf_b
+    alle = owner_client.get(reverse("verlauf")).content.decode()
+    assert "<code>synth-a</code>" in alle and "<code>synth-b</code>" in alle
+    seitenleiste = owner_client.get(reverse("posteingang")).content.decode()
+    assert "Synthetisches A" in seitenleiste and "Synthetisches B" in seitenleiste
 
 
 def test_nutzertext_wird_nicht_als_html_ausgefuehrt(owner_client):
     owner_client.post(reverse("projekt_neu"), {"kennung": "x", "name": "<script>alert(1)</script>"})
-    seite = owner_client.get(reverse("uebersicht")).content.decode()
+    seite = owner_client.get(reverse("projekte")).content.decode()
     assert "<script>alert(1)</script>" not in seite and "&lt;script&gt;" in seite

@@ -97,7 +97,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LOGIN_URL = "anmelden"
-LOGIN_REDIRECT_URL = "uebersicht"
+LOGIN_REDIRECT_URL = "posteingang"
 LOGOUT_REDIRECT_URL = "anmelden"
 
 SESSION_COOKIE_HTTPONLY = True
@@ -120,6 +120,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Werkzeuge für Chats liegen unter steuerung/static/client/ und werden als /static/client/ ausgeliefert.
 STATIC_ROOT = DATEN_DIR / "static"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

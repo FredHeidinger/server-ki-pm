@@ -220,3 +220,69 @@ def test_projekt_lesen(projekt, bindung):
     assert antwort["projekt"]["kennung"] == "synth-a"
     assert antwort["projekt"]["module"] == [{"kennung": "kern", "name": "Kern"}]
     assert antwort["projekt"]["arbeitsorte"][0]["kennung"] == "repo"
+
+
+def test_pc_zugang_erkennt_projekt_am_ordner(akteur, projekt, projekt_b, freigegeben):
+    dienst.arbeitsort_anlegen(
+        akteur, projekt_b, kennung="pc", name="Ordner B", rechner="PC", pfad=r"W:\Projekte\B"
+    )
+    projekt.arbeitsorte.update(pfad=r"W:\Projekte\A")
+    pc, schluessel = dienst.bindung_anlegen(akteur, None, name="Claude Code auf Freds PC")
+    assert pc.art == "pc" and pc.projekt is None
+    ohne = Client(headers={"Authorization": f"Bearer {schluessel}"})
+    assert ohne.get("/api/projekt/").status_code == 400
+    fremd = Client(
+        headers={"Authorization": f"Bearer {schluessel}", "X-KIPM-Ordner": r"C:\irgendwo"}
+    )
+    assert fremd.get("/api/projekt/").status_code == 409
+    in_a = Client(
+        headers={"Authorization": f"Bearer {schluessel}", "X-KIPM-Ordner": "w:/projekte/a/src/auth"}
+    )
+    antwort = in_a.get("/api/projekt/").json()
+    assert antwort["projekt"]["kennung"] == "synth-a" and antwort["zugang"] == "pc"
+    assert [a["nummer"] for a in in_a.get("/api/auftraege/").json()["auftraege"]] == [
+        freigegeben.nummer
+    ]
+    in_b = Client(
+        headers={"Authorization": f"Bearer {schluessel}", "X-KIPM-Ordner": r"W:\Projekte\B"}
+    )
+    assert in_b.get(f"/api/auftraege/{freigegeben.pk}/").status_code == 404
+    uebernahme = post(
+        in_a, f"/api/auftraege/{freigegeben.pk}/uebernehmen/", revision=2, anfrage_kennung="pc1"
+    )
+    assert (
+        uebernahme.status_code == 200
+        and uebernahme.json()["auftrag"]["bearbeiter"] == "Claude Code auf Freds PC"
+    )
+    from steuerung.models import Ereignis
+
+    assert Ereignis.objects.filter(
+        objekt_kennung=freigegeben.nummer,
+        ereignis="Übernommen",
+        anlass__contains="Ordner w:/projekte/a",
+    ).exists()
+
+
+def test_rueckfrage_blockiert_und_antwort_ist_lesbar(akteur, freigegeben, bindung):
+    c = api(bindung.klartext)
+    post(c, f"/api/auftraege/{freigegeben.pk}/uebernehmen/", revision=2, anfrage_kennung="u")
+    r = post(
+        c,
+        f"/api/auftraege/{freigegeben.pk}/rueckfrage/",
+        revision=2,
+        text="Welche Sprache?",
+        anfrage_kennung="r1",
+    )
+    assert r.status_code == 200 and r.json()["auftrag"]["zustand"] == "BLOCKIERT"
+    dienst.rueckfrage_beantworten(akteur, freigegeben, "Deutsch")
+    detail = c.get(f"/api/auftraege/{freigegeben.pk}/").json()["auftrag"]
+    assert detail["zustand"] == "IN_ARBEIT"
+    assert [m["art"] for m in detail["meldungen"][:2]] == ["ANTWORT", "RUECKFRAGE"]
+    f = post(
+        c,
+        f"/api/auftraege/{freigegeben.pk}/fehler/",
+        revision=2,
+        text="Werkzeug fehlt",
+        anfrage_kennung="f1",
+    )
+    assert f.json()["auftrag"]["zustand"] == "BLOCKIERT"

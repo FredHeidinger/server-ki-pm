@@ -16,7 +16,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from . import dienst
-from .models import AnfrageKennung, Auftrag, Entscheidung, Modul
+from .models import AnfrageKennung, Auftrag, ChatBindung, Entscheidung, Modul
 
 
 def _fehler(status: int, text: str) -> JsonResponse:
@@ -33,7 +33,29 @@ def bindung_erforderlich(view):
         if bindung is None:
             return _fehler(401, "Zugangsschlüssel ungültig, abgelaufen oder widerrufen.")
         request.bindung = bindung
-        request.akteur = dienst.Akteur.aus_bindung(bindung)
+        ordner = request.headers.get("X-KIPM-Ordner", "").strip()
+        projekt = bindung.projekt
+        arbeitsort = None
+        if bindung.art == bindung.ART_PC:
+            if not ordner:
+                return _fehler(
+                    400,
+                    "PC-Zugang: Kopfzeile X-KIPM-Ordner (Arbeitsordner) fehlt; "
+                    "daraus ergibt sich das Projekt.",
+                )
+            projekt, arbeitsort = dienst.projekt_fuer_ordner(ordner)
+            if projekt is None:
+                return _fehler(
+                    409,
+                    f"Der Ordner „{ordner}“ ist keinem Projekt zugeordnet. In Server-KI-PM beim "
+                    "Projekt einen Arbeitsort mit diesem Ordner anlegen.",
+                )
+        request.projekt = projekt
+        request.arbeitsort = arbeitsort
+        ChatBindung.objects.filter(pk=bindung.pk).update(
+            letzter_ordner=ordner[:300], letztes_projekt=projekt, letzter_pfad=request.path[:120]
+        )
+        request.akteur = dienst.Akteur.aus_bindung(bindung, projekt=projekt, ordner=ordner)
         return view(request, *args, **kwargs)
 
     return innen
@@ -160,6 +182,15 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                     for a in auftrag.abhaengigkeiten.select_related("vorgaenger")
                 ],
                 "pruefer": auftrag.pruefer.get_username() if auftrag.pruefer else None,
+                "meldungen": [
+                    {
+                        "art": m.art,
+                        "von": m.akteur_name,
+                        "zeit": m.zeitpunkt.isoformat(timespec="minutes"),
+                        "text": m.text,
+                    }
+                    for m in auftrag.meldungen.all()[:20]
+                ],
                 "letzte_pruefung": _letzte_pruefung(auftrag),
             }
         )
@@ -189,8 +220,8 @@ def _letzte_pruefung(auftrag: Auftrag) -> dict | None:
 @bindung_erforderlich
 @_behandeln
 def projekt_lesen(request: HttpRequest) -> JsonResponse:
-    """Das gebundene Projekt mit Modulen und Arbeitsorten."""
-    p = request.bindung.projekt
+    """Das Projekt der Anfrage (aus Bindung oder Arbeitsordner) mit Modulen und Arbeitsorten."""
+    p = request.projekt
     return JsonResponse(
         {
             "ok": True,
@@ -202,11 +233,19 @@ def projekt_lesen(request: HttpRequest) -> JsonResponse:
                     {"kennung": m.kennung, "name": m.name} for m in p.module.filter(aktiv=True)
                 ],
                 "arbeitsorte": [
-                    {"kennung": o.kennung, "name": o.name, "rechner": o.rechner, "pfad": o.pfad}
+                    {
+                        "kennung": o.kennung,
+                        "name": o.name,
+                        "rechner": o.rechner,
+                        "pfad": o.pfad,
+                        "repository": o.repository,
+                    }
                     for o in p.arbeitsorte.filter(aktiv=True)
                 ],
             },
             "bindung": request.bindung.name,
+            "zugang": request.bindung.art,
+            "arbeitsort": request.arbeitsort.kennung if request.arbeitsort else None,
         }
     )
 
@@ -220,13 +259,14 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
     ``?alle=1`` auch abgeschlossene."""
     auftraege = dienst.auftraege_fuer_bindung(
         request.bindung,
+        request.projekt,
         nur_meine=request.GET.get("nur_meine") == "1",
         alle=request.GET.get("alle") == "1",
     )
     return JsonResponse(
         {
             "ok": True,
-            "projekt": request.bindung.projekt.kennung,
+            "projekt": request.projekt.kennung,
             "bindung": request.bindung.name,
             "auftraege": [_auftrag_json(a) for a in auftraege],
         }
@@ -241,7 +281,7 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
 def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     """Chat legt einen Wunsch als Entwurf an; Freigabe bleibt beim Owner.
     Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``."""
-    projekt = request.bindung.projekt
+    projekt = request.projekt
     modul = None
     if daten.get("modul"):
         modul = Modul.objects.filter(projekt=projekt, kennung=str(daten["modul"])).first()
@@ -318,6 +358,28 @@ def hindernis(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonRespons
 @bindung_erforderlich
 @_mit_wiederholungsschutz
 @_behandeln
+def rueckfrage(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    dienst.rueckfrage_melden(request.akteur, auftrag, _revision(daten), str(daten.get("text", "")))
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def fehler(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    dienst.fehler_melden(request.akteur, auftrag, _revision(daten), str(daten.get("text", "")))
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
 def vorschlag(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     dienst.vorschlag_einreichen(
@@ -386,7 +448,7 @@ def _entscheidung_json(e: Entscheidung) -> dict:
 @_behandeln
 def entscheidungen(request: HttpRequest) -> JsonResponse:
     liste = (
-        Entscheidung.objects.filter(betroffene_projekte=request.bindung.projekt)
+        Entscheidung.objects.filter(betroffene_projekte=request.projekt)
         .exclude(zustand=Entscheidung.ZURUECKGEZOGEN)
         .distinct()
     )
@@ -406,7 +468,7 @@ def entscheidung_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
         titel=str(daten.get("titel", "")),
         text=str(daten.get("text", "")),
         verweis=str(daten.get("verweis", "")),
-        projekte=[request.bindung.projekt],
+        projekte=[request.projekt],
     )
     return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)}, status=201)
 
@@ -420,7 +482,7 @@ def entscheidung_bestaetigen(
     request: HttpRequest, daten: dict, entscheidung_id: int
 ) -> JsonResponse:
     e = Entscheidung.objects.filter(pk=entscheidung_id).first()
-    if e is None or not e.betroffene_projekte.filter(pk=request.bindung.projekt_id).exists():
+    if e is None or not e.betroffene_projekte.filter(pk=request.projekt.pk).exists():
         raise dienst.KeinZugriff("Nicht gefunden.")
-    dienst.uebernahme_bestaetigen(request.akteur, e, request.bindung.projekt)
+    dienst.uebernahme_bestaetigen(request.akteur, e, request.projekt)
     return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)})

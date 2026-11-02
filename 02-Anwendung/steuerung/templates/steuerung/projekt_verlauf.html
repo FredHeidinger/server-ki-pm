@@ -1,0 +1,5 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Verlauf{% endblock %}
+{% block projektinhalt %}
+{% include "steuerung/verlaufsliste.html" %}
+{% endblock %}

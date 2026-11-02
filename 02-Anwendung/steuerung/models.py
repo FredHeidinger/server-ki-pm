@@ -54,7 +54,8 @@ class Arbeitsort(models.Model):
     kennung = models.SlugField("Kennung", max_length=40)
     name = models.CharField("Name", max_length=120)
     rechner = models.CharField("Rechner", max_length=120, blank=True)
-    pfad = models.CharField("Pfad oder Repository", max_length=300, blank=True)
+    pfad = models.CharField("Ordner auf dem Rechner", max_length=300, blank=True)
+    repository = models.URLField("Repository (z. B. GitHub)", max_length=300, blank=True)
     aktiv = models.BooleanField("Aktiv", default=True)
 
     class Meta:
@@ -70,29 +71,45 @@ class Arbeitsort(models.Model):
 
 
 class ChatBindung(models.Model):
-    """Zugang eines Projektchats: genau ein Projekt, eine Rolle, widerrufbar.
+    """Zugang eines Chats oder eines PCs. Gespeichert wird nur der Hash des Schlüssels.
 
-    Gespeichert wird nur der Hash des Schlüssels; der Klartext wird einmal angezeigt.
+    Art „projekt“: genau ein Projekt. Art „pc“: alle Projekte; das Projekt ergibt sich aus
+    dem Ordner, in dem der Chat arbeitet (Arbeitsort mit passendem Pfad).
     """
 
     ROLLE_BEARBEITER = "bearbeiter"
     ROLLEN = [(ROLLE_BEARBEITER, "Bearbeiter")]
+    ART_PROJEKT = "projekt"
+    ART_PC = "pc"
+    ARTEN = [
+        (ART_PROJEKT, "Chat-Schlüssel für ein Projekt"),
+        (ART_PC, "PC-Zugang für alle Projekte"),
+    ]
 
-    projekt = models.ForeignKey(Projekt, on_delete=models.CASCADE, related_name="bindungen")
+    art = models.CharField("Art", max_length=10, choices=ARTEN, default=ART_PROJEKT)
+    projekt = models.ForeignKey(
+        Projekt, null=True, blank=True, on_delete=models.CASCADE, related_name="bindungen"
+    )
     name = models.CharField("Name", max_length=120)
     rolle = models.CharField("Rolle", max_length=20, choices=ROLLEN, default=ROLLE_BEARBEITER)
     praefix = models.CharField("Schlüsselpräfix", max_length=16, unique=True)
     schluessel_hash = models.CharField("Schlüsselhash", max_length=64)
+    notiz = models.CharField("Wo gespeichert", max_length=200, blank=True)
     angelegt_am = models.DateTimeField(auto_now_add=True)
     gueltig_bis = models.DateTimeField("Gültig bis")
     widerrufen_am = models.DateTimeField("Widerrufen am", null=True, blank=True)
     zuletzt_aktiv = models.DateTimeField("Zuletzt aktiv", null=True, blank=True)
+    letzter_ordner = models.CharField("Letzter Arbeitsordner", max_length=300, blank=True)
+    letztes_projekt = models.ForeignKey(
+        Projekt, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    letzter_pfad = models.CharField("Letzte Anfrage", max_length=120, blank=True)
 
     class Meta:
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.projekt.kennung})"
+        return f"{self.name} ({self.projekt.kennung if self.projekt else 'alle Projekte'})"
 
     @property
     def aktiv(self) -> bool:
@@ -281,14 +298,21 @@ class Meldung(models.Model):
 
     FORTSCHRITT = "FORTSCHRITT"
     HINDERNIS = "HINDERNIS"
+    RUECKFRAGE = "RUECKFRAGE"
+    FEHLER = "FEHLER"
     VORSCHLAG = "VORSCHLAG"
     PRUEFBERICHT = "PRUEFBERICHT"
+    ANTWORT = "ANTWORT"
     ARTEN = [
         (FORTSCHRITT, "Fortschritt"),
         (HINDERNIS, "Hindernis"),
+        (RUECKFRAGE, "Rückfrage"),
+        (FEHLER, "Fehler"),
         (VORSCHLAG, "Vorschlag"),
         (PRUEFBERICHT, "Prüfbericht"),
+        (ANTWORT, "Antwort"),
     ]
+    BLOCKIERENDE = (HINDERNIS, RUECKFRAGE, FEHLER)
     OFFEN = "OFFEN"
     UEBERNOMMEN = "UEBERNOMMEN"
     ABGELEHNT = "ABGELEHNT"

@@ -12,17 +12,22 @@ pytestmark = pytest.mark.django_db
 
 def test_alle_bereiche_rendern(owner_client, projekt, freigegeben):
     for name in (
-        "uebersicht",
+        "posteingang",
+        "meine",
         "auftraege",
         "pruefung",
         "entscheidungen",
         "verlauf",
+        "projekte",
         "wunsch_neu",
         "entscheidung_neu",
+        "verbindungen",
     ):
         assert owner_client.get(reverse(name)).status_code == 200, name
     assert (
-        owner_client.get(reverse("projekt_detail", kwargs={"kennung": "synth-a"})).status_code
+        owner_client.get(
+            reverse("projekt_einstellungen", kwargs={"kennung": "synth-a"})
+        ).status_code
         == 200
     )
     assert (
@@ -109,12 +114,13 @@ def test_pruefung_ueber_oberflaeche(owner_client, akteur, projekt, freigegeben, 
     )
     liste = owner_client.get(reverse("pruefung")).content.decode()
     assert freigegeben.nummer in liste
+    assert e.pk  # Ergebnis existiert; geprüft wird auf der Auftragsseite
     seite = owner_client.get(
-        reverse("pruefung_detail", kwargs={"ergebnis_id": e.pk})
+        reverse("auftrag_detail", kwargs={"auftrag_id": freigegeben.pk})
     ).content.decode()
-    assert "Hinweis nennt nächsten Schritt" in seite
+    assert "Hinweis nennt nächsten Schritt" in seite and "Prüfen und abnehmen" in seite
     antwort = owner_client.post(
-        reverse("pruefung_detail", kwargs={"ergebnis_id": e.pk}),
+        reverse("auftrag_aktion", kwargs={"auftrag_id": freigegeben.pk, "aktion": "pruefen"}),
         {
             "k0": "ERFUELLT",
             "a0": "",
@@ -122,10 +128,13 @@ def test_pruefung_ueber_oberflaeche(owner_client, akteur, projekt, freigegeben, 
             "a1": "noch Code",
             "entscheidung": "ABGENOMMEN",
         },
+        follow=True,
     )
-    assert antwort.status_code == 200 and "nicht erfüllt" in antwort.content.decode()
+    assert "nicht erfüllt" in antwort.content.decode()
+    freigegeben.refresh_from_db()
+    assert freigegeben.zustand == Auftrag.ZUR_PRUEFUNG
     antwort = owner_client.post(
-        reverse("pruefung_detail", kwargs={"ergebnis_id": e.pk}),
+        reverse("auftrag_aktion", kwargs={"auftrag_id": freigegeben.pk, "aktion": "pruefen"}),
         {"k0": "ERFUELLT", "a0": "", "k1": "ERFUELLT", "a1": "", "entscheidung": "ABGENOMMEN"},
     )
     assert antwort.status_code == 302
@@ -148,30 +157,35 @@ def test_selbstabnahme_in_oberflaeche_gesperrt(
         {"zusammenfassung": "fertig", "dateien": "a@1", "pruefungen": "p", "luecken": ""},
     )
     assert antwort.status_code == 302
-    e = auftrag.ergebnisse.first()
     seite = owner_client.get(
-        reverse("pruefung_detail", kwargs={"ergebnis_id": e.pk})
+        reverse("auftrag_detail", kwargs={"auftrag_id": auftrag.pk})
     ).content.decode()
-    assert "Selbstabnahme ist nicht erlaubt" in seite
+    assert "wartet auf Prüfung durch einen anderen Menschen" in seite
+    assert "Prüfen und abnehmen" not in seite
     antwort = owner_client.post(
-        reverse("pruefung_detail", kwargs={"ergebnis_id": e.pk}),
+        reverse("auftrag_aktion", kwargs={"auftrag_id": auftrag.pk, "aktion": "pruefen"}),
         {"k0": "ERFUELLT", "a0": "", "k1": "ERFUELLT", "a1": "", "entscheidung": "ABGENOMMEN"},
     )
+    assert antwort.status_code == 302
     auftrag.refresh_from_db()
     assert auftrag.zustand == Auftrag.ZUR_PRUEFUNG
 
 
 def test_bindung_anlegen_zeigt_schluessel_einmal(owner_client, projekt):
     antwort = owner_client.post(
-        reverse("bindung_neu", kwargs={"kennung": projekt.kennung}),
-        {"bindung-name": "Chat A", "bindung-gueltig_tage": 30},
+        reverse("zugang_neu"),
+        {
+            "art": "cli",
+            "zugang-name": "Chat A",
+            "zugang-projekt": projekt.pk,
+            "zugang-notiz": ".kipm",
+            "zugang-gueltig_tage": 30,
+        },
     )
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "kipm_" in seite and "wird nur jetzt angezeigt" in seite
-    nochmal = owner_client.get(
-        reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
-    ).content.decode()
-    assert "kipm_" not in nochmal
+    assert "schluessel = kipm_" in seite and "nur jetzt sichtbar" in seite
+    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "cli"})).content.decode()
+    assert "schluessel = kipm_" not in nochmal
     bindung = projekt.bindungen.get()
     owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": bindung.pk}))
     bindung.refresh_from_db()
@@ -262,12 +276,12 @@ def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
     assert 'class="board"' in board and freigegeben.nummer in board and "Freigegeben" in board
     liste = owner_client.get(reverse("auftraege") + "?ansicht=liste").content.decode()
     assert "<table" in liste and freigegeben.nummer in liste
-    uebersicht = owner_client.get(reverse("uebersicht")).content.decode()
+    uebersicht = owner_client.get(reverse("projekte")).content.decode()
     assert "projektkarte" in uebersicht and "1 freigegeben" in uebersicht
     detail = owner_client.get(
         reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
     ).content.decode()
-    assert 'class="board"' in detail and "für Freigabe nötig" in detail
+    assert 'class="board"' in detail and 'class="reiter"' in detail
 
 
 def test_plus_listen_und_kuerzel_automatisch(owner_client):
@@ -280,7 +294,9 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
             "module_eintrag": ["Core", "", "Standards"],
         },
     )
-    assert antwort.status_code == 302 and antwort["Location"].endswith("/projekt/nexus-projekt/")
+    assert antwort.status_code == 302 and antwort["Location"].endswith(
+        "/projekt/nexus-projekt/einstellungen/"
+    )
     seite = owner_client.get(antwort["Location"]).content.decode()
     assert "Core" in seite and "Standards" in seite
     owner_client.post(
@@ -294,3 +310,114 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
 
     assert Modul.objects.get(name="Web Oberfläche").kennung == "web-oberflache"
     assert Arbeitsort.objects.get(kennung="repository-nexus").name == "Repository Nexus"
+
+
+def test_verbindungen_katalog_und_pc_zugang(owner_client, projekt):
+    seite = owner_client.get(reverse("verbindungen")).content.decode()
+    assert (
+        "Claude Code (MCP)" in seite and "Kommandozeile" in seite and "HTTP-Schnittstelle" in seite
+    )
+    detail = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
+    assert "Voraussetzungen" in detail and "claude mcp add" in detail and "kipm_mcp.py" in detail
+    antwort = owner_client.post(
+        reverse("zugang_neu"),
+        {
+            "art": "mcp",
+            "zugang-name": "Claude Code auf Freds PC",
+            "zugang-notiz": "konfig.ini",
+            "zugang-gueltig_tage": 90,
+        },
+    )
+    assert antwort.status_code == 302
+    seite = owner_client.get(antwort["Location"]).content.decode()
+    assert "nur jetzt sichtbar" in seite and "schluessel = kipm_" in seite
+    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
+    assert "kipm_" not in nochmal.split("Schritt 3")[1].split("Schritt 4")[0].replace(
+        "kipm_mcp", ""
+    )
+    from steuerung.models import ChatBindung
+
+    pc = ChatBindung.objects.get(art="pc")
+    assert pc.notiz == "konfig.ini"
+    pruefen = owner_client.get(
+        reverse("zugang_pruefen", kwargs={"bindung_id": pc.pk})
+    ).content.decode()
+    assert "noch nie" in pruefen
+    owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": pc.pk}))
+    pc.refresh_from_db()
+    assert pc.widerrufen_am is not None
+
+
+def test_projektzugang_braucht_projekt_und_notiz(owner_client, projekt):
+    antwort = owner_client.post(
+        reverse("zugang_neu"),
+        {"art": "cli", "zugang-name": "Chat", "zugang-notiz": "", "zugang-gueltig_tage": 30},
+    )
+    assert antwort.status_code == 302
+    from steuerung.models import ChatBindung
+
+    assert ChatBindung.objects.count() == 0
+    antwort = owner_client.post(
+        reverse("zugang_neu"),
+        {
+            "art": "cli",
+            "zugang-name": "Chat",
+            "zugang-projekt": projekt.pk,
+            "zugang-notiz": ".kipm",
+            "zugang-gueltig_tage": 30,
+        },
+    )
+    assert ChatBindung.objects.get().projekt == projekt
+
+
+def test_posteingang_zeigt_konkrete_eintraege(owner_client, akteur, projekt, freigegeben, bindung):
+    chat = dienst.Akteur.aus_bindung(bindung)
+    dienst.wunsch_erfassen(chat, projekt, titel="Idee vom Chat", beschreibung="bitte prüfen")
+    dienst.auftrag_uebernehmen(chat, freigegeben, 2)
+    dienst.rueckfrage_melden(chat, freigegeben, 2, "Welche Sprache für den Hinweis?")
+    seite = owner_client.get(reverse("posteingang")).content.decode()
+    assert "Wunsch von Chat A" in seite and "Rückfrage" in seite and "Welche Sprache" in seite
+    antwort = owner_client.post(
+        reverse("antwort", kwargs={"auftrag_id": freigegeben.pk}),
+        {"text": "Deutsch", "zurueck": "/"},
+    )
+    assert antwort.status_code == 302 and antwort["Location"] == "/"
+    freigegeben.refresh_from_db()
+    assert freigegeben.zustand == Auftrag.IN_ARBEIT
+    seite = owner_client.get(reverse("posteingang")).content.decode()
+    assert "Welche Sprache" not in seite
+
+
+def test_panel_und_projektreiter(owner_client, projekt, freigegeben):
+    panel = owner_client.get(
+        reverse("auftrag_panel", kwargs={"auftrag_id": freigegeben.pk})
+    ).content.decode()
+    assert "<html" not in panel and freigegeben.titel in panel and "Aktionen" in panel
+    for name in (
+        "projekt_detail",
+        "projekt_pruefung",
+        "projekt_entscheidungen",
+        "projekt_verlauf",
+        "projekt_einstellungen",
+    ):
+        seite = owner_client.get(reverse(name, kwargs={"kennung": projekt.kennung}))
+        assert seite.status_code == 200, name
+        assert 'class="reiter"' in seite.content.decode()
+
+
+def test_client_dateien_werden_ausgeliefert(owner_client):
+    from django.contrib.staticfiles import finders
+
+    assert finders.find("client/kipm.py") and finders.find("client/kipm_mcp.py")
+
+
+def test_datei_link_mit_repository(akteur, projekt):
+    from steuerung.templatetags.steuerung_extras import datei_link
+
+    ort = projekt.arbeitsorte.first()
+    assert str(datei_link("src/a.py@9c2e7b1", ort)) == "<code>src/a.py@9c2e7b1</code>"
+    ort.repository = "https://github.com/FredHeidinger/nexus/"
+    html = str(datei_link("src/a.py@9c2e7b1", ort))
+    assert "https://github.com/FredHeidinger/nexus/blob/9c2e7b1/src/a.py" in html
+    assert "https://github.com/FredHeidinger/nexus/commit/9c2e7b1" in html
+    assert str(datei_link("ohne-commit", ort)) == "<code>ohne-commit</code>"

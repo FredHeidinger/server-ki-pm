@@ -1,0 +1,21 @@
+{% load steuerung_extras %}
+{% if zeilen %}
+<table>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th>{% if not projekt %}<th scope="col">Projekt</th>{% endif %}<th scope="col">Eingereicht</th><th scope="col">Bearbeiter</th><th scope="col">Prüfer</th><th scope="col"></th></tr></thead>
+  <tbody>
+  {% for z in zeilen %}
+    <tr>
+      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
+      <td>{{ z.a.titel }}</td>
+      {% if not projekt %}<td>{{ z.a.projekt.name }}</td>{% endif %}
+      <td>{{ z.e.eingereicht_am|date:"d.m.Y H:i" }}</td>
+      <td>{{ z.e.eingereicht_von_name }}</td>
+      <td>{{ z.a.pruefer.get_username|default:"–" }}</td>
+      <td>{% if z.selbst %}<span class="gedaempft">eigene Arbeit, prüft ein anderer</span>{% else %}<a class="knopf klein" href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}#pruefen" data-panel="{% url 'auftrag_panel' auftrag_id=z.a.pk %}">Prüfen</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="leer">Nichts wartet auf Prüfung.</div>
+{% endif %}

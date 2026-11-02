@@ -1,0 +1,27 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Verbindung prüfen{% endblock %}
+{% block brotkrumen %}<a href="{% url 'verbindungen' %}">Verbindungen</a> › {{ b.name }}{% endblock %}
+{% block inhalt %}
+<h1>Verbindung prüfen: {{ b.name }}</h1>
+<section class="box {% if b.widerrufen_am or b.gueltig_bis < jetzt %}warn{% endif %}">
+  <dl class="felder">
+    <dt>Art</dt><dd>{{ b.get_art_display }}</dd>
+    <dt>Zustand</dt><dd>{% if b.widerrufen_am %}widerrufen am {{ b.widerrufen_am|date:"d.m.Y H:i" }}{% elif b.gueltig_bis < jetzt %}abgelaufen am {{ b.gueltig_bis|date:"d.m.Y" }}{% else %}aktiv bis {{ b.gueltig_bis|date:"d.m.Y" }}{% endif %}</dd>
+    <dt>Letzte Anfrage</dt><dd>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }} · <code>{{ b.letzter_pfad }}</code>{% else %}<strong>noch nie</strong>. Der Zugang wurde noch nicht benutzt; Einrichtung prüfen (Schlüssel, Adresse, Zertifikat).{% endif %}</dd>
+    {% if b.art == "pc" %}
+    <dt>Letzter Ordner</dt><dd>{% if b.letzter_ordner %}<code>{{ b.letzter_ordner }}</code>{% else %}–{% endif %}</dd>
+    <dt>Erkanntes Projekt</dt><dd>{% if b.letztes_projekt %}{{ b.letztes_projekt.name }}{% elif b.letzter_ordner %}<strong>keines</strong>: Ordner ist keinem Arbeitsort zugeordnet{% else %}–{% endif %}</dd>
+    {% else %}
+    <dt>Projekt</dt><dd>{{ b.projekt.name }}</dd>
+    {% endif %}
+    <dt>Wo gespeichert</dt><dd>{{ b.notiz|default:"–" }}</dd>
+  </dl>
+</section>
+<section class="box">
+  <h2>Letzte Ereignisse dieses Zugangs</h2>
+  {% if ereignisse %}
+  <table class="klein"><tbody>{% for e in ereignisse %}<tr><td>{{ e.zeitpunkt|date:"d.m.Y H:i" }}</td><td>{{ e.projekt.name|default:"–" }}</td><td>{{ e.objekt_typ }} <code>{{ e.objekt_kennung }}</code></td><td>{{ e.ereignis }}</td><td>{{ e.anlass|default:"–" }}</td></tr>{% endfor %}</tbody></table>
+  {% else %}<p class="gedaempft">Noch keine Ereignisse.</p>{% endif %}
+</section>
+<p><a class="knopf zweit" href="{% url 'verbindungen' %}">← Verbindungen</a></p>
+{% endblock %}

@@ -1,66 +1,10 @@
 {% extends "steuerung/grund.html" %}
-{% load steuerung_extras %}
-{% block titel %}Aufträge{% endblock %}
+{% block titel %}Alle Aufträge{% endblock %}
+{% block brotkrumen %}Alle Aufträge{% endblock %}
 {% block inhalt %}
 <div class="seitenkopf">
-  <h1>Aufträge</h1>
-  <div class="werkzeuge">
-    <a class="umschalter {% if ansicht == 'board' %}aktiv{% endif %}" href="{% filterlink ansicht='' %}">Board</a>
-    <a class="umschalter {% if ansicht == 'liste' %}aktiv{% endif %}" href="{% filterlink ansicht='liste' %}">Liste</a>
-    <a class="knopf" href="{% url 'wunsch_neu' %}">+ Wunsch</a>
-  </div>
+  <h1>Alle Aufträge</h1>
+  <div class="werkzeuge"><a class="knopf" href="{% url 'wunsch_neu' %}">+ Wunsch</a></div>
 </div>
-
-{% if ansicht == 'board' %}
-  {% include "steuerung/board.html" with spalten=spalten zeige_projekt=True %}
-  {% if abgebrochen %}<p class="gedaempft">{{ abgebrochen }} abgebrochene Aufträge, sichtbar in der Listenansicht.</p>{% endif %}
-{% else %}
-<form method="get" class="filterzeile">
-  <input type="hidden" name="ansicht" value="liste">
-  <label>Zustand
-    <select name="zustand" onchange="this.form.submit()">
-      <option value="" {% if not filter.zustand %}selected{% endif %}>Alle</option>
-      <option value="offen" {% if filter.zustand == "offen" %}selected{% endif %}>Alle offenen</option>
-      {% for wert, wort in zustaende %}<option value="{{ wert }}" {% if filter.zustand == wert %}selected{% endif %}>{{ wort }}</option>{% endfor %}
-    </select>
-  </label>
-  <label>Reifegrad
-    <select name="reifegrad" onchange="this.form.submit()">
-      <option value="" {% if not filter.reifegrad %}selected{% endif %}>Alle</option>
-      <option value="wunsch" {% if filter.reifegrad == "wunsch" %}selected{% endif %}>Wunsch</option>
-      <option value="paket" {% if filter.reifegrad == "paket" %}selected{% endif %}>Arbeitspaket</option>
-    </select>
-  </label>
-  <label>Bearbeiter
-    <select name="bearbeiter" onchange="this.form.submit()">
-      <option value="" {% if not filter.bearbeiter %}selected{% endif %}>Alle</option>
-      <option value="niemand" {% if filter.bearbeiter == "niemand" %}selected{% endif %}>niemand</option>
-      {% for n in bearbeiter_namen %}<option value="{{ n }}" {% if filter.bearbeiter == n %}selected{% endif %}>{{ n }}</option>{% endfor %}
-    </select>
-  </label>
-  <noscript><button type="submit" class="knopf zweit">Filtern</button></noscript>
-</form>
-{% if zeilen %}
-<table>
-  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col">Projekt / Modul</th><th scope="col">Reifegrad</th><th scope="col">Zustand</th><th scope="col">Bearbeiter</th><th scope="col">Prio</th><th scope="col">Rev</th><th scope="col">Letzte Meldung</th></tr></thead>
-  <tbody>
-  {% for z in zeilen %}
-    <tr>
-      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
-      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a></td>
-      <td>{{ z.a.projekt.name }}{% if z.a.modul %} / {{ z.a.modul.name }}{% endif %}</td>
-      <td>{{ z.reifegrad }}</td>
-      <td>{{ z.a.zustand|zustand }}</td>
-      <td>{{ z.a.bearbeiter_name|default:"–" }}</td>
-      <td>{{ z.a.prioritaet }}</td>
-      <td>{{ z.a.revision_nr }}</td>
-      <td>{% if z.a.zuletzt_gemeldet_am %}{{ z.a.zuletzt_gemeldet_am|date:"d.m. H:i" }}{% else %}–{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<div class="leer">Keine Aufträge für diese Auswahl.</div>
-{% endif %}
-{% endif %}
+{% include "steuerung/auftragsliste.html" %}
 {% endblock %}

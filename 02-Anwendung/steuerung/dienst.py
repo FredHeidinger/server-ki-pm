@@ -57,6 +57,8 @@ class Akteur:
     bindung: ChatBindung | None
     name: str
     ist_owner: bool
+    projekt: Projekt | None = None  # Projekt der Bindung; bei PC-Zugang aus dem Ordner
+    ordner: str = ""
 
     @classmethod
     def aus_benutzer(cls, benutzer: AbstractBaseUser) -> "Akteur":
@@ -68,8 +70,17 @@ class Akteur:
         )
 
     @classmethod
-    def aus_bindung(cls, bindung: ChatBindung) -> "Akteur":
-        return cls(benutzer=None, bindung=bindung, name=bindung.name, ist_owner=False)
+    def aus_bindung(
+        cls, bindung: ChatBindung, projekt: Projekt | None = None, ordner: str = ""
+    ) -> "Akteur":
+        return cls(
+            benutzer=None,
+            bindung=bindung,
+            name=bindung.name,
+            ist_owner=False,
+            projekt=projekt or bindung.projekt,
+            ordner=ordner,
+        )
 
     @property
     def ist_mensch(self) -> bool:
@@ -96,6 +107,8 @@ def _ereignis(
     anlass: str = "",
     revision: str = "",
 ) -> Ereignis:
+    if akteur.ordner:
+        anlass = (anlass + " · " if anlass else "") + f"Ordner {akteur.ordner}"
     return Ereignis.objects.create(
         akteur=akteur.benutzer if akteur.benutzer is not None and akteur.benutzer.pk else None,
         akteur_name=akteur.name,
@@ -130,8 +143,8 @@ def _mensch_erforderlich(akteur: Akteur, handlung: str) -> None:
 
 
 def _projekt_sichtbar(akteur: Akteur, projekt: Projekt) -> None:
-    """Chats sehen nur ihr eigenes Projekt; fremde Objekte gelten als nicht vorhanden."""
-    if akteur.bindung is not None and akteur.bindung.projekt_id != projekt.pk:
+    """Chats sehen nur ihr Projekt (aus Bindung oder Ordner); Fremdes gilt als nicht vorhanden."""
+    if akteur.bindung is not None and (akteur.projekt is None or akteur.projekt.pk != projekt.pk):
         raise KeinZugriff("Nicht gefunden.")
 
 
@@ -239,7 +252,14 @@ def modul_anlegen(akteur: Akteur, projekt: Projekt, *, kennung: str, name: str) 
 
 
 def arbeitsort_anlegen(
-    akteur: Akteur, projekt: Projekt, *, kennung: str, name: str, rechner: str = "", pfad: str = ""
+    akteur: Akteur,
+    projekt: Projekt,
+    *,
+    kennung: str,
+    name: str,
+    rechner: str = "",
+    pfad: str = "",
+    repository: str = "",
 ) -> Arbeitsort:
     _owner_erforderlich(akteur, "Arbeitsorte anlegen")
     kennung = slugify(kennung)
@@ -253,6 +273,7 @@ def arbeitsort_anlegen(
                 name=name.strip(),
                 rechner=rechner.strip(),
                 pfad=pfad.strip(),
+                repository=repository.strip(),
             )
             _ereignis(
                 akteur,
@@ -272,10 +293,16 @@ def _schluessel_hash(schluessel: str) -> str:
 
 
 def bindung_anlegen(
-    akteur: Akteur, projekt: Projekt, *, name: str, gueltig_tage: int = 90
+    akteur: Akteur,
+    projekt: Projekt | None,
+    *,
+    name: str,
+    gueltig_tage: int = 90,
+    notiz: str = "",
 ) -> tuple[ChatBindung, str]:
-    """Chat-Bindung anlegen. Gibt den Klartextschlüssel genau einmal zurück."""
-    _owner_erforderlich(akteur, "Chat-Bindungen anlegen")
+    """Zugang anlegen: mit Projekt ein Chat-Schlüssel, ohne Projekt ein PC-Zugang für alle
+    Projekte (Projekt aus dem Arbeitsordner). Gibt den Klartextschlüssel genau einmal zurück."""
+    _owner_erforderlich(akteur, "Zugänge anlegen")
     if not name.strip():
         raise DienstFehler("Der Name darf nicht leer sein.")
     if not 1 <= gueltig_tage <= 365:
@@ -286,7 +313,9 @@ def bindung_anlegen(
     with transaction.atomic():
         bindung = ChatBindung.objects.create(
             projekt=projekt,
+            art=ChatBindung.ART_PROJEKT if projekt else ChatBindung.ART_PC,
             name=name.strip(),
+            notiz=notiz.strip(),
             praefix=praefix,
             schluessel_hash=_schluessel_hash(schluessel),
             gueltig_bis=timezone.now() + timedelta(days=gueltig_tage),
@@ -296,14 +325,14 @@ def bindung_anlegen(
             projekt=projekt,
             objekt_typ="Bindung",
             objekt_kennung=bindung.name,
-            ereignis="Chat-Bindung angelegt",
-            anlass=f"Rolle {bindung.get_rolle_display()}, gültig {gueltig_tage} Tage",
+            ereignis="Zugang angelegt",
+            anlass=f"{bindung.get_art_display()}, gültig {gueltig_tage} Tage",
         )
     return bindung, schluessel
 
 
 def bindung_widerrufen(akteur: Akteur, bindung: ChatBindung, grund: str = "") -> None:
-    _owner_erforderlich(akteur, "Chat-Bindungen widerrufen")
+    _owner_erforderlich(akteur, "Zugänge widerrufen")
     if bindung.widerrufen_am is not None:
         raise DienstFehler("Diese Bindung ist bereits widerrufen.")
     with transaction.atomic():
@@ -314,7 +343,7 @@ def bindung_widerrufen(akteur: Akteur, bindung: ChatBindung, grund: str = "") ->
             projekt=bindung.projekt,
             objekt_typ="Bindung",
             objekt_kennung=bindung.name,
-            ereignis="Chat-Bindung widerrufen",
+            ereignis="Zugang widerrufen",
             anlass=grund,
         )
 
@@ -325,7 +354,9 @@ def bindung_pruefen(schluessel: str) -> ChatBindung | None:
     if len(teile) != 3 or teile[0] != "kipm":
         return None
     bindung = ChatBindung.objects.select_related("projekt").filter(praefix=teile[1]).first()
-    if bindung is None or not bindung.aktiv or not bindung.projekt.aktiv:
+    if bindung is None or not bindung.aktiv:
+        return None
+    if bindung.projekt is not None and not bindung.projekt.aktiv:
         return None
     if not secrets.compare_digest(bindung.schluessel_hash, _schluessel_hash(schluessel.strip())):
         return None
@@ -349,10 +380,34 @@ def auftrag_holen(akteur: Akteur, auftrag_id: int) -> Auftrag:
     return auftrag
 
 
-def auftraege_fuer_bindung(bindung: ChatBindung, *, nur_meine: bool = False, alle: bool = False):
-    """Aufträge des gebundenen Projekts: standardmäßig alle offenen, wahlweise nur
-    übernehmbare und eigene, oder einschließlich abgeschlossener."""
-    qs = Auftrag.objects.filter(projekt=bindung.projekt).select_related("projekt", "modul")
+def _ordner_normiert(pfad: str) -> str:
+    return pfad.strip().replace("\\", "/").rstrip("/").lower()
+
+
+def projekt_fuer_ordner(ordner: str) -> tuple[Projekt | None, Arbeitsort | None]:
+    """Projekt und Arbeitsort, dessen Ordnerpfad den Arbeitsordner umfasst (längster Treffer)."""
+    norm = _ordner_normiert(ordner)
+    if not norm:
+        return None, None
+    bester: Arbeitsort | None = None
+    for ort in (
+        Arbeitsort.objects.filter(aktiv=True, projekt__aktiv=True)
+        .exclude(pfad="")
+        .select_related("projekt")
+    ):
+        pfad = _ordner_normiert(ort.pfad)
+        if norm == pfad or norm.startswith(pfad + "/"):
+            if bester is None or len(pfad) > len(_ordner_normiert(bester.pfad)):
+                bester = ort
+    return (bester.projekt, bester) if bester else (None, None)
+
+
+def auftraege_fuer_bindung(
+    bindung: ChatBindung, projekt: Projekt, *, nur_meine: bool = False, alle: bool = False
+):
+    """Aufträge des Projekts: standardmäßig alle offenen, wahlweise nur übernehmbare und
+    eigene, oder einschließlich abgeschlossener."""
+    qs = Auftrag.objects.filter(projekt=projekt).select_related("projekt", "modul")
     if nur_meine:
         qs = qs.filter(
             Q(zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None)
@@ -924,7 +979,9 @@ def auftrag_uebernehmen(akteur: Akteur, auftrag: Auftrag, revision_nr: int) -> A
         offen = [p for p in freigabepruefung(aktuell) if not p.erfuellt]
         if offen:
             raise Konflikt("Übernahme nicht möglich: " + "; ".join(p.text for p in offen))
-        if akteur.bindung is not None and akteur.bindung.projekt_id != aktuell.projekt_id:
+        if akteur.bindung is not None and (
+            akteur.projekt is None or akteur.projekt.pk != aktuell.projekt_id
+        ):
             raise KeinZugriff("Nicht gefunden.")
         if akteur.benutzer is not None and aktuell.pruefer_id == akteur.benutzer.pk:
             raise Konflikt(
@@ -1036,6 +1093,68 @@ def _meldung(
 
 def fortschritt_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
     return _meldung(akteur, auftrag, revision_nr, Meldung.FORTSCHRITT, text, "Fortschritt gemeldet")
+
+
+def rueckfrage_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
+    """Rückfrage des Bearbeiters; blockiert den Auftrag, bis ein Mensch antwortet."""
+    meldung = _meldung(
+        akteur,
+        auftrag,
+        revision_nr,
+        Meldung.RUECKFRAGE,
+        text,
+        "Rückfrage gestellt",
+        neuer_zustand=Auftrag.BLOCKIERT,
+    )
+    auftrag.refresh_from_db()
+    return meldung
+
+
+def fehler_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
+    """Fehler des Bearbeiters (Abbruch, Werkzeugproblem); blockiert den Auftrag."""
+    meldung = _meldung(
+        akteur,
+        auftrag,
+        revision_nr,
+        Meldung.FEHLER,
+        text,
+        "Fehler gemeldet",
+        neuer_zustand=Auftrag.BLOCKIERT,
+    )
+    auftrag.refresh_from_db()
+    return meldung
+
+
+def rueckfrage_beantworten(akteur: Akteur, auftrag: Auftrag, text: str) -> Meldung:
+    """Antwort des Menschen auf Rückfrage, Hindernis oder Fehler; hebt die Blockade auf."""
+    _owner_erforderlich(akteur, "Rückfragen beantworten")
+    if not text.strip():
+        raise DienstFehler("Die Antwort darf nicht leer sein.")
+    with transaction.atomic():
+        aktuell = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
+        meldung = Meldung.objects.create(
+            auftrag=aktuell,
+            revision_nr=aktuell.revision_nr,
+            art=Meldung.ANTWORT,
+            text=text.strip(),
+            akteur_name=akteur.name,
+        )
+        aufgehoben = False
+        if aktuell.zustand == Auftrag.BLOCKIERT:
+            aktuell.zustand = Auftrag.IN_ARBEIT
+            aktuell.save(update_fields=["zustand", "aktualisiert_am"])
+            aufgehoben = True
+        _ereignis(
+            akteur,
+            projekt=aktuell.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=aktuell.nummer,
+            ereignis="Antwort gegeben" + (", Blockade aufgehoben" if aufgehoben else ""),
+            anlass=text.strip()[:200],
+            revision=str(aktuell.revision_nr),
+        )
+    auftrag.refresh_from_db()
+    return meldung
 
 
 def hindernis_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
@@ -1267,7 +1386,9 @@ def entscheidung_vorschlagen(
         raise DienstFehler("Titel und Text sind erforderlich.")
     if not projekte:
         raise DienstFehler("Mindestens ein betroffenes Projekt ist anzugeben.")
-    if akteur.bindung is not None and akteur.bindung.projekt_id not in {p.pk for p in projekte}:
+    if akteur.bindung is not None and (
+        akteur.projekt is None or akteur.projekt.pk not in {p.pk for p in projekte}
+    ):
         raise KeinZugriff(
             "Ein Chat kann nur Entscheidungen vorschlagen, die sein Projekt betreffen."
         )
@@ -1336,7 +1457,7 @@ def uebernahme_bestaetigen(akteur: Akteur, entscheidung: Entscheidung, projekt: 
     """Chat bestätigt für sein Projekt, der Owner für jedes betroffene Projekt."""
     if entscheidung.zustand != Entscheidung.ENTSCHIEDEN:
         raise Konflikt("Nur eine entschiedene Entscheidung kann übernommen werden.")
-    if akteur.bindung is not None and akteur.bindung.projekt_id != projekt.pk:
+    if akteur.bindung is not None and (akteur.projekt is None or akteur.projekt.pk != projekt.pk):
         raise KeinZugriff("Ein Chat kann nur für sein eigenes Projekt bestätigen.")
     if akteur.bindung is None and not akteur.ist_owner:
         raise KeinZugriff("Bestätigen dürfen Chat-Bindungen oder der Owner.")
@@ -1379,6 +1500,121 @@ def umsetzungsauftrag_anlegen(
         titel=f"Umsetzung {entscheidung.nummer}: {entscheidung.titel}"[:200],
         beschreibung=entscheidung.text,
         entscheidung=entscheidung,
+    )
+
+
+# --- Posteingang und Meine Aufträge --------------------------------------------------------
+
+
+def posteingang(benutzer) -> list[dict]:
+    """Alles, was jetzt eine menschliche Entscheidung braucht, als konkrete Einträge."""
+    eintraege: list[dict] = []
+    offen = Auftrag.objects.exclude(zustand__in=Auftrag.ENDZUSTAENDE).select_related(
+        "projekt", "modul", "pruefer"
+    )
+    for a in offen.filter(zustand=Auftrag.ZUR_PRUEFUNG):
+        e = a.ergebnisse.first()
+        if e is None:
+            continue
+        selbst = e.benutzer_id == benutzer.pk
+        eintraege.append(
+            {
+                "art": "pruefung",
+                "auftrag": a,
+                "ergebnis": e,
+                "zeit": e.eingereicht_am,
+                "titel": f"{a.nummer} wartet auf Prüfung"
+                + (" (eigene Arbeit, prüft ein anderer)" if selbst else ""),
+                "text": e.zusammenfassung,
+                "von": e.eingereicht_von_name,
+                "selbst": selbst,
+            }
+        )
+    for m in (
+        Meldung.objects.filter(
+            auftrag__zustand=Auftrag.BLOCKIERT, art__in=Meldung.BLOCKIERENDE, historisch=False
+        )
+        .select_related("auftrag", "auftrag__projekt")
+        .order_by("-zeitpunkt")
+    ):
+        if any(x["art"] == "blockade" and x["auftrag"].pk == m.auftrag_id for x in eintraege):
+            continue
+        eintraege.append(
+            {
+                "art": "blockade",
+                "auftrag": m.auftrag,
+                "meldung": m,
+                "zeit": m.zeitpunkt,
+                "titel": f"{m.auftrag.nummer} {m.get_art_display()}: {m.auftrag.titel}",
+                "text": m.text,
+                "von": m.akteur_name,
+            }
+        )
+    for a in offen.filter(zustand=Auftrag.KLAERUNG_ERFORDERLICH):
+        eintraege.append(
+            {
+                "art": "klaerung",
+                "auftrag": a,
+                "zeit": a.aktualisiert_am,
+                "titel": f"{a.nummer} braucht Klärung: {a.titel}",
+                "text": f"Übernahme von {a.letzter_bearbeiter_name or '–'} erloschen; neu freigeben oder abbrechen.",
+                "von": "",
+            }
+        )
+    for m in (
+        Meldung.objects.filter(art=Meldung.VORSCHLAG, vorschlag_status=Meldung.OFFEN)
+        .exclude(auftrag__zustand__in=Auftrag.ENDZUSTAENDE)
+        .select_related("auftrag", "auftrag__projekt")
+    ):
+        eintraege.append(
+            {
+                "art": "vorschlag",
+                "auftrag": m.auftrag,
+                "meldung": m,
+                "zeit": m.zeitpunkt,
+                "titel": f"Vorschlag zu {m.auftrag.nummer}: {m.auftrag.titel}",
+                "text": m.text,
+                "von": m.akteur_name,
+            }
+        )
+    for a in offen.filter(zustand=Auftrag.ENTWURF):
+        rev = a.revisionen.filter(nummer=1).first()
+        if rev is None or rev.erstellt_von_name == benutzer.get_username():
+            continue
+        eintraege.append(
+            {
+                "art": "wunsch",
+                "auftrag": a,
+                "zeit": a.angelegt_am,
+                "titel": f"Wunsch von {rev.erstellt_von_name}: {a.nummer} {a.titel}",
+                "text": rev.beschreibung,
+                "von": rev.erstellt_von_name,
+            }
+        )
+    for e in Entscheidung.objects.filter(zustand=Entscheidung.VORSCHLAG):
+        eintraege.append(
+            {
+                "art": "entscheidung",
+                "entscheidung": e,
+                "zeit": e.vorgeschlagen_am,
+                "titel": f"Entscheidung {e.nummer} vorgeschlagen: {e.titel}",
+                "text": e.text,
+                "von": e.vorgeschlagen_von_name,
+            }
+        )
+    eintraege.sort(key=lambda x: x["zeit"] or timezone.now())
+    return eintraege
+
+
+def meine_auftraege(benutzer):
+    """Aufträge, die der Mensch selbst bearbeitet oder als Prüfer offen hat."""
+    return (
+        Auftrag.objects.filter(
+            Q(bearbeiter_benutzer=benutzer) | Q(pruefer=benutzer, zustand=Auftrag.ZUR_PRUEFUNG)
+        )
+        .exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+        .select_related("projekt", "modul")
+        .order_by("prioritaet", "id")
     )
 
 

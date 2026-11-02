@@ -11,34 +11,25 @@
 <div class="app">
 <nav class="seitenleiste" aria-label="Bereiche">
   <p class="marke">Server-KI-PM</p>
-  {% url 'uebersicht' as u_ueb %}{% url 'auftraege' as u_auf %}{% url 'pruefung' as u_pr %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}
-  <a href="{{ u_ueb }}" {% if request.path == u_ueb or request.path|slice:":9" == "/projekt/" or request.path|slice:":9" == "/bindung/" %}aria-current="page"{% endif %}><span class="sym">▦</span> Übersicht</a>
-  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}><span class="sym">☰</span> Aufträge</a>
-  <a href="{{ u_pr }}" {% if request.path|slice:":9" == "/pruefung" %}aria-current="page"{% endif %}><span class="sym">✔</span> Prüfung</a>
+  {% url 'posteingang' as u_post %}{% url 'meine' as u_meine %}{% url 'auftraege' as u_auf %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}{% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
+  <a href="{{ u_post }}" {% if request.path == u_post %}aria-current="page"{% endif %}><span class="sym">✉</span> Posteingang{% if posteingang_anzahl %} <span class="zaehler">{{ posteingang_anzahl }}</span>{% endif %}</a>
+  <a href="{{ u_meine }}" {% if request.path == u_meine %}aria-current="page"{% endif %}><span class="sym">●</span> Meine Aufträge</a>
+  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}><span class="sym">☰</span> Alle Aufträge</a>
   <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}><span class="sym">⚖</span> Entscheidungen</a>
   <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}><span class="sym">◷</span> Verlauf</a>
-  <p class="legende-zustand">
-    <span class="stufe pflicht">Pflicht</span> <span class="stufe freigabe">für Freigabe nötig</span> <span class="stufe optional">optional</span>
-  </p>
+  <p class="gruppe"><a href="{{ u_proj }}" {% if request.path == u_proj %}aria-current="page"{% endif %}>Projekte</a><a class="plus" href="{% url 'projekt_neu' %}" title="Projekt anlegen">+</a></p>
+  {% for p in seitenleiste_projekte %}
+  <a class="projektlink" href="{% url 'projekt_detail' kennung=p.kennung %}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}aria-current="page"{% endif %}><span class="sym">▪</span> {{ p.name }}</a>
+  {% endfor %}
+  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}><span class="sym">⚿</span> Verbindungen</a></p>
 </nav>
 <main id="inhalt">
 <header class="kopfzeile">
-  <form method="post" action="{% url 'projekt_filter' %}" class="projektfilter">
-    {% csrf_token %}
-    <input type="hidden" name="zurueck" value="{{ request.path }}">
-    <label for="projektfilter">Projekt</label>
-    <select id="projektfilter" name="projekt" onchange="this.form.requestSubmit()">
-      <option value="" {% if not aktives_projekt %}selected{% endif %}>Alle Projekte</option>
-      {% for p in alle_projekte %}
-      <option value="{{ p.kennung }}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}selected{% endif %}>{{ p.name }}</option>
-      {% endfor %}
-    </select>
-    <noscript><button type="submit" class="knopf zweit">Anwenden</button></noscript>
-  </form>
+  <div class="brotkrumen">{% block brotkrumen %}{% endblock %}</div>
   <form method="post" action="{% url 'abmelden' %}" class="benutzer">
     {% csrf_token %}
     <span>Angemeldet: <strong>{{ user.get_username }}</strong></span>
-    <button type="submit" class="knopf zweit">Abmelden</button>
+    <button type="submit" class="knopf zweit klein">Abmelden</button>
   </form>
 </header>
 {% if messages %}
@@ -48,32 +39,58 @@
 {% endif %}
 {% block inhalt %}{% endblock %}
 </main>
+<aside id="panel" class="panel" hidden aria-label="Auftrag">
+  <div class="panelkopf"><a id="panel-seite" class="knopf zweit klein" href="#">Als Seite öffnen</a> <button type="button" id="panel-zu" class="knopf zweit klein" aria-label="Panel schließen">Schließen ×</button></div>
+  <div id="panel-inhalt"></div>
+</aside>
 </div>
 <script>
-// Listen mit Plus-Knopf: Einträge hinzufügen und entfernen. Ohne JavaScript bleiben feste Felder.
-document.addEventListener("click", function (ev) {
-  var plus = ev.target.closest(".liste-plus");
-  if (plus) {
-    var liste = plus.closest(".liste");
-    var vorlage = liste.querySelector(".listeneintrag");
-    var neu = vorlage.cloneNode(true);
-    var eingabe = neu.querySelector("input");
-    eingabe.value = "";
-    liste.insertBefore(neu, plus);
-    eingabe.focus();
-    return;
+// Seitenpanel: Links mit data-panel laden das Auftragsfragment rechts; ohne JavaScript öffnet die Seite.
+(function () {
+  var panel = document.getElementById("panel");
+  var inhalt = document.getElementById("panel-inhalt");
+  var seite = document.getElementById("panel-seite");
+  function oeffnen(url, seiteUrl) {
+    fetch(url + (url.indexOf("?") > -1 ? "&" : "?") + "zurueck=" + encodeURIComponent(location.pathname + location.search), {credentials: "same-origin"})
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        inhalt.innerHTML = html;
+        seite.href = seiteUrl;
+        panel.hidden = false;
+        document.body.classList.add("mit-panel");
+        panel.focus();
+      })
+      .catch(function () { location.href = seiteUrl; });
   }
-  var weg = ev.target.closest(".liste-weg");
-  if (weg) {
-    var eintrag = weg.closest(".listeneintrag");
-    var liste2 = eintrag.closest(".liste");
-    if (liste2.querySelectorAll(".listeneintrag").length > 1) {
-      eintrag.remove();
-    } else {
-      eintrag.querySelector("input").value = "";
+  document.addEventListener("click", function (ev) {
+    var a = ev.target.closest("a[data-panel]");
+    if (a) { ev.preventDefault(); oeffnen(a.getAttribute("data-panel"), a.href); return; }
+    if (ev.target.closest("#panel-zu")) { panel.hidden = true; document.body.classList.remove("mit-panel"); inhalt.innerHTML = ""; }
+    var plus = ev.target.closest(".liste-plus");
+    if (plus) {
+      var liste = plus.closest(".liste");
+      var neu = liste.querySelector(".listeneintrag").cloneNode(true);
+      neu.querySelector("input").value = "";
+      liste.insertBefore(neu, plus);
+      neu.querySelector("input").focus();
+      return;
     }
-  }
-});
+    var weg = ev.target.closest(".liste-weg");
+    if (weg) {
+      var eintrag = weg.closest(".listeneintrag");
+      var l2 = eintrag.closest(".liste");
+      if (l2.querySelectorAll(".listeneintrag").length > 1) { eintrag.remove(); } else { eintrag.querySelector("input").value = ""; }
+      return;
+    }
+    var kopie = ev.target.closest("[data-kopieren]");
+    if (kopie) {
+      var ziel = document.getElementById(kopie.getAttribute("data-kopieren"));
+      var text = ziel ? (ziel.value !== undefined ? ziel.value : ziel.textContent) : "";
+      navigator.clipboard.writeText(text).then(function () { kopie.textContent = "Kopiert"; setTimeout(function () { kopie.textContent = "Kopieren"; }, 1500); });
+    }
+  });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !panel.hidden) { panel.hidden = true; document.body.classList.remove("mit-panel"); } });
+})();
 </script>
 </body>
 </html>
