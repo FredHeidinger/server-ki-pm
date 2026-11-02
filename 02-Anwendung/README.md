@@ -10,7 +10,7 @@ Django 5.2 (LTS) mit einer SQLite-Datei. Oberfläche und HTTP-Schnittstelle für
 | `steuerung/api.py` | HTTP-Schnittstelle für Chat-Bindungen (`Authorization: Bearer kipm_…`), Wiederholungsschutz über `anfrage_kennung` (Kennung wird vor der Ausführung reserviert, gleichzeitige Wiederholungen erhalten 409) |
 | `steuerung/views.py`, `templates/`, `static/` | Oberfläche: Übersicht, Projektseite, Aufträge, Prüfung, Entscheidungen, Verlauf; serverseitig gerendert, ohne JavaScript bedienbar |
 | `client/kipm.py` | Kommandozeile für Projektchats, nur Standardbibliothek |
-| `tests/` | 86 Tests: Dienstregeln, Schnittstelle, Oberfläche, Kommandozeile gegen Live-Server, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung |
+| `tests/` | 90 Tests: Dienstregeln, Schnittstelle, Oberfläche, Kommandozeile gegen Live-Server, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung |
 | `requirements.txt` | Aus `uv.lock` exportiert für die Serverinstallation (`uv export --no-dev --extra server`) |
 
 Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [03-Server/INSTALLATION.md](../03-Server/INSTALLATION.md) vorbereitet.
@@ -19,7 +19,8 @@ Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [
 
 | Methode und Pfad | Zweck |
 |---|---|
-| `GET /api/auftraege/` | Übernehmbare und eigene Aufträge des gebundenen Projekts |
+| `GET /api/auftraege/` | Alle offenen Aufträge des Projekts; `?nur_meine=1` übernehmbare und eigene, `?alle=1` auch abgeschlossene |
+| `POST /api/auftraege/anlegen/` | `{titel, beschreibung, modul?, prioritaet?, erzwingen?, anfrage_kennung}`; Entwurf, 409 bei gleichem Titel eines offenen Auftrags |
 | `GET /api/auftraege/<id>/` | Gebundene Revision mit Umfang und Kriterien |
 | `POST /api/auftraege/<id>/uebernehmen/` | `{revision, anfrage_kennung}`; exklusiv, genau einer gewinnt |
 | `POST /api/auftraege/<id>/fortschritt/`, `…/hindernis/`, `…/vorschlag/`, `…/pruefbericht/` | `{revision, text, anfrage_kennung}` |

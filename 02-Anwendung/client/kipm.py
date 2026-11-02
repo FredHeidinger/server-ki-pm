@@ -6,7 +6,10 @@ Einrichtung (vom Owner je Chat):
   KIPM_SCHLUESSEL Zugangsschlüssel der Chat-Bindung (kipm_…); nie in Dateien oder Chats kopieren.
 
 Befehle:
-  meine-auftraege                        übernehmbare und eigene Aufträge
+  auftraege [--alle]                     alle offenen Aufträge des Projekts (mit --alle auch abgeschlossene)
+  meine-auftraege                        nur übernehmbare und eigene Aufträge
+  auftrag-anlegen --titel "…" --text "…" [--modul kennung] [--prio hoch|mittel|niedrig] [--erzwingen]
+                                         Wunsch als Entwurf anlegen; gleicher Titel wie ein offener Auftrag wird abgewiesen
   lesen A-12                             vollständige gebundene Revision
   uebernehmen A-12 --revision 3          exklusive Übernahme
   fortschritt A-12 --revision 3 "Text"   Fortschritt melden
@@ -96,7 +99,7 @@ def _ausgeben(status: int, antwort: dict, roh: bool) -> int:
     if "auftraege" in antwort:
         print(f"Projekt {antwort['projekt']} · Bindung {antwort['bindung']}")
         if not antwort["auftraege"]:
-            print("Keine übernehmbaren oder eigenen Aufträge.")
+            print("Keine Aufträge.")
         for a in antwort["auftraege"]:
             art = "übernehmbar" if a["uebernehmbar"] else f"Bearbeiter {a['bearbeiter']}"
             print(
@@ -156,6 +159,14 @@ def main(argv: list[str] | None = None) -> int:
     unter = p.add_subparsers(dest="befehl", required=True)
 
     unter.add_parser("meine-auftraege", parents=[gemeinsam])
+    s = unter.add_parser("auftraege", parents=[gemeinsam])
+    s.add_argument("--alle", action="store_true")
+    s = unter.add_parser("auftrag-anlegen", parents=[gemeinsam])
+    s.add_argument("--titel", required=True)
+    s.add_argument("--text", required=True)
+    s.add_argument("--modul", default="")
+    s.add_argument("--prio", default="mittel", choices=["hoch", "mittel", "niedrig"])
+    s.add_argument("--erzwingen", action="store_true")
     s = unter.add_parser("lesen", parents=[gemeinsam])
     s.add_argument("auftrag")
     for name in ("uebernehmen", "fortschritt", "hindernis", "vorschlag", "pruefbericht"):
@@ -183,7 +194,21 @@ def main(argv: list[str] | None = None) -> int:
     kennung = a.kennung or uuid.uuid4().hex
 
     if a.befehl == "meine-auftraege":
-        status, antwort = anfrage("auftraege/")
+        status, antwort = anfrage("auftraege/?nur_meine=1")
+    elif a.befehl == "auftraege":
+        status, antwort = anfrage("auftraege/?alle=1" if a.alle else "auftraege/")
+    elif a.befehl == "auftrag-anlegen":
+        status, antwort = anfrage(
+            "auftraege/anlegen/",
+            {
+                "titel": a.titel,
+                "beschreibung": a.text,
+                "modul": a.modul,
+                "prioritaet": a.prio,
+                "erzwingen": a.erzwingen,
+                "anfrage_kennung": kennung,
+            },
+        )
     elif a.befehl == "lesen":
         status, antwort = anfrage(f"auftraege/{_nummer(a.auftrag)}/")
     elif a.befehl == "uebernehmen":

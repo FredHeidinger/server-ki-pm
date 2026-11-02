@@ -23,11 +23,26 @@ def test_wunsch_ist_entwurf_und_unvollstaendig(akteur, projekt):
         dienst.auftrag_freigeben(akteur, a)
 
 
-def test_chat_darf_keinen_wunsch_anlegen(bindung, projekt):
+def test_chat_legt_wunsch_nur_im_eigenen_projekt_an(bindung, projekt, projekt_b):
+    chat = dienst.Akteur.aus_bindung(bindung)
+    a = dienst.wunsch_erfassen(chat, projekt, titel="Idee vom Chat", beschreibung="y")
+    assert a.zustand == Auftrag.ENTWURF
+    assert Ereignis.objects.filter(objekt_kennung=a.nummer, akteur_name="Chat A").exists()
     with pytest.raises(dienst.KeinZugriff):
-        dienst.wunsch_erfassen(
-            dienst.Akteur.aus_bindung(bindung), projekt, titel="x", beschreibung="y"
-        )
+        dienst.wunsch_erfassen(chat, projekt_b, titel="fremd", beschreibung="y")
+    with pytest.raises(dienst.KeinZugriff):
+        dienst.auftrag_freigeben(chat, a)
+
+
+def test_doppelter_titel_wird_erkannt(akteur, projekt):
+    dienst.wunsch_erfassen(akteur, projekt, titel="Schneller starten", beschreibung="")
+    with pytest.raises(dienst.Konflikt, match="A-1"):
+        dienst.wunsch_erfassen(akteur, projekt, titel="  schneller  STARTEN ", beschreibung="")
+    zweiter = dienst.wunsch_erfassen(
+        akteur, projekt, titel="Schneller starten", beschreibung="", erzwingen=True
+    )
+    assert zweiter.nummer == "A-2"
+    assert len(dienst.doppelte_auftraege(projekt, "Schneller starten")) == 2
 
 
 def test_konkretisieren_erzeugt_revision_und_freigabefaehigkeit(akteur, projekt):

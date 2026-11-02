@@ -349,18 +349,32 @@ def auftrag_holen(akteur: Akteur, auftrag_id: int) -> Auftrag:
     return auftrag
 
 
-def auftraege_fuer_bindung(bindung: ChatBindung):
-    """Übernehmbare und eigene Aufträge des gebundenen Projekts."""
-    return (
-        Auftrag.objects.filter(projekt=bindung.projekt)
-        .filter(
+def auftraege_fuer_bindung(bindung: ChatBindung, *, nur_meine: bool = False, alle: bool = False):
+    """Aufträge des gebundenen Projekts: standardmäßig alle offenen, wahlweise nur
+    übernehmbare und eigene, oder einschließlich abgeschlossener."""
+    qs = Auftrag.objects.filter(projekt=bindung.projekt).select_related("projekt", "modul")
+    if nur_meine:
+        qs = qs.filter(
             Q(zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None)
             | Q(bearbeiter_bindung=bindung)
         )
-        .exclude(zustand__in=Auftrag.ENDZUSTAENDE)
-        .select_related("projekt", "modul")
-        .order_by("prioritaet", "id")
-    )
+    if not alle:
+        qs = qs.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+    return qs.order_by("prioritaet", "id")
+
+
+def _titel_normiert(titel: str) -> str:
+    return " ".join(titel.lower().split())
+
+
+def doppelte_auftraege(projekt: Projekt, titel: str) -> list[Auftrag]:
+    """Offene Aufträge desselben Projekts mit gleichem Titel (ohne Groß-/Kleinschreibung)."""
+    norm = _titel_normiert(titel)
+    return [
+        a
+        for a in Auftrag.objects.filter(projekt=projekt).exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+        if _titel_normiert(a.titel) == norm
+    ]
 
 
 @dataclass(frozen=True)
@@ -485,13 +499,23 @@ def wunsch_erfassen(
     prioritaet: str = "mittel",
     abgeleitet_von: Auftrag | None = None,
     entscheidung: Entscheidung | None = None,
+    erzwingen: bool = False,
 ) -> Auftrag:
-    """Wunsch als Auftrag im Entwurf anlegen. Chats dürfen das nicht (Vorschläge sind Meldungen)."""
-    _mensch_erforderlich(akteur, "Wünsche erfassen")
+    """Wunsch als Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; Freigabe bleibt
+    beim Owner. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer ``erzwingen``."""
+    _projekt_sichtbar(akteur, projekt)
     if not titel.strip():
         raise DienstFehler("Der Titel darf nicht leer sein.")
     if modul is not None and modul.projekt_id != projekt.pk:
         raise DienstFehler("Das Modul gehört nicht zu diesem Projekt.")
+    if not erzwingen:
+        doppelt = doppelte_auftraege(projekt, titel)
+        if doppelt:
+            raise Konflikt(
+                "Gleicher Titel wie offener Auftrag "
+                + ", ".join(a.nummer for a in doppelt)
+                + "; zuerst dort nachsehen oder das Anlegen ausdrücklich erzwingen."
+            )
     with transaction.atomic():
         auftrag = Auftrag.objects.create(
             projekt=projekt,
@@ -1381,13 +1405,14 @@ def kacheln(projekt: Projekt | None) -> dict[str, int]:
     }
 
 
-def projektzeilen(projekte) -> list[dict]:
+def projektzeilen(projekte, *, mit_modulen: bool = True) -> list[dict]:
     """Je Projekt und Modul: Auftragszahlen je Zustand, zuletzt gemeldet, zuletzt geprüft."""
     zaehlzustaende = [
         ("entwurf", Auftrag.ENTWURF),
         ("freigegeben", Auftrag.FREIGEGEBEN),
         ("in_arbeit", (Auftrag.IN_ARBEIT, Auftrag.NACHARBEIT, Auftrag.BLOCKIERT)),
         ("zur_pruefung", Auftrag.ZUR_PRUEFUNG),
+        ("abgenommen", Auftrag.ABGENOMMEN),
     ]
     grenze = timezone.now() - timedelta(days=7)
 
@@ -1408,6 +1433,7 @@ def projektzeilen(projekte) -> list[dict]:
             .order_by("-zeitpunkt")
             .first()
         )
+        zahlen["offen"] = sum(v for k, v in zahlen.items() if k != "abgenommen")
         return {
             "name": name,
             "kennung": kennung,
@@ -1424,8 +1450,9 @@ def projektzeilen(projekte) -> list[dict]:
     for projekt in projekte:
         alle = Auftrag.objects.filter(projekt=projekt)
         ergebnis.append(zeile(projekt.name, projekt.kennung, alle))
-        for modul in projekt.module.filter(aktiv=True):
-            ergebnis.append(zeile(modul.name, str(modul), alle.filter(modul=modul), True))
+        if mit_modulen:
+            for modul in projekt.module.filter(aktiv=True):
+                ergebnis.append(zeile(modul.name, str(modul), alle.filter(modul=modul), True))
     return ergebnis
 
 

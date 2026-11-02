@@ -2,8 +2,21 @@
 {% load steuerung_extras %}
 {% block titel %}Aufträge{% endblock %}
 {% block inhalt %}
-<h1>Aufträge</h1>
+<div class="seitenkopf">
+  <h1>Aufträge</h1>
+  <div class="werkzeuge">
+    <a class="umschalter {% if ansicht == 'board' %}aktiv{% endif %}" href="{% filterlink ansicht='' %}">Board</a>
+    <a class="umschalter {% if ansicht == 'liste' %}aktiv{% endif %}" href="{% filterlink ansicht='liste' %}">Liste</a>
+    <a class="knopf" href="{% url 'wunsch_neu' %}">+ Wunsch</a>
+  </div>
+</div>
+
+{% if ansicht == 'board' %}
+  {% include "steuerung/board.html" with spalten=spalten zeige_projekt=True %}
+  {% if abgebrochen %}<p class="gedaempft">{{ abgebrochen }} abgebrochene Aufträge, sichtbar in der Listenansicht.</p>{% endif %}
+{% else %}
 <form method="get" class="filterzeile">
+  <input type="hidden" name="ansicht" value="liste">
   <label>Zustand
     <select name="zustand" onchange="this.form.submit()">
       <option value="" {% if not filter.zustand %}selected{% endif %}>Alle</option>
@@ -26,7 +39,6 @@
     </select>
   </label>
   <noscript><button type="submit" class="knopf zweit">Filtern</button></noscript>
-  <a class="knopf" href="{% url 'wunsch_neu' %}">Wunsch erfassen</a>
 </form>
 {% if zeilen %}
 <table>
@@ -36,7 +48,7 @@
     <tr>
       <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
       <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a></td>
-      <td>{{ z.a.projekt.kennung }}{% if z.a.modul %} / {{ z.a.modul.kennung }}{% endif %}</td>
+      <td>{{ z.a.projekt.name }}{% if z.a.modul %} / {{ z.a.modul.name }}{% endif %}</td>
       <td>{{ z.reifegrad }}</td>
       <td>{{ z.a.zustand|zustand }}</td>
       <td>{{ z.a.bearbeiter_name|default:"–" }}</td>
@@ -49,5 +61,6 @@
 </table>
 {% else %}
 <div class="leer">Keine Aufträge für diese Auswahl.</div>
+{% endif %}
 {% endif %}
 {% endblock %}

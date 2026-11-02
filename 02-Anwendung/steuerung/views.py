@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from . import dienst
@@ -22,6 +23,7 @@ from .forms import (
     ModulForm,
     ProjektForm,
     WunschForm,
+    listen_zusammenfuehren,
 )
 from .kontext import SITZUNGSSCHLUESSEL, aktives_projekt
 from .models import (
@@ -92,14 +94,15 @@ def uebersicht(request: HttpRequest) -> HttpResponse:
     projekte = Projekt.objects.filter(aktiv=True).prefetch_related("module")
     if projekt is not None:
         projekte = projekte.filter(pk=projekt.pk)
+    karten = []
+    for p, zeile in zip(projekte, dienst.projektzeilen(projekte, mit_modulen=False), strict=True):
+        zeile["beschreibung"] = p.beschreibung
+        zeile["module"] = [m.name for m in p.module.all() if m.aktiv]
+        karten.append(zeile)
     return render(
         request,
         "steuerung/uebersicht.html",
-        {
-            "kacheln": dienst.kacheln(projekt),
-            "zeilen": dienst.projektzeilen(projekte),
-            "projekte": projekte,
-        },
+        {"kacheln": dienst.kacheln(projekt), "projektkarten": karten},
     )
 
 
@@ -119,14 +122,16 @@ def projekt_filter(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def projekt_neu(request: HttpRequest) -> HttpResponse:
-    form = ProjektForm(request.POST or None)
+    form = ProjektForm(
+        listen_zusammenfuehren(request.POST, "module") if request.method == "POST" else None
+    )
     if request.method == "POST" and form.is_valid():
         daten = form.cleaned_data
         try:
             module = dienst.module_aus_text(daten["module"])
             projekt = dienst.projekt_registrieren(
                 _akteur(request),
-                kennung=daten["kennung"],
+                kennung=daten["kennung"] or slugify(daten["name"]),
                 name=daten["name"],
                 beschreibung=daten["beschreibung"],
                 module=module,
@@ -151,7 +156,7 @@ def projekt_detail(request: HttpRequest, kennung: str) -> HttpResponse:
             "module": projekt.module.all(),
             "arbeitsorte": projekt.arbeitsorte.all(),
             "bindungen": projekt.bindungen.all(),
-            "auftraege": projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)[:20],
+            "spalten": _spalten(projekt.auftraege.select_related("projekt", "modul")),
             "modul_form": ModulForm(prefix="modul"),
             "arbeitsort_form": ArbeitsortForm(prefix="ort"),
             "bindung_form": BindungForm(prefix="bindung"),
@@ -168,12 +173,13 @@ def modul_neu(request: HttpRequest, kennung: str) -> HttpResponse:
     form = ModulForm(request.POST, prefix="modul")
     if form.is_valid():
         try:
-            dienst.modul_anlegen(_akteur(request), projekt, **form.cleaned_data)
+            name = form.cleaned_data["name"]
+            dienst.modul_anlegen(_akteur(request), projekt, kennung=slugify(name), name=name)
             messages.success(request, "Modul angelegt.")
         except dienst.DienstFehler as fehler:
             _fehler_anzeigen(request, fehler)
     else:
-        messages.error(request, "Modul: Kennung und Name sind erforderlich.")
+        messages.error(request, "Modul: Der Name ist erforderlich.")
     return redirect("projekt_detail", kennung=kennung)
 
 
@@ -184,12 +190,13 @@ def arbeitsort_neu(request: HttpRequest, kennung: str) -> HttpResponse:
     form = ArbeitsortForm(request.POST, prefix="ort")
     if form.is_valid():
         try:
-            dienst.arbeitsort_anlegen(_akteur(request), projekt, **form.cleaned_data)
+            d = form.cleaned_data
+            dienst.arbeitsort_anlegen(_akteur(request), projekt, kennung=slugify(d["name"]), **d)
             messages.success(request, "Arbeitsort angelegt.")
         except dienst.DienstFehler as fehler:
             _fehler_anzeigen(request, fehler)
     else:
-        messages.error(request, "Arbeitsort: Kennung und Name sind erforderlich.")
+        messages.error(request, "Arbeitsort: Der Name ist erforderlich.")
     return redirect("projekt_detail", kennung=kennung)
 
 
@@ -242,12 +249,57 @@ def _reifegrad(auftrag: Auftrag) -> str:
     return "Arbeitspaket"
 
 
+SPALTEN = [
+    ("entwurf", "Entwurf", Auftrag.ENTWURF, (Auftrag.ENTWURF,)),
+    ("freigegeben", "Freigegeben", Auftrag.FREIGEGEBEN, (Auftrag.FREIGEGEBEN,)),
+    (
+        "arbeit",
+        "In Arbeit",
+        Auftrag.IN_ARBEIT,
+        (
+            Auftrag.IN_ARBEIT,
+            Auftrag.NACHARBEIT,
+            Auftrag.BLOCKIERT,
+            Auftrag.PAUSIERT,
+            Auftrag.KLAERUNG_ERFORDERLICH,
+        ),
+    ),
+    ("pruefung", "Zur Prüfung", Auftrag.ZUR_PRUEFUNG, (Auftrag.ZUR_PRUEFUNG,)),
+    ("abgenommen", "Abgenommen", Auftrag.ABGENOMMEN, (Auftrag.ABGENOMMEN,)),
+]
+PRIO_RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
+
+
+def _spalten(auftraege) -> list[dict]:
+    """Aufträge auf die Board-Spalten verteilen; Abgenommene nur die letzten zehn."""
+    spalten = []
+    for klasse, titel, haupt, zustaende in SPALTEN:
+        karten = [a for a in auftraege if a.zustand in zustaende]
+        karten.sort(key=lambda a: (PRIO_RANG[a.prioritaet], -a.pk))
+        if haupt == Auftrag.ABGENOMMEN:
+            karten = sorted(karten, key=lambda a: -a.pk)[:10]
+        spalten.append({"klasse": klasse, "titel": titel, "hauptzustand": haupt, "karten": karten})
+    return spalten
+
+
 @login_required
 def auftraege(request: HttpRequest) -> HttpResponse:
     projekt = aktives_projekt(request)
     liste = Auftrag.objects.select_related("projekt", "modul").prefetch_related("revisionen")
     if projekt is not None:
         liste = liste.filter(projekt=projekt)
+    ansicht = "liste" if request.GET.get("ansicht") == "liste" else "board"
+    if ansicht == "board":
+        alle = list(liste)
+        return render(
+            request,
+            "steuerung/auftraege.html",
+            {
+                "ansicht": ansicht,
+                "spalten": _spalten(alle),
+                "abgebrochen": sum(1 for a in alle if a.zustand == Auftrag.ABGEBROCHEN),
+            },
+        )
     zustand = request.GET.get("zustand", "")
     if zustand == "offen":
         liste = liste.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
@@ -279,6 +331,7 @@ def auftraege(request: HttpRequest) -> HttpResponse:
         request,
         "steuerung/auftraege.html",
         {
+            "ansicht": ansicht,
             "zeilen": zeilen,
             "zustaende": Auftrag.ZUSTAENDE,
             "filter": {"zustand": zustand, "bearbeiter": bearbeiter, "reifegrad": reifegrad},
@@ -290,6 +343,8 @@ def auftraege(request: HttpRequest) -> HttpResponse:
 @login_required
 def wunsch_neu(request: HttpRequest) -> HttpResponse:
     projekt = aktives_projekt(request)
+    if request.GET.get("projekt"):
+        projekt = Projekt.objects.filter(kennung=request.GET["projekt"]).first() or projekt
     form = WunschForm(request.POST or None, projekt=projekt)
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
@@ -301,6 +356,7 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
                 beschreibung=d["beschreibung"],
                 modul=d["modul"],
                 prioritaet=d["prioritaet"],
+                erzwingen=d["erzwingen"],
             )
         except dienst.DienstFehler as fehler:
             form.add_error(None, str(fehler))
@@ -426,7 +482,12 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         "pruefer": auftrag.pruefer or request.user,
     }
     form = ArbeitspaketForm(
-        request.POST or None, initial=anfang, auftrag=auftrag, menschen=dienst.menschen()
+        listen_zusammenfuehren(request.POST, "schreibumfang", "abnahmekriterien")
+        if request.method == "POST"
+        else None,
+        initial=anfang,
+        auftrag=auftrag,
+        menschen=dienst.menschen(),
     )
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
@@ -559,7 +620,11 @@ def auftrag_teilen(request: HttpRequest, auftrag_id: int) -> HttpResponse:
 @login_required
 def eigenes_ergebnis(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     auftrag = _auftrag_oder_404(auftrag_id)
-    form = EigenesErgebnisForm(request.POST or None)
+    form = EigenesErgebnisForm(
+        listen_zusammenfuehren(request.POST, "dateien", "pruefungen")
+        if request.method == "POST"
+        else None
+    )
     if request.method == "POST" and form.is_valid():
         try:
             dienst.ergebnis_einreichen(

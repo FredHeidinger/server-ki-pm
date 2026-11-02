@@ -171,3 +171,45 @@ def test_ungueltiges_json(freigegeben, bindung):
         content_type="application/json",
     )
     assert antwort.status_code == 400
+
+
+def test_chat_legt_auftrag_an_und_sieht_alle_offenen(freigegeben, bindung):
+    c = api(bindung.klartext)
+    neu = post(
+        c,
+        "/api/auftraege/anlegen/",
+        titel="Logo erneuern",
+        beschreibung="Altes Logo ersetzen",
+        modul="kern",
+        prioritaet="niedrig",
+        anfrage_kennung="n1",
+    )
+    assert neu.status_code == 201 and neu.json()["auftrag"]["zustand"] == "ENTWURF"
+    doppelt = post(
+        c, "/api/auftraege/anlegen/", titel="logo erneuern", beschreibung="x", anfrage_kennung="n2"
+    )
+    assert (
+        doppelt.status_code == 409 and neu.json()["auftrag"]["nummer"] in doppelt.json()["fehler"]
+    )
+    erzwungen = post(
+        c,
+        "/api/auftraege/anlegen/",
+        titel="logo erneuern",
+        beschreibung="x",
+        erzwingen=True,
+        anfrage_kennung="n3",
+    )
+    assert erzwungen.status_code == 201
+    falsches_modul = post(
+        c,
+        "/api/auftraege/anlegen/",
+        titel="Anderes",
+        beschreibung="x",
+        modul="gibtsnicht",
+        anfrage_kennung="n4",
+    )
+    assert falsches_modul.status_code == 400
+    alle = c.get("/api/auftraege/").json()["auftraege"]
+    assert len(alle) == 3 and {a["zustand"] for a in alle} == {"FREIGEGEBEN", "ENTWURF"}
+    meine = c.get("/api/auftraege/?nur_meine=1").json()["auftraege"]
+    assert [a["nummer"] for a in meine] == [freigegeben.nummer]

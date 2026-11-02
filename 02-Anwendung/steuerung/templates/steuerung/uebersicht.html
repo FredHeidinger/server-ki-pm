@@ -1,38 +1,56 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}Übersicht{% endblock %}
 {% block inhalt %}
-<h1>Übersicht</h1>
+<div class="seitenkopf">
+  <h1>Übersicht</h1>
+  <div class="werkzeuge"><a class="knopf zweit" href="{% url 'wunsch_neu' %}">+ Wunsch</a> <a class="knopf" href="{% url 'projekt_neu' %}">+ Projekt</a></div>
+</div>
 
 <h2>Was braucht mich?</h2>
 <div class="kacheln">
-  <a class="kachel" href="{% url 'pruefung' %}"><span class="zahl">{{ kacheln.zur_pruefung }}</span><span>Ergebnisse zur Prüfung</span></a>
-  <a class="kachel" href="{% url 'auftraege' %}?reifegrad=wunsch&zustand=ENTWURF"><span class="zahl">{{ kacheln.wuensche }}</span><span>Wünsche ohne Arbeitspaket</span></a>
-  <a class="kachel" href="{% url 'auftraege' %}?zustand=BLOCKIERT"><span class="zahl">{{ kacheln.blockiert }}</span><span>Blockiert</span></a>
-  <a class="kachel" href="{% url 'entscheidungen' %}"><span class="zahl">{{ kacheln.entscheidungen }}</span><span>Offene Entscheidungen</span></a>
-  <a class="kachel" href="{% url 'auftraege' %}?zustand=KLAERUNG_ERFORDERLICH"><span class="zahl">{{ kacheln.klaerung }}</span><span>Klärung erforderlich</span></a>
+  <a class="kachel {% if kacheln.zur_pruefung %}aktiv{% endif %}" href="{% url 'pruefung' %}"><span class="zahl">{{ kacheln.zur_pruefung }}</span><span>zur Prüfung</span></a>
+  <a class="kachel {% if kacheln.wuensche %}aktiv{% endif %}" href="{% url 'auftraege' %}?ansicht=liste&reifegrad=wunsch&zustand=ENTWURF"><span class="zahl">{{ kacheln.wuensche }}</span><span>Wünsche ohne Arbeitspaket</span></a>
+  <a class="kachel {% if kacheln.blockiert %}warnend{% endif %}" href="{% url 'auftraege' %}?ansicht=liste&zustand=BLOCKIERT"><span class="zahl">{{ kacheln.blockiert }}</span><span>blockiert</span></a>
+  <a class="kachel {% if kacheln.entscheidungen %}aktiv{% endif %}" href="{% url 'entscheidungen' %}"><span class="zahl">{{ kacheln.entscheidungen }}</span><span>offene Entscheidungen</span></a>
+  <a class="kachel {% if kacheln.klaerung %}warnend{% endif %}" href="{% url 'auftraege' %}?ansicht=liste&zustand=KLAERUNG_ERFORDERLICH"><span class="zahl">{{ kacheln.klaerung }}</span><span>Klärung erforderlich</span></a>
 </div>
 
-<h2>Projekte und Module</h2>
-{% if zeilen %}
-<table>
-  <thead>
-    <tr><th scope="col">Projekt / Modul</th><th scope="col">Entwurf</th><th scope="col">Freigegeben</th><th scope="col">In Arbeit</th><th scope="col">Zur Prüfung</th><th scope="col">Zuletzt gemeldet (Bearbeiter)</th><th scope="col">Zuletzt geprüft (Mensch)</th></tr>
-  </thead>
-  <tbody>
-  {% for z in zeilen %}
-    <tr {% if z.ist_modul %}class="modul"{% endif %}>
-      {% if z.ist_modul %}<td>{{ z.name }}</td>{% else %}<th scope="row"><a href="{% url 'projekt_detail' kennung=z.kennung %}">{{ z.name }}</a></th>{% endif %}
-      <td>{{ z.entwurf|default:"–" }}</td><td>{{ z.freigegeben|default:"–" }}</td><td>{{ z.in_arbeit|default:"–" }}</td><td>{{ z.zur_pruefung|default:"–" }}</td>
-      <td>{% if z.gemeldet_am %}{{ z.gemeldet_am|date:"d.m. H:i" }} · {{ z.gemeldet_von }}{% if z.gemeldet_alt %} <span class="alt">(älter als 7 Tage)</span>{% endif %}{% else %}nie{% endif %}</td>
-      <td>{% if z.geprueft_am %}{{ z.geprueft_am|date:"d.m. H:i" }} · {{ z.geprueft_von }}{% else %}nie{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<div class="leer">
-  {% if aktives_projekt %}Das gewählte Projekt ist nicht aktiv.{% else %}Noch kein Projekt registriert. Projekte und Module sind Daten, keine Programmteile; jedes Projekt erhält eigene Arbeitsorte und Chat-Bindungen.{% endif %}
+<h2>Projekte</h2>
+{% if projektkarten %}
+<div class="projektkarten">
+{% for p in projektkarten %}
+  <article class="projektkarte">
+    <div class="projektkopf">
+      <h3><a href="{% url 'projekt_detail' kennung=p.kennung %}">{{ p.name }}</a></h3>
+      <span class="kuerzel">{{ p.kennung }}</span>
+    </div>
+    {% if p.beschreibung %}<p class="gedaempft">{{ p.beschreibung }}</p>{% endif %}
+    {% if p.offen or p.abgenommen %}
+    <div class="balken" role="img" aria-label="{{ p.entwurf }} Entwurf, {{ p.freigegeben }} freigegeben, {{ p.in_arbeit }} in Arbeit, {{ p.zur_pruefung }} zur Prüfung, {{ p.abgenommen }} abgenommen">
+      {% if p.entwurf %}<span class="b-entwurf" style="flex:{{ p.entwurf }}"></span>{% endif %}
+      {% if p.freigegeben %}<span class="b-freigegeben" style="flex:{{ p.freigegeben }}"></span>{% endif %}
+      {% if p.in_arbeit %}<span class="b-arbeit" style="flex:{{ p.in_arbeit }}"></span>{% endif %}
+      {% if p.zur_pruefung %}<span class="b-pruefung" style="flex:{{ p.zur_pruefung }}"></span>{% endif %}
+      {% if p.abgenommen %}<span class="b-abgenommen" style="flex:{{ p.abgenommen }}"></span>{% endif %}
+    </div>
+    <ul class="legende">
+      <li><i class="b-entwurf"></i>{{ p.entwurf }} Entwurf</li>
+      <li><i class="b-freigegeben"></i>{{ p.freigegeben }} freigegeben</li>
+      <li><i class="b-arbeit"></i>{{ p.in_arbeit }} in Arbeit</li>
+      <li><i class="b-pruefung"></i>{{ p.zur_pruefung }} zur Prüfung</li>
+      <li><i class="b-abgenommen"></i>{{ p.abgenommen }} abgenommen</li>
+    </ul>
+    {% else %}<p class="gedaempft">Noch keine Aufträge.</p>{% endif %}
+    {% if p.module %}<p class="chips">{% for m in p.module %}<span class="chip">{{ m }}</span>{% endfor %}</p>{% endif %}
+    <p class="kleinmeta">
+      Zuletzt gemeldet: {% if p.gemeldet_am %}{{ p.gemeldet_am|date:"d.m. H:i" }} · {{ p.gemeldet_von }}{% if p.gemeldet_alt %} <span class="alt">(älter als 7 Tage)</span>{% endif %}{% else %}nie{% endif %}<br>
+      Zuletzt geprüft: {% if p.geprueft_am %}{{ p.geprueft_am|date:"d.m. H:i" }} · {{ p.geprueft_von }}{% else %}nie{% endif %}
+    </p>
+    <p><a class="knopf zweit klein" href="{% url 'projekt_detail' kennung=p.kennung %}">Board und Einstellungen</a></p>
+  </article>
+{% endfor %}
 </div>
+{% else %}
+<div class="leer">Noch kein Projekt registriert. Mit „+ Projekt“ beginnen; Module, Arbeitsorte und Chat-Zugänge kommen danach auf der Projektseite dazu.</div>
 {% endif %}
-<p><a class="knopf" href="{% url 'projekt_neu' %}">Projekt registrieren</a> <a class="knopf zweit" href="{% url 'wunsch_neu' %}">Wunsch erfassen</a></p>
 {% endblock %}

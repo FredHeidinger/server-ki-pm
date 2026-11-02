@@ -66,7 +66,7 @@ def test_formular_registriert_und_zeigt_projekt(owner_client):
     seite = owner_client.get(reverse("uebersicht")).content.decode()
     assert "Synthetisches A" in seite and "Kern" in seite and "Doku" in seite
     detail = owner_client.get(antwort["Location"]).content.decode()
-    assert "synth-a" in detail and "Chat-Bindungen" in detail
+    assert "synth-a" in detail and "Chat-Zugänge" in detail
     verlauf = owner_client.get(reverse("verlauf")).content.decode()
     assert "Projekt registriert" in verlauf
 

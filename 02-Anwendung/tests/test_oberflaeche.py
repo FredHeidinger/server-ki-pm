@@ -255,3 +255,42 @@ def test_verlauf_filter(owner_client, projekt, freigegeben):
         reverse("verlauf") + "?objekt=Auftrag&kennung=" + freigegeben.nummer
     ).content.decode()
     assert "Freigegeben" in seite and "Projekt registriert" not in seite
+
+
+def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
+    board = owner_client.get(reverse("auftraege")).content.decode()
+    assert 'class="board"' in board and freigegeben.nummer in board and "Freigegeben" in board
+    liste = owner_client.get(reverse("auftraege") + "?ansicht=liste").content.decode()
+    assert "<table" in liste and freigegeben.nummer in liste
+    uebersicht = owner_client.get(reverse("uebersicht")).content.decode()
+    assert "projektkarte" in uebersicht and "1 freigegeben" in uebersicht
+    detail = owner_client.get(
+        reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
+    ).content.decode()
+    assert 'class="board"' in detail and "für Freigabe nötig" in detail
+
+
+def test_plus_listen_und_kuerzel_automatisch(owner_client):
+    antwort = owner_client.post(
+        reverse("projekt_neu"),
+        {
+            "name": "Nexus Projekt",
+            "beschreibung": "",
+            "kennung": "",
+            "module_eintrag": ["Core", "", "Standards"],
+        },
+    )
+    assert antwort.status_code == 302 and antwort["Location"].endswith("/projekt/nexus-projekt/")
+    seite = owner_client.get(antwort["Location"]).content.decode()
+    assert "Core" in seite and "Standards" in seite
+    owner_client.post(
+        reverse("modul_neu", kwargs={"kennung": "nexus-projekt"}), {"modul-name": "Web Oberfläche"}
+    )
+    owner_client.post(
+        reverse("arbeitsort_neu", kwargs={"kennung": "nexus-projekt"}),
+        {"ort-name": "Repository Nexus", "ort-rechner": "PC", "ort-pfad": ""},
+    )
+    from steuerung.models import Arbeitsort, Modul
+
+    assert Modul.objects.get(name="Web Oberfläche").kennung == "web-oberflache"
+    assert Arbeitsort.objects.get(kennung="repository-nexus").name == "Repository Nexus"

@@ -2,6 +2,23 @@ from django import forms
 
 from .models import Arbeitsort, Auftrag, Modul, Projekt
 
+# Stufen für die Anzeige an jedem Feld: Pflicht, für Freigabe nötig, optional.
+PFLICHT = "pflicht"
+FREIGABE = "freigabe"
+OPTIONAL = "optional"
+
+
+def _stufen(form: forms.Form, **stufen: str) -> None:
+    for name, feld in form.fields.items():
+        feld.stufe = stufen.get(name, PFLICHT if feld.required else OPTIONAL)
+
+
+def _liste(feld: forms.Field, platzhalter: str) -> forms.Field:
+    """Feld, das in der Oberfläche als Liste mit Plus-Knopf erscheint (ein Eintrag je Zeile)."""
+    feld.liste = True
+    feld.platzhalter = platzhalter
+    return feld
+
 
 class NamensAuswahl(forms.ModelChoiceField):
     """Zeigt den verständlichen Namen statt der technischen Kennung."""
@@ -11,31 +28,35 @@ class NamensAuswahl(forms.ModelChoiceField):
 
 
 class ProjektForm(forms.Form):
-    kennung = forms.SlugField(
-        label="Kennung",
-        max_length=40,
-        help_text="Kurz und dauerhaft, nur Buchstaben, Ziffern und Bindestriche. Beispiel: synth-a",
-    )
-    name = forms.CharField(label="Name", max_length=120)
+    name = forms.CharField(label="Name", max_length=120, help_text="z. B. Nexus")
     beschreibung = forms.CharField(
-        label="Beschreibung", required=False, widget=forms.Textarea(attrs={"rows": 3})
-    )
-    module = forms.CharField(
-        label="Module (optional)",
+        label="Beschreibung",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 4}),
-        help_text="Ein Modul je Zeile, z. B. „Kern“ oder „kern: Kernfunktionen“.",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Ein Satz, worum es geht.",
     )
+    module = _liste(
+        forms.CharField(label="Module", required=False, widget=forms.HiddenInput),
+        "Modulname, z. B. Core",
+    )
+    kennung = forms.SlugField(
+        label="Kürzel",
+        max_length=40,
+        required=False,
+        help_text="Kurz, ohne Leerzeichen; leer lassen, dann wird es aus dem Namen gebildet.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _stufen(self)
 
 
 class ModulForm(forms.Form):
-    kennung = forms.SlugField(label="Kennung", max_length=40)
-    name = forms.CharField(label="Name", max_length=120)
+    name = forms.CharField(label="Name des Moduls", max_length=120)
 
 
 class ArbeitsortForm(forms.Form):
-    kennung = forms.SlugField(label="Kennung", max_length=40, help_text="z. B. repo-haupt")
-    name = forms.CharField(label="Name", max_length=120, help_text="z. B. Repository synth-a")
+    name = forms.CharField(label="Name", max_length=120, help_text="z. B. Repository Nexus")
     rechner = forms.CharField(
         label="Rechner", max_length=120, required=False, help_text="z. B. Freds PC"
     )
@@ -46,17 +67,23 @@ class ArbeitsortForm(forms.Form):
         help_text="Nur zur Orientierung; der Dienst öffnet keine Pfade.",
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _stufen(self)
+
 
 class BindungForm(forms.Form):
-    name = forms.CharField(
-        label="Name der Bindung", max_length=120, help_text="z. B. Chat Synthetisches A"
-    )
+    name = forms.CharField(label="Name des Chats", max_length=120, help_text="z. B. Chat Nexus")
     gueltig_tage = forms.IntegerField(label="Gültig (Tage)", min_value=1, max_value=365, initial=90)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _stufen(self)
 
 
 class WunschForm(forms.Form):
     projekt = NamensAuswahl(label="Projekt", queryset=Projekt.objects.filter(aktiv=True))
-    modul = NamensAuswahl(label="Modul (optional)", queryset=Modul.objects.none(), required=False)
+    modul = NamensAuswahl(label="Modul", queryset=Modul.objects.none(), required=False)
     titel = forms.CharField(label="Titel", max_length=200)
     beschreibung = forms.CharField(
         label="Beschreibung in deinen Worten",
@@ -64,6 +91,9 @@ class WunschForm(forms.Form):
         help_text="Was soll anders sein? Ziel, Umfang und Abnahme folgen beim Konkretisieren.",
     )
     prioritaet = forms.ChoiceField(label="Priorität", choices=Auftrag.PRIO, initial="mittel")
+    erzwingen = forms.BooleanField(
+        label="Trotz gleichem Titel anlegen (kein Doppel)", required=False
+    )
 
     def __init__(self, *args, projekt: Projekt | None = None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -80,6 +110,7 @@ class WunschForm(forms.Form):
                 "Zuerst das Projekt wählen und speichern; das Modul lässt sich beim "
                 "Konkretisieren nachtragen."
             )
+        _stufen(self)
 
 
 class ArbeitspaketForm(forms.Form):
@@ -101,28 +132,34 @@ class ArbeitspaketForm(forms.Form):
         label="Nicht-Ziele",
         required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="Mindestens ein Eintrag oder ausdrücklich „keine“.",
+        help_text="Was ausdrücklich nicht gemacht wird; sonst „keine“.",
     )
     arbeitsort = NamensAuswahl(
         label="Arbeitsort", queryset=Arbeitsort.objects.none(), required=False
     )
-    schreibumfang = forms.CharField(
-        label="Schreibumfang",
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
-        help_text="Ein Pfadmuster je Zeile, z. B. src/auth/** oder docs/ZUSTANDSMODELL.md.",
+    schreibumfang = _liste(
+        forms.CharField(
+            label="Schreibumfang",
+            required=False,
+            widget=forms.HiddenInput,
+            help_text="Welche Dateien oder Ordner der Bearbeiter ändern darf.",
+        ),
+        "Pfad oder Muster, z. B. src/auth/** oder docs/README.md",
     )
     quellen = forms.CharField(
         label="Quellen und Verträge",
         required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="Verweise mit Revisionsstand; darf leer sein.",
+        help_text="Verweise mit Revisionsstand.",
     )
-    abnahmekriterien = forms.CharField(
-        label="Abnahmekriterien",
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 4}),
-        help_text="Eine prüfbare Aussage je Zeile.",
+    abnahmekriterien = _liste(
+        forms.CharField(
+            label="Abnahmekriterien",
+            required=False,
+            widget=forms.HiddenInput,
+            help_text="Jedes Kriterium ist eine prüfbare Aussage.",
+        ),
+        "z. B. Falsches Passwort zeigt einen verständlichen Hinweis",
     )
     pruefer = NamensAuswahl(label="Prüfer", queryset=None, required=False)
     anlass = forms.CharField(label="Anlass der Änderung", max_length=200, required=False)
@@ -134,6 +171,15 @@ class ArbeitspaketForm(forms.Form):
             projekt=auftrag.projekt, aktiv=True
         )
         self.fields["pruefer"].queryset = menschen
+        _stufen(
+            self,
+            ziel=FREIGABE,
+            nicht_ziele=FREIGABE,
+            arbeitsort=FREIGABE,
+            schreibumfang=FREIGABE,
+            abnahmekriterien=FREIGABE,
+            pruefer=FREIGABE,
+        )
 
 
 class BegruendungForm(forms.Form):
@@ -144,19 +190,21 @@ class EigenesErgebnisForm(forms.Form):
     zusammenfassung = forms.CharField(
         label="Zusammenfassung", widget=forms.Textarea(attrs={"rows": 3})
     )
-    dateien = forms.CharField(
-        label="Geänderte Dateien mit Revision",
-        widget=forms.Textarea(attrs={"rows": 3}),
-        help_text="Eine je Zeile, z. B. src/auth/login.py@9c2e7b1",
+    dateien = _liste(
+        forms.CharField(label="Geänderte Dateien mit Revision", widget=forms.HiddenInput),
+        "z. B. src/auth/login.py@9c2e7b1",
     )
-    pruefungen = forms.CharField(
-        label="Ausgeführte Prüfungen",
-        widget=forms.Textarea(attrs={"rows": 3}),
-        help_text="Eine je Zeile, z. B. pytest tests/auth: 12 bestanden",
+    pruefungen = _liste(
+        forms.CharField(label="Ausgeführte Prüfungen", widget=forms.HiddenInput),
+        "z. B. pytest tests/auth: 12 bestanden",
     )
     luecken = forms.CharField(
         label="Bekannte Lücken", required=False, widget=forms.Textarea(attrs={"rows": 2})
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _stufen(self)
 
 
 class EntscheidungForm(forms.Form):
@@ -174,6 +222,10 @@ class EntscheidungForm(forms.Form):
         label="Sofort entscheiden (nicht nur vorschlagen)", required=False
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _stufen(self)
+
 
 class EntscheidenForm(forms.Form):
     text = forms.CharField(
@@ -181,3 +233,13 @@ class EntscheidenForm(forms.Form):
         required=False,
         widget=forms.Textarea(attrs={"rows": 4}),
     )
+
+
+def listen_zusammenfuehren(post, *felder: str):
+    """Einträge der Plus-Listen (``<feld>_eintrag``) zu Zeilen des Hauptfelds zusammenführen."""
+    daten = post.copy()
+    for feld in felder:
+        eintraege = [z.strip() for z in post.getlist(f"{feld}_eintrag") if z.strip()]
+        if eintraege or feld not in post:
+            daten[feld] = "\n".join(eintraege)
+    return daten

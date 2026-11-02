@@ -16,7 +16,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from . import dienst
-from .models import AnfrageKennung, Auftrag, Entscheidung
+from .models import AnfrageKennung, Auftrag, Entscheidung, Modul
 
 
 def _fehler(status: int, text: str) -> JsonResponse:
@@ -126,6 +126,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
     rev = auftrag.aktuelle_revision
     daten = {
         "nummer": auftrag.nummer,
+        "id": auftrag.pk,
         "titel": auftrag.titel,
         "projekt": auftrag.projekt.kennung,
         "modul": str(auftrag.modul.kennung) if auftrag.modul else None,
@@ -188,7 +189,13 @@ def _letzte_pruefung(auftrag: Auftrag) -> dict | None:
 @bindung_erforderlich
 @_behandeln
 def meine_auftraege(request: HttpRequest) -> JsonResponse:
-    auftraege = dienst.auftraege_fuer_bindung(request.bindung)
+    """Alle offenen Aufträge des Projekts; ``?nur_meine=1`` nur übernehmbare und eigene,
+    ``?alle=1`` auch abgeschlossene."""
+    auftraege = dienst.auftraege_fuer_bindung(
+        request.bindung,
+        nur_meine=request.GET.get("nur_meine") == "1",
+        alle=request.GET.get("alle") == "1",
+    )
     return JsonResponse(
         {
             "ok": True,
@@ -196,6 +203,37 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
             "bindung": request.bindung.name,
             "auftraege": [_auftrag_json(a) for a in auftraege],
         }
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Chat legt einen Wunsch als Entwurf an; Freigabe bleibt beim Owner.
+    Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``."""
+    projekt = request.bindung.projekt
+    modul = None
+    if daten.get("modul"):
+        modul = Modul.objects.filter(projekt=projekt, kennung=str(daten["modul"])).first()
+        if modul is None:
+            raise dienst.DienstFehler(f"Modul „{daten['modul']}“ gibt es in diesem Projekt nicht.")
+    prioritaet = str(daten.get("prioritaet") or "mittel")
+    if prioritaet not in dict(Auftrag.PRIO):
+        raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
+    auftrag = dienst.wunsch_erfassen(
+        request.akteur,
+        projekt,
+        titel=str(daten.get("titel", "")),
+        beschreibung=str(daten.get("beschreibung", "")),
+        modul=modul,
+        prioritaet=prioritaet,
+        erzwingen=bool(daten.get("erzwingen", False)),
+    )
+    return JsonResponse(
+        {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
     )
 
 

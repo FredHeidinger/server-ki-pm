@@ -12,11 +12,14 @@
 <nav class="seitenleiste" aria-label="Bereiche">
   <p class="marke">Server-KI-PM</p>
   {% url 'uebersicht' as u_ueb %}{% url 'auftraege' as u_auf %}{% url 'pruefung' as u_pr %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}
-  <a href="{{ u_ueb }}" {% if request.path == u_ueb or request.path|slice:":9" == "/projekt/" or request.path|slice:":9" == "/bindung/" %}aria-current="page"{% endif %}>Übersicht</a>
-  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}>Aufträge</a>
-  <a href="{{ u_pr }}" {% if request.path|slice:":9" == "/pruefung" %}aria-current="page"{% endif %}>Prüfung</a>
-  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}>Entscheidungen</a>
-  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}>Verlauf</a>
+  <a href="{{ u_ueb }}" {% if request.path == u_ueb or request.path|slice:":9" == "/projekt/" or request.path|slice:":9" == "/bindung/" %}aria-current="page"{% endif %}><span class="sym">▦</span> Übersicht</a>
+  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}><span class="sym">☰</span> Aufträge</a>
+  <a href="{{ u_pr }}" {% if request.path|slice:":9" == "/pruefung" %}aria-current="page"{% endif %}><span class="sym">✔</span> Prüfung</a>
+  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}><span class="sym">⚖</span> Entscheidungen</a>
+  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}><span class="sym">◷</span> Verlauf</a>
+  <p class="legende-zustand">
+    <span class="stufe pflicht">Pflicht</span> <span class="stufe freigabe">für Freigabe nötig</span> <span class="stufe optional">optional</span>
+  </p>
 </nav>
 <main id="inhalt">
 <header class="kopfzeile">
@@ -46,5 +49,31 @@
 {% block inhalt %}{% endblock %}
 </main>
 </div>
+<script>
+// Listen mit Plus-Knopf: Einträge hinzufügen und entfernen. Ohne JavaScript bleiben feste Felder.
+document.addEventListener("click", function (ev) {
+  var plus = ev.target.closest(".liste-plus");
+  if (plus) {
+    var liste = plus.closest(".liste");
+    var vorlage = liste.querySelector(".listeneintrag");
+    var neu = vorlage.cloneNode(true);
+    var eingabe = neu.querySelector("input");
+    eingabe.value = "";
+    liste.insertBefore(neu, plus);
+    eingabe.focus();
+    return;
+  }
+  var weg = ev.target.closest(".liste-weg");
+  if (weg) {
+    var eintrag = weg.closest(".listeneintrag");
+    var liste2 = eintrag.closest(".liste");
+    if (liste2.querySelectorAll(".listeneintrag").length > 1) {
+      eintrag.remove();
+    } else {
+      eintrag.querySelector("input").value = "";
+    }
+  }
+});
+</script>
 </body>
 </html>

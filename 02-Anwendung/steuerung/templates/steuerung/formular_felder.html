@@ -1,10 +1,21 @@
+{% load steuerung_extras %}
 {% if form.non_field_errors %}<div class="fehler" role="alert">{{ form.non_field_errors.0 }}</div>{% endif %}
 {% for feld in form %}
 <div class="feld{% if feld.errors %} ungueltig{% endif %}">
   {% if feld.field.widget.input_type == "checkbox" and not feld.field.choices %}
     <label>{{ feld }} {{ feld.label }}</label>
+  {% elif feld.field.liste %}
+    <span class="feldname" id="{{ feld.id_for_label }}_name">{{ feld.label }} {% include "steuerung/stufe.html" with stufe=feld.field.stufe %}</span>
+    <div class="liste" data-liste="{{ feld.html_name }}" role="group" aria-labelledby="{{ feld.id_for_label }}_name">
+      {% for eintrag in feld.value|zeilenliste %}
+      <div class="listeneintrag"><input type="text" name="{{ feld.html_name }}_eintrag" value="{{ eintrag }}" placeholder="{{ feld.field.platzhalter }}" aria-label="{{ feld.label }} {{ forloop.counter }}"><button type="button" class="liste-weg" aria-label="Eintrag entfernen">×</button></div>
+      {% endfor %}
+      <div class="listeneintrag"><input type="text" name="{{ feld.html_name }}_eintrag" value="" placeholder="{{ feld.field.platzhalter }}" aria-label="{{ feld.label }} neu"><button type="button" class="liste-weg" aria-label="Eintrag entfernen">×</button></div>
+      <noscript><div class="listeneintrag"><input type="text" name="{{ feld.html_name }}_eintrag" placeholder="{{ feld.field.platzhalter }}"></div><div class="listeneintrag"><input type="text" name="{{ feld.html_name }}_eintrag" placeholder="{{ feld.field.platzhalter }}"></div></noscript>
+      <button type="button" class="knopf zweit klein liste-plus">+ Eintrag hinzufügen</button>
+    </div>
   {% else %}
-    <label for="{{ feld.id_for_label }}">{{ feld.label }}</label>
+    <label for="{{ feld.id_for_label }}">{{ feld.label }} {% include "steuerung/stufe.html" with stufe=feld.field.stufe %}</label>
     {{ feld }}
   {% endif %}
   {% if feld.help_text %}<p class="hilfe">{{ feld.help_text }}</p>{% endif %}
