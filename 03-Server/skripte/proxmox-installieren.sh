@@ -24,7 +24,8 @@ command -v pct >/dev/null || { echo "Dieses Skript läuft nur auf einem Proxmox-
 
 echo "== Vorlage Debian 13"
 pveam update >/dev/null
-VORLAGE=$(pveam available --section system | awk '/debian-13-standard/ {print $2}' | sort | tail -1)
+ARCH=$(dpkg --print-architecture)
+VORLAGE=$(pveam available --section system | awk '/debian-13-standard/ {print $2}' | grep "_${ARCH}\.tar" | sort | tail -1)
 [ -n "$VORLAGE" ] || { echo "Keine Debian-13-Vorlage gefunden."; exit 1; }
 pveam list local | grep -q "$VORLAGE" || pveam download local "$VORLAGE"
 
@@ -40,7 +41,11 @@ else
     --hostname "$HOSTNAME_CT" --unprivileged 1 --cores 1 --memory 1024 --swap 512 \
     --rootfs "$SPEICHER:8" --net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" \
     --features nesting=1 --onboot 1 --description "Server-KI-PM (automatisch angelegt)"
-  pct start "$ID"
+  if ! pct start "$ID"; then
+    echo "!! Container $ID startet nicht; er wird wieder entfernt."
+    pct destroy "$ID" --purge || true
+    exit 1
+  fi
 fi
 
 echo "== Warten auf Netz im Container"
