@@ -120,7 +120,6 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-# Werkzeuge für Chats liegen unter steuerung/static/client/ und werden als /static/client/ ausgeliefert.
 STATIC_ROOT = DATEN_DIR / "static"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

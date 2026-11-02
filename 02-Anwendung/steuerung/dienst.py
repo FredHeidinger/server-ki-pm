@@ -30,6 +30,7 @@ from .models import (
     Kriteriumsbewertung,
     Meldung,
     Modul,
+    OrdnerAnfrage,
     Projekt,
     Pruefung,
     Revision,
@@ -346,6 +347,72 @@ def bindung_widerrufen(akteur: Akteur, bindung: ChatBindung, grund: str = "") ->
             ereignis="Zugang widerrufen",
             anlass=grund,
         )
+
+
+def bindung_benutzt(bindung: ChatBindung) -> bool:
+    """Hängen Aufträge, Meldungen oder Ergebnisse an dem Zugang, bleibt er für den Verlauf."""
+    return (
+        bindung.auftraege.exists()
+        or bindung.meldungen.exists()
+        or bindung.ergebnisse.exists()
+        or Auftrag.objects.filter(letzter_bearbeiter_bindung=bindung).exists()
+    )
+
+
+def bindung_loeschen(akteur: Akteur, bindung: ChatBindung) -> None:
+    """Unbenutzten Zugang endgültig löschen; benutzte werden nur widerrufen (Archiv)."""
+    _owner_erforderlich(akteur, "Zugänge löschen")
+    if bindung_benutzt(bindung):
+        raise DienstFehler(
+            f"„{bindung.name}“ hat schon an Aufträgen gearbeitet und bleibt für den Verlauf "
+            "erhalten. Widerrufen schiebt ihn ins Archiv."
+        )
+    with transaction.atomic():
+        _ereignis(
+            akteur,
+            projekt=bindung.projekt,
+            objekt_typ="Bindung",
+            objekt_kennung=bindung.name,
+            ereignis="Zugang gelöscht",
+        )
+        bindung.delete()
+
+
+# --- Ordner ohne Projekt -------------------------------------------------------------------
+
+
+def ordner_unbekannt_melden(bindung: ChatBindung, ordner: str) -> None:
+    """Unbekannten Arbeitsordner im Posteingang zur Zuordnung vorlegen (einmal je Ordner)."""
+    norm = _ordner_normiert(ordner)
+    if not norm:
+        return
+    OrdnerAnfrage.objects.update_or_create(
+        normiert=norm[:300], defaults={"ordner": ordner.strip()[:300], "bindung": bindung}
+    )
+
+
+def ordner_zuordnen(akteur: Akteur, anfrage: OrdnerAnfrage, projekt: Projekt) -> Arbeitsort:
+    """Ordner als Arbeitsort des Projekts anlegen; erledigt alle Anfragen, die er abdeckt."""
+    _owner_erforderlich(akteur, "Ordner zuordnen")
+    ordner = anfrage.ordner.rstrip("/\\")
+    name = ordner.replace("\\", "/").rsplit("/", 1)[-1] or ordner
+    basis = slugify(name)[:30] or "ordner"
+    kennung, nr = basis, 2
+    while Arbeitsort.objects.filter(projekt=projekt, kennung=kennung).exists():
+        kennung, nr = f"{basis}-{nr}", nr + 1
+    with transaction.atomic():
+        ort = arbeitsort_anlegen(
+            akteur, projekt, kennung=kennung, name=name, rechner=anfrage.bindung.name, pfad=ordner
+        )
+        for offen in OrdnerAnfrage.objects.all():
+            if projekt_fuer_ordner(offen.ordner)[0] is not None:
+                offen.delete()
+    return ort
+
+
+def ordner_verwerfen(akteur: Akteur, anfrage: OrdnerAnfrage) -> None:
+    _owner_erforderlich(akteur, "Ordneranfragen verwerfen")
+    anfrage.delete()
 
 
 def bindung_pruefen(schluessel: str) -> ChatBindung | None:
@@ -1600,6 +1667,17 @@ def posteingang(benutzer) -> list[dict]:
                 "titel": f"Entscheidung {e.nummer} vorgeschlagen: {e.titel}",
                 "text": e.text,
                 "von": e.vorgeschlagen_von_name,
+            }
+        )
+    for o in OrdnerAnfrage.objects.select_related("bindung"):
+        eintraege.append(
+            {
+                "art": "ordner",
+                "anfrage": o,
+                "zeit": o.angelegt_am,
+                "titel": f"Neuer Arbeitsordner: {o.ordner}",
+                "text": "Ein Chat arbeitet in diesem Ordner. Zu welchem Projekt gehört er?",
+                "von": o.bindung.name,
             }
         )
     eintraege.sort(key=lambda x: x["zeit"] or timezone.now())

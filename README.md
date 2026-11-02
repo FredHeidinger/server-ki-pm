@@ -1,6 +1,6 @@
 # Server-KI-PM
 
-Zentrale Auftragssteuerung für Softwareprojekte mit KI-Chats: Browseroberfläche für den Menschen, begrenzte HTTP-Schnittstelle und Kommandozeile für Projektchats, SQLite hinter einem Django-Dienst.
+Zentrale Auftragssteuerung für Softwareprojekte mit KI-Chats: Browseroberfläche für den Menschen, begrenzte HTTP-Schnittstelle und MCP-Endpunkt für Projektchats, SQLite hinter einem Django-Dienst.
 
 Dieses Repository ist ein automatisch erzeugter Spiegel (`03-Server/skripte/spiegel.py`) des privaten Hauptrepositorys; Änderungen dort, nicht hier.
 
@@ -18,7 +18,7 @@ Legt einen eigenen Debian-13-Container an, installiert Dienst, TLS-Proxy und tä
 
 | Ordner | Inhalt |
 |---|---|
-| `02-Anwendung` | Django-Anwendung, HTTP-Schnittstelle, Kommandozeile `client/kipm.py`, Tests |
+| `02-Anwendung` | Django-Anwendung, HTTP-Schnittstelle, MCP-Endpunkt, Tests |
 | `03-Server/skripte` | Installations-, Sicherungs- und Wiederherstellungsskripte, systemd-Unit, Caddy-Vorlage, Spiegelerzeugung |
 
 Lokal entwickeln: in `02-Anwendung` `uv sync`, `uv run pytest`, `uv run manage.py migrate`, `uv run manage.py konto_anlegen <name>`, `uv run manage.py runserver`.

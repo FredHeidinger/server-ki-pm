@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api, views
+from . import api, mcp, views
 
 urlpatterns = [
     path("anmelden/", views.Anmelden.as_view(), name="anmelden"),
@@ -73,12 +73,28 @@ urlpatterns = [
         name="bindung_widerrufen",
     ),
     path(
+        "verbindungen/zugang/<int:bindung_id>/loeschen/",
+        views.bindung_loeschen,
+        name="bindung_loeschen",
+    ),
+    path(
+        "verbindungen/ordner/<int:anfrage_id>/zuordnen/",
+        views.ordner_zuordnen,
+        name="ordner_zuordnen",
+    ),
+    path(
+        "verbindungen/ordner/<int:anfrage_id>/verwerfen/",
+        views.ordner_verwerfen,
+        name="ordner_verwerfen",
+    ),
+    path(
         "verbindungen/zugang/<int:bindung_id>/pruefen/",
         views.zugang_pruefen,
         name="zugang_pruefen",
     ),
     path("verbindungen/<slug:art>/", views.verbindung, name="verbindung"),
-    # HTTP-Schnittstelle für Zugänge
+    # MCP-Endpunkt und HTTP-Schnittstelle für Zugänge
+    path("mcp/", mcp.endpunkt, name="mcp"),
     path("api/projekt/", api.projekt_lesen, name="api_projekt"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),

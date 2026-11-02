@@ -10,95 +10,62 @@
   <ul class="liste-schlicht">{% for v in info.voraussetzungen %}<li>{{ v }}</li>{% endfor %}</ul>
 </section>
 
+{% if art == "mcp" %}
+<section class="box">
+  <h2>Einmal pro PC: dem Server vertrauen</h2>
+  <p>Damit Claude Code die gesicherte Verbindung annimmt. Zeigt dein Browser bei dieser Seite keine Zertifikatswarnung mehr, ist das schon erledigt. Sonst diese Zeile in ein Terminal einfügen und die Rückfrage von Windows mit „Ja“ bestätigen; danach ist auch die Browserwarnung weg.</p>
+  <pre id="zertbefehl">cmd /c "curl.exe -fsSk -o %TEMP%\kipm-root.crt {{ server_url }}static/kipm-root.crt &amp;&amp; certutil -user -addstore Root %TEMP%\kipm-root.crt"</pre>
+  <button type="button" class="knopf zweit klein" data-kopieren="zertbefehl">Kopieren</button>
+</section>
+
 {% if neuer_schluessel %}
 <section class="box warn" role="alert">
-  <h2>Zugang „{{ neuer_schluessel.name }}“ ist angelegt. Der Schlüssel ist nur jetzt sichtbar.</h2>
-  <p>Kopiere ihn an den Ort aus deiner Notiz. Danach zeigt Server-KI-PM ihn nie wieder; bei Verlust widerrufst du den Zugang und legst einen neuen an.</p>
-  <p><code class="schluessel" id="schluessel">{{ neuer_schluessel.schluessel }}</code> <button type="button" class="knopf zweit klein" data-kopieren="schluessel">Kopieren</button></p>
+  <h2>„{{ neuer_schluessel.name }}“ ist angelegt. Jetzt diesen Befehl einmal in ein Terminal einfügen:</h2>
+  <pre id="mcpbefehl">claude mcp add --transport http --scope user kipm {{ server_url }}mcp/ --header "Authorization: Bearer {{ neuer_schluessel.schluessel }}"</pre>
+  <button type="button" class="knopf klein" data-kopieren="mcpbefehl">Kopieren</button>
+  <p>Fertig. Der Schlüssel steckt im Befehl und wird nur jetzt angezeigt; Claude Code speichert ihn in seinen Benutzereinstellungen. Kontrolle in Claude Code mit <code>/mcp</code>: „kipm“ muss verbunden sein.</p>
 </section>
-{% endif %}
-
+{% else %}
 <section class="box">
-  <h2>Schritt 1: Zugang anlegen</h2>
-  {% if art == "mcp" %}<p class="gedaempft">Ein Zugang je PC. Welches Projekt gemeint ist, erkennt der Dienst am Ordner, in dem Claude Code läuft (Schritt 4).</p>{% endif %}
+  <h2>PC anbinden</h2>
   <form method="post" action="{% url 'zugang_neu' %}" class="formular klein">
     {% csrf_token %}
     <input type="hidden" name="art" value="{{ art }}">
     {% include "steuerung/formular_felder.html" with form=form %}
-    <button type="submit" class="knopf">+ Zugang anlegen und Schlüssel anzeigen</button>
+    <button type="submit" class="knopf">Zugang anlegen und Befehl anzeigen</button>
   </form>
 </section>
+{% endif %}
 
-{% if art == "mcp" %}
 <section class="box">
-  <h2>Schritt 2: Werkzeug auf den PC laden</h2>
-  <p>Zwei Dateien und das Zertifikat des Servers in einen festen Ordner legen, z. B. <code>%USERPROFILE%\.kipm</code>:</p>
+  <h2>So arbeitet es</h2>
   <ul class="liste-schlicht">
-    <li><a href="{{ server_url }}static/client/kipm_mcp.py" download>kipm_mcp.py</a> (MCP-Server)</li>
-    <li><a href="{{ server_url }}static/client/kipm.py" download>kipm.py</a> (Verbindung zum Dienst)</li>
-    <li><a href="{{ server_url }}static/kipm-root.crt" download>kipm-root.crt</a> (Zertifikat des Servers)</li>
+    <li>Jeder neue Claude-Code-Chat hat die Werkzeuge <code>kipm_auftraege</code>, <code>kipm_lesen</code>, <code>kipm_uebernehmen</code>, <code>kipm_fortschritt</code>, <code>kipm_rueckfrage</code>, <code>kipm_ergebnis</code> und weitere. Freigabe und Abnahme gibt es dort bewusst nicht.</li>
+    <li>Das Projekt ergibt sich aus dem Ordner, in dem der Chat arbeitet. Ist der Ordner noch keinem Projekt zugeordnet, fragt Server-KI-PM dich im Posteingang.</li>
+    <li>Andere KI-Chats mit MCP-Unterstützung binden dieselbe Adresse <code>{{ server_url }}mcp/</code> mit demselben Kopfeintrag an.</li>
   </ul>
 </section>
-<section class="box">
-  <h2>Schritt 3: Zugangsdatei <code>konfig.ini</code> im selben Ordner anlegen</h2>
-  <p>Mit einem Editor, nicht im Chat. Inhalt (Schlüssel aus Schritt 1{% if neuer_schluessel %} ist eingesetzt{% endif %}):</p>
-  <pre id="konfig">[kipm]
-url = {{ server_url }}
-schluessel = {% if neuer_schluessel %}{{ neuer_schluessel.schluessel }}{% else %}HIER-DEN-SCHLUESSEL-EINFUEGEN{% endif %}
-ca = kipm-root.crt</pre>
-  <button type="button" class="knopf zweit klein" data-kopieren="konfig">Kopieren</button>
-</section>
-<section class="box">
-  <h2>Schritt 4: Ordner den Projekten zuordnen</h2>
-  <p>Jedes Projekt braucht unter Einstellungen einen Arbeitsort mit dem Ordner, in dem der Chat arbeitet. Aktuelle Zuordnung:</p>
-  {% if arbeitsorte %}<table class="klein"><thead><tr><th>Ordner</th><th>Projekt</th></tr></thead><tbody>{% for o in arbeitsorte %}<tr><td><code>{{ o.pfad }}</code></td><td><a href="{% url 'projekt_einstellungen' kennung=o.projekt.kennung %}">{{ o.projekt.name }}</a></td></tr>{% endfor %}</tbody></table>{% else %}<p class="gedaempft">Noch kein Ordner zugeordnet. Ohne Zuordnung kann der PC-Zugang nichts tun.</p>{% endif %}
-</section>
-<section class="box">
-  <h2>Schritt 5: In Claude Code eintragen</h2>
-  <p>Einmal in einem Terminal ausführen (Pfad anpassen, falls du einen anderen Ordner gewählt hast):</p>
-  <pre id="mcpbefehl">claude mcp add --scope user kipm -- python "%USERPROFILE%\.kipm\kipm_mcp.py"</pre>
-  <button type="button" class="knopf zweit klein" data-kopieren="mcpbefehl">Kopieren</button>
-  <p class="gedaempft">Prüfen in Claude Code mit <code>/mcp</code>: dort muss „kipm“ als verbunden erscheinen. Jeder neue Chat hat dann die Werkzeuge <code>kipm_projekt</code>, <code>kipm_auftraege</code>, <code>kipm_auftrag_anlegen</code>, <code>kipm_uebernehmen</code>, <code>kipm_fortschritt</code>, <code>kipm_rueckfrage</code>, <code>kipm_ergebnis</code> und weitere. Freigabe und Abnahme gibt es dort bewusst nicht.</p>
-</section>
-<section class="box">
-  <h2>Schritt 6: Zertifikatswarnung im Browser abschalten (optional)</h2>
-  <p>Damit der Browser dem Server vertraut: <code>kipm-root.crt</code> doppelklicken → „Zertifikat installieren“ → „Aktueller Benutzer“ → „Alle Zertifikate in folgendem Speicher“ → „Vertrauenswürdige Stammzertifizierungsstellen“.</p>
-</section>
-{% elif art == "cli" %}
-<section class="box">
-  <h2>Schritt 2: Dateien in den Projektordner des Chats</h2>
-  <ul class="liste-schlicht">
-    <li><a href="{{ server_url }}static/client/kipm.py" download>kipm.py</a></li>
-    <li><a href="{{ server_url }}static/kipm-root.crt" download>kipm-root.crt</a></li>
-  </ul>
-</section>
-<section class="box">
-  <h2>Schritt 3: Datei <code>.kipm</code> im Projektordner anlegen</h2>
-  <p>Mit einem Editor, nicht im Chat; <code>.kipm</code> und <code>kipm-root.crt</code> in die <code>.gitignore</code> eintragen.</p>
-  <pre id="konfig">[kipm]
-url = {{ server_url }}
-schluessel = {% if neuer_schluessel %}{{ neuer_schluessel.schluessel }}{% else %}HIER-DEN-SCHLUESSEL-EINFUEGEN{% endif %}
-ca = kipm-root.crt</pre>
-  <button type="button" class="knopf zweit klein" data-kopieren="konfig">Kopieren</button>
-</section>
-<section class="box">
-  <h2>Schritt 4: Dem Chat die Regeln geben</h2>
-  <p>Diesen Text einmal in den Chat einfügen:</p>
-  <pre id="chattext">Du bist über Server-KI-PM an die zentrale Auftragssteuerung angebunden. Die Datei .kipm im Projektordner enthält Adresse und Zugang; lies sie nicht vor und kopiere sie nirgendwohin. Prüfe den Zugang mit: python kipm.py projekt
 
-Regeln:
-- Vor jedem Anlegen zuerst: python kipm.py auftraege  (nichts doppelt anlegen)
-- Neue Aufgabe nur als Entwurf: python kipm.py auftrag-anlegen --titel "…" --text "…" --modul &lt;modulkennung&gt; --prio hoch|mittel|niedrig
-- Arbeiten nur an freigegebenen Aufträgen nach Übernahme: python kipm.py uebernehmen A-&lt;nr&gt; --revision &lt;rev&gt;; Ziel, Schreibumfang und Abnahmekriterien aus python kipm.py lesen A-&lt;nr&gt; sind bindend.
-- Unterwegs: python kipm.py fortschritt A-&lt;nr&gt; --revision &lt;rev&gt; "…"; bei offenen Fragen rueckfrage, bei Problemen hindernis oder fehler. Antworten des Menschen stehen in python kipm.py lesen A-&lt;nr&gt;.
-- Zum Schluss: python kipm.py ergebnis A-&lt;nr&gt; --revision &lt;rev&gt; --zusammenfassung "…" --datei "pfad@commit" --pruefung "befehl: ergebnis" --luecken "…"
-- Änderungswünsche am Auftrag mit vorschlag melden; Umfang, Freigabe und Abnahme änderst du nie selbst.</pre>
-  <button type="button" class="knopf zweit klein" data-kopieren="chattext">Kopieren</button>
-</section>
 {% else %}
+{% if neuer_schluessel %}
+<section class="box warn" role="alert">
+  <h2>„{{ neuer_schluessel.name }}“ ist angelegt. Der Schlüssel ist nur jetzt sichtbar.</h2>
+  <p>In deiner Integration speichern; bei Verlust Zugang löschen und neu anlegen.</p>
+  <p><code class="schluessel" id="schluessel">{{ neuer_schluessel.schluessel }}</code> <button type="button" class="knopf zweit klein" data-kopieren="schluessel">Kopieren</button></p>
+</section>
+{% endif %}
+<section class="box">
+  <h2>Schritt 1: Zugang anlegen</h2>
+  <form method="post" action="{% url 'zugang_neu' %}" class="formular klein">
+    {% csrf_token %}
+    <input type="hidden" name="art" value="{{ art }}">
+    {% include "steuerung/formular_felder.html" with form=form %}
+    <button type="submit" class="knopf">Zugang anlegen und Schlüssel anzeigen</button>
+  </form>
+</section>
 <section class="box">
   <h2>Schritt 2: Anfragen stellen</h2>
-  <p>Jede Anfrage trägt die Kopfzeile <code>Authorization: Bearer &lt;Schlüssel&gt;</code>. Antworten sind JSON mit <code>ok</code> und entweder Daten oder <code>fehler</code>. Verändernde Anfragen tragen <code>anfrage_kennung</code>: gleiche Kennung mit gleichem Inhalt wirkt nie doppelt.</p>
+  <p>Jede Anfrage trägt die Kopfzeile <code>Authorization: Bearer &lt;Schlüssel&gt;</code>. Antworten sind JSON mit <code>ok</code> und entweder Daten oder <code>fehler</code>. Verändernde Anfragen tragen <code>anfrage_kennung</code>: gleiche Kennung mit gleichem Inhalt wirkt nie doppelt. Das Zertifikat des Servers liegt unter <a href="{{ server_url }}static/kipm-root.crt">{{ server_url }}static/kipm-root.crt</a>.</p>
   <pre id="curl">curl -sS --cacert kipm-root.crt -H "Authorization: Bearer {% if neuer_schluessel %}{{ neuer_schluessel.schluessel }}{% else %}SCHLUESSEL{% endif %}" {{ server_url }}api/auftraege/</pre>
   <button type="button" class="knopf zweit klein" data-kopieren="curl">Kopieren</button>
   <table class="klein">
@@ -120,22 +87,6 @@ Regeln:
 
 <section class="box">
   <h2>Zugänge dieser Art</h2>
-  {% if bindungen %}
-  <table class="klein">
-    <thead><tr><th>Name</th>{% if art != "mcp" %}<th>Projekt</th>{% endif %}<th>Wo gespeichert</th><th>Zuletzt verwendet</th><th>Zustand</th><th></th></tr></thead>
-    <tbody>
-    {% for b in bindungen %}
-    <tr>
-      <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span></td>
-      {% if art != "mcp" %}<td>{{ b.projekt.name }}</td>{% endif %}
-      <td>{{ b.notiz|default:"–" }}</td>
-      <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% if b.letztes_projekt %} · {{ b.letztes_projekt.name }}{% endif %}{% else %}nie{% endif %}</td>
-      <td>{% if b.widerrufen_am %}<span class="status aus">widerrufen</span>{% elif b.gueltig_bis < jetzt %}<span class="status aus">abgelaufen</span>{% else %}<span class="status ok">aktiv</span>{% endif %}</td>
-      <td><a class="knopf zweit klein" href="{% url 'zugang_pruefen' bindung_id=b.pk %}">Verbindung prüfen</a> {% if not b.widerrufen_am %}<form method="post" action="{% url 'bindung_widerrufen' bindung_id=b.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ request.path }}"><button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="gedaempft">Noch kein Zugang dieser Art.</p>{% endif %}
+  {% include "steuerung/zugangstabelle.html" %}
 </section>
 {% endblock %}

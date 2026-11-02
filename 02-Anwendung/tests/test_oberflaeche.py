@@ -175,17 +175,16 @@ def test_bindung_anlegen_zeigt_schluessel_einmal(owner_client, projekt):
     antwort = owner_client.post(
         reverse("zugang_neu"),
         {
-            "art": "cli",
+            "art": "http",
             "zugang-name": "Chat A",
             "zugang-projekt": projekt.pk,
-            "zugang-notiz": ".kipm",
             "zugang-gueltig_tage": 30,
         },
     )
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "schluessel = kipm_" in seite and "nur jetzt sichtbar" in seite
-    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "cli"})).content.decode()
-    assert "schluessel = kipm_" not in nochmal
+    assert "Bearer kipm_" in seite and "nur jetzt sichtbar" in seite
+    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "http"})).content.decode()
+    assert "Bearer kipm_" not in nochmal
     bindung = projekt.bindungen.get()
     owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": bindung.pk}))
     bindung.refresh_from_db()
@@ -314,31 +313,25 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
 
 def test_verbindungen_katalog_und_pc_zugang(owner_client, projekt):
     seite = owner_client.get(reverse("verbindungen")).content.decode()
-    assert (
-        "Claude Code (MCP)" in seite and "Kommandozeile" in seite and "HTTP-Schnittstelle" in seite
-    )
+    assert "Claude Code (MCP)" in seite and "HTTP-Schnittstelle" in seite
+    assert "Kommandozeile" not in seite and "Wo gespeichert" not in seite
     detail = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
-    assert "Voraussetzungen" in detail and "claude mcp add" in detail and "kipm_mcp.py" in detail
+    assert "Voraussetzungen" in detail and "certutil -user -addstore Root" in detail
+    assert "claude mcp add" not in detail  # erst mit Schlüssel, dann fertig eingesetzt
     antwort = owner_client.post(
         reverse("zugang_neu"),
-        {
-            "art": "mcp",
-            "zugang-name": "Claude Code auf Freds PC",
-            "zugang-notiz": "konfig.ini",
-            "zugang-gueltig_tage": 90,
-        },
+        {"art": "mcp", "zugang-name": "Claude Code auf Freds PC", "zugang-gueltig_tage": 90},
     )
     assert antwort.status_code == 302
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "nur jetzt sichtbar" in seite and "schluessel = kipm_" in seite
+    assert "claude mcp add --transport http --scope user kipm http://testserver/mcp/" in seite
+    assert '--header "Authorization: Bearer kipm_' in seite
     nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
-    assert "kipm_" not in nochmal.split("Schritt 3")[1].split("Schritt 4")[0].replace(
-        "kipm_mcp", ""
-    )
+    assert "Bearer kipm_" not in nochmal and "PC anbinden" in nochmal
     from steuerung.models import ChatBindung
 
     pc = ChatBindung.objects.get(art="pc")
-    assert pc.notiz == "konfig.ini"
+    assert pc.notiz == "Claude Code (Benutzereinstellungen)"
     pruefen = owner_client.get(
         reverse("zugang_pruefen", kwargs={"bindung_id": pc.pk})
     ).content.decode()
@@ -348,10 +341,10 @@ def test_verbindungen_katalog_und_pc_zugang(owner_client, projekt):
     assert pc.widerrufen_am is not None
 
 
-def test_projektzugang_braucht_projekt_und_notiz(owner_client, projekt):
+def test_projektzugang_braucht_projekt(owner_client, projekt):
     antwort = owner_client.post(
         reverse("zugang_neu"),
-        {"art": "cli", "zugang-name": "Chat", "zugang-notiz": "", "zugang-gueltig_tage": 30},
+        {"art": "http", "zugang-name": "Chat", "zugang-gueltig_tage": 30},
     )
     assert antwort.status_code == 302
     from steuerung.models import ChatBindung
@@ -360,14 +353,14 @@ def test_projektzugang_braucht_projekt_und_notiz(owner_client, projekt):
     antwort = owner_client.post(
         reverse("zugang_neu"),
         {
-            "art": "cli",
+            "art": "http",
             "zugang-name": "Chat",
             "zugang-projekt": projekt.pk,
-            "zugang-notiz": ".kipm",
             "zugang-gueltig_tage": 30,
         },
     )
     assert ChatBindung.objects.get().projekt == projekt
+    assert owner_client.get(reverse("verbindung", kwargs={"art": "cli"})).status_code == 404
 
 
 def test_posteingang_zeigt_konkrete_eintraege(owner_client, akteur, projekt, freigegeben, bindung):
@@ -403,12 +396,6 @@ def test_panel_und_projektreiter(owner_client, projekt, freigegeben):
         seite = owner_client.get(reverse(name, kwargs={"kennung": projekt.kennung}))
         assert seite.status_code == 200, name
         assert 'class="reiter"' in seite.content.decode()
-
-
-def test_client_dateien_werden_ausgeliefert(owner_client):
-    from django.contrib.staticfiles import finders
-
-    assert finders.find("client/kipm.py") and finders.find("client/kipm_mcp.py")
 
 
 def test_datei_link_mit_repository(akteur, projekt):

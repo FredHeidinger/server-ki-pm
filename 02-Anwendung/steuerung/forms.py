@@ -86,18 +86,13 @@ class ArbeitsortForm(forms.Form):
 
 
 class ZugangForm(forms.Form):
-    """Zugang anlegen: Name, Pflichtnotiz „wo gespeichert“, Gültigkeit; Projekt je nach Art."""
+    """Zugang anlegen: Name und Gültigkeit; Projekt nur beim Projektschlüssel."""
 
     name = forms.CharField(
         label="Name", max_length=120, help_text="Wer oder was diesen Zugang nutzt."
     )
     projekt = NamensAuswahl(
         label="Projekt", queryset=Projekt.objects.filter(aktiv=True), required=False
-    )
-    notiz = forms.CharField(
-        label="Wo wird der Schlüssel gespeichert?",
-        max_length=200,
-        help_text="Damit du ihn später wiederfindest oder sicher löschen kannst.",
     )
     gueltig_tage = forms.IntegerField(label="Gültig (Tage)", min_value=1, max_value=365, initial=90)
 

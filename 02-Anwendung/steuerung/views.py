@@ -31,7 +31,6 @@ from .forms import (
     listen_zusammenfuehren,
 )
 from .models import (
-    Arbeitsort,
     Auftrag,
     ChatBindung,
     Entscheidung,
@@ -39,6 +38,7 @@ from .models import (
     Ergebnis,
     Kriteriumsbewertung,
     Meldung,
+    OrdnerAnfrage,
     Projekt,
 )
 
@@ -109,6 +109,7 @@ def posteingang(request: HttpRequest) -> HttpResponse:
         {
             "eintraege": dienst.posteingang(request.user),
             "projekte_vorhanden": Projekt.objects.exists(),
+            "projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
         },
     )
 
@@ -939,27 +940,19 @@ def entscheidung_aktion(request: HttpRequest, entscheidung_id: int, aktion: str)
 VERBINDUNGSARTEN = {
     "mcp": {
         "titel": "Claude Code (MCP)",
-        "kurz": "Jeder Claude-Code-Chat auf deinem PC bekommt die Werkzeuge von Server-KI-PM; das Projekt erkennt er am Ordner.",
+        "kurz": "Ein Befehl auf deinem PC, dann hat jeder Claude-Code-Chat die Werkzeuge von Server-KI-PM; das Projekt erkennt er am Ordner.",
         "zugangsart": ChatBindung.ART_PC,
+        "notiz": "Claude Code (Benutzereinstellungen)",
         "voraussetzungen": [
             "Claude Code ist installiert (Befehl „claude“ funktioniert).",
-            "Python 3.11 oder neuer ist installiert (Befehl „python --version“).",
             "Dieser PC erreicht den Server im Heimnetz.",
-        ],
-    },
-    "cli": {
-        "titel": "Kommandozeile (andere Chats)",
-        "kurz": "Für Chats mit Shell-Zugriff außerhalb von Claude Code: ein Schlüssel je Projekt, das Werkzeug kipm.py im Projektordner.",
-        "zugangsart": ChatBindung.ART_PROJEKT,
-        "voraussetzungen": [
-            "Der Chat kann Befehle ausführen und das Heimnetz erreichen.",
-            "Python 3.11 oder neuer auf dem Rechner des Chats.",
         ],
     },
     "http": {
         "titel": "HTTP-Schnittstelle (eigene Integration)",
         "kurz": "Für Skripte, Automatisierungen (z. B. n8n) oder eigene Werkzeuge: dieselben Regeln, direkt über HTTPS.",
         "zugangsart": ChatBindung.ART_PROJEKT,
+        "notiz": "eigene Integration",
         "voraussetzungen": ["Das Werkzeug kann HTTPS-Anfragen mit Kopfzeilen senden."],
     },
 }
@@ -972,10 +965,7 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
         "steuerung/verbindungen.html",
         {
             "arten": VERBINDUNGSARTEN,
-            "bindungen": ChatBindung.objects.select_related("projekt", "letztes_projekt").order_by(
-                "-angelegt_am"
-            ),
-            "jetzt": timezone.now(),
+            **_zugaenge(ChatBindung.objects.all()),
         },
     )
 
@@ -990,14 +980,7 @@ def verbindung(request: HttpRequest, art: str) -> HttpResponse:
         neuer = None
     form = ZugangForm(
         prefix="zugang",
-        initial={
-            "name": {"mcp": "Claude Code auf meinem PC", "cli": "Chat", "http": "Integration"}[art],
-            "notiz": {
-                "mcp": "%USERPROFILE%\\.kipm\\konfig.ini",
-                "cli": ".kipm im Projektordner",
-                "http": "",
-            }[art],
-        },
+        initial={"name": {"mcp": "Claude Code auf meinem PC", "http": "Integration"}[art]},
         projektpflicht=info["zugangsart"] == ChatBindung.ART_PROJEKT,
     )
     return render(
@@ -1009,13 +992,7 @@ def verbindung(request: HttpRequest, art: str) -> HttpResponse:
             "form": form,
             "neuer_schluessel": neuer,
             "server_url": f"{request.scheme}://{request.get_host()}/",
-            "arbeitsorte": Arbeitsort.objects.filter(aktiv=True)
-            .exclude(pfad="")
-            .select_related("projekt"),
-            "bindungen": ChatBindung.objects.filter(art=info["zugangsart"]).select_related(
-                "projekt", "letztes_projekt"
-            ),
-            "jetzt": timezone.now(),
+            **_zugaenge(ChatBindung.objects.filter(art=info["zugangsart"])),
         },
     )
 
@@ -1038,7 +1015,7 @@ def zugang_neu(request: HttpRequest) -> HttpResponse:
                 d.get("projekt") if info["zugangsart"] == ChatBindung.ART_PROJEKT else None,
                 name=d["name"],
                 gueltig_tage=d["gueltig_tage"],
-                notiz=d["notiz"],
+                notiz=info["notiz"],
             )
             request.session["neuer_schluessel"] = {
                 "art": art,
@@ -1064,6 +1041,55 @@ def bindung_widerrufen(request: HttpRequest, bindung_id: int) -> HttpResponse:
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
     return _zurueck(request, "/verbindungen/")
+
+
+def _zugaenge(qs) -> dict:
+    """Zugangsliste: gültige oben, widerrufene und abgelaufene im Archiv; Löschbarkeit je Zeile."""
+    aktive, archiv = [], []
+    for b in qs.select_related("projekt", "letztes_projekt").order_by("-angelegt_am"):
+        b.loeschbar = not dienst.bindung_benutzt(b)
+        (aktive if b.aktiv else archiv).append(b)
+    return {"bindungen": aktive, "archiv": archiv, "jetzt": timezone.now()}
+
+
+@login_required
+@require_POST
+def bindung_loeschen(request: HttpRequest, bindung_id: int) -> HttpResponse:
+    bindung = get_object_or_404(ChatBindung, pk=bindung_id)
+    name = bindung.name
+    try:
+        dienst.bindung_loeschen(_akteur(request), bindung)
+        messages.success(request, f"Zugang „{name}“ ist gelöscht.")
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return _zurueck(request, "/verbindungen/")
+
+
+@login_required
+@require_POST
+def ordner_zuordnen(request: HttpRequest, anfrage_id: int) -> HttpResponse:
+    anfrage = get_object_or_404(OrdnerAnfrage.objects.select_related("bindung"), pk=anfrage_id)
+    projekt = Projekt.objects.filter(pk=request.POST.get("projekt") or 0, aktiv=True).first()
+    if projekt is None:
+        messages.error(request, "Bitte ein Projekt wählen.")
+        return redirect("posteingang")
+    try:
+        ort = dienst.ordner_zuordnen(_akteur(request), anfrage, projekt)
+        messages.success(request, f"Ordner „{ort.pfad}“ gehört jetzt zu {projekt.name}.")
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return redirect("posteingang")
+
+
+@login_required
+@require_POST
+def ordner_verwerfen(request: HttpRequest, anfrage_id: int) -> HttpResponse:
+    anfrage = get_object_or_404(OrdnerAnfrage, pk=anfrage_id)
+    try:
+        dienst.ordner_verwerfen(_akteur(request), anfrage)
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return redirect("posteingang")
 
 
 @login_required

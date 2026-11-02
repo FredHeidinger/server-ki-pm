@@ -118,6 +118,25 @@ class ChatBindung(models.Model):
         return self.widerrufen_am is None and self.gueltig_bis > timezone.now()
 
 
+class OrdnerAnfrage(models.Model):
+    """Ein PC-Zugang hat aus einem Ordner gearbeitet, der keinem Projekt zugeordnet ist.
+    Erscheint im Posteingang, bis der Mensch ihn einem Projekt zuordnet oder verwirft."""
+
+    ordner = models.CharField("Ordner", max_length=300)
+    normiert = models.CharField("Ordner normiert", max_length=300, unique=True)
+    bindung = models.ForeignKey(
+        ChatBindung, on_delete=models.CASCADE, related_name="ordneranfragen"
+    )
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+    zuletzt_am = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["angelegt_am"]
+
+    def __str__(self) -> str:
+        return self.ordner
+
+
 class Auftrag(models.Model):
     """Ein Auftrag beginnt als Wunsch und reift zum Arbeitspaket. Nummer ist ``A-<id>``."""
 

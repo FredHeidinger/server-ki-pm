@@ -45,10 +45,11 @@ def bindung_erforderlich(view):
                 )
             projekt, arbeitsort = dienst.projekt_fuer_ordner(ordner)
             if projekt is None:
+                dienst.ordner_unbekannt_melden(bindung, ordner)
                 return _fehler(
                     409,
-                    f"Der Ordner „{ordner}“ ist keinem Projekt zugeordnet. In Server-KI-PM beim "
-                    "Projekt einen Arbeitsort mit diesem Ordner anlegen.",
+                    f"Der Ordner „{ordner}“ ist noch keinem Projekt zugeordnet. Server-KI-PM hat "
+                    "den Menschen im Posteingang gefragt; nach der Zuordnung erneut versuchen.",
                 )
         request.projekt = projekt
         request.arbeitsort = arbeitsort
