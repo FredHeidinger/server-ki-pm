@@ -171,21 +171,18 @@ def test_selbstabnahme_in_oberflaeche_gesperrt(
     assert auftrag.zustand == Auftrag.ZUR_PRUEFUNG
 
 
-def test_bindung_anlegen_zeigt_schluessel_einmal(owner_client, projekt):
+def test_link_wird_einmal_angezeigt_und_ist_widerrufbar(owner_client):
     antwort = owner_client.post(
-        reverse("zugang_neu"),
-        {
-            "art": "http",
-            "zugang-name": "Chat A",
-            "zugang-projekt": projekt.pk,
-            "zugang-gueltig_tage": 30,
-        },
+        reverse("zugang_neu"), {"zugang-name": "ChatGPT Desktop", "zugang-gueltig_tage": 30}
     )
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "Bearer kipm_" in seite and "nur jetzt sichtbar" in seite
-    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "http"})).content.decode()
-    assert "Bearer kipm_" not in nochmal
-    bindung = projekt.bindungen.get()
+    assert "nur jetzt sichtbar" in seite and "http://testserver/mcp/kipm_" in seite
+    nochmal = owner_client.get(reverse("verbindungen")).content.decode()
+    assert "/mcp/kipm_" not in nochmal and "Link erzeugen" in nochmal
+    from steuerung.models import ChatBindung
+
+    bindung = ChatBindung.objects.get(name="ChatGPT Desktop")
+    assert bindung.art == "pc" and bindung.projekt is None
     owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": bindung.pk}))
     bindung.refresh_from_db()
     assert bindung.widerrufen_am is not None
@@ -311,56 +308,33 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
     assert Arbeitsort.objects.get(kennung="repository-nexus").name == "Repository Nexus"
 
 
-def test_verbindungen_katalog_und_pc_zugang(owner_client, projekt):
+def test_eine_seite_ki_verbinden(owner_client, settings):
     seite = owner_client.get(reverse("verbindungen")).content.decode()
-    assert "Claude Code (MCP)" in seite and "HTTP-Schnittstelle" in seite
-    assert "Kommandozeile" not in seite and "Wo gespeichert" not in seite
-    detail = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
-    assert "Voraussetzungen" in detail and "certutil -user -addstore Root" in detail
-    assert "claude mcp add" not in detail  # erst mit Schlüssel, dann fertig eingesetzt
+    assert "KI verbinden" in seite and "certutil -user -addstore Root" in seite
+    for alt in ("Kommandozeile", "Wo gespeichert", "HTTP-Schnittstelle", "Claude Code (MCP)"):
+        assert alt not in seite
     antwort = owner_client.post(
-        reverse("zugang_neu"),
-        {"art": "mcp", "zugang-name": "Claude Code auf Freds PC", "zugang-gueltig_tage": 90},
+        reverse("zugang_neu"), {"zugang-name": "Claude Desktop", "zugang-gueltig_tage": 90}
     )
     assert antwort.status_code == 302
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "claude mcp add --transport http --scope user kipm http://testserver/mcp/" in seite
-    assert '--header "Authorization: Bearer kipm_' in seite
-    nochmal = owner_client.get(reverse("verbindung", kwargs={"art": "mcp"})).content.decode()
-    assert "Bearer kipm_" not in nochmal and "PC anbinden" in nochmal
+    assert "claude mcp add --transport http --scope user kipm http://testserver/mcp/kipm_" in seite
+    assert "codex mcp add kipm --url http://testserver/mcp/kipm_" in seite
+    assert "Connector" in seite and "aus dem Internet erreichbar" in seite
     from steuerung.models import ChatBindung
 
-    pc = ChatBindung.objects.get(art="pc")
-    assert pc.notiz == "Claude Code (Benutzereinstellungen)"
+    pc = ChatBindung.objects.get(name="Claude Desktop")
     pruefen = owner_client.get(
         reverse("zugang_pruefen", kwargs={"bindung_id": pc.pk})
     ).content.decode()
     assert "noch nie" in pruefen
-    owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": pc.pk}))
-    pc.refresh_from_db()
-    assert pc.widerrufen_am is not None
 
-
-def test_projektzugang_braucht_projekt(owner_client, projekt):
+    settings.KIPM_OEFFENTLICHE_URL = "https://kipm.example.net"
     antwort = owner_client.post(
-        reverse("zugang_neu"),
-        {"art": "http", "zugang-name": "Chat", "zugang-gueltig_tage": 30},
+        reverse("zugang_neu"), {"zugang-name": "ChatGPT", "zugang-gueltig_tage": 90}
     )
-    assert antwort.status_code == 302
-    from steuerung.models import ChatBindung
-
-    assert ChatBindung.objects.count() == 0
-    antwort = owner_client.post(
-        reverse("zugang_neu"),
-        {
-            "art": "http",
-            "zugang-name": "Chat",
-            "zugang-projekt": projekt.pk,
-            "zugang-gueltig_tage": 30,
-        },
-    )
-    assert ChatBindung.objects.get().projekt == projekt
-    assert owner_client.get(reverse("verbindung", kwargs={"art": "cli"})).status_code == 404
+    seite = owner_client.get(antwort["Location"]).content.decode()
+    assert "https://kipm.example.net/mcp/kipm_" in seite and "certutil" not in seite
 
 
 def test_posteingang_zeigt_konkrete_eintraege(owner_client, akteur, projekt, freigegeben, bindung):

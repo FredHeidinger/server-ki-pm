@@ -246,7 +246,8 @@ def test_pc_zugang_erkennt_projekt_am_ordner(akteur, projekt, projekt_b, freigeg
     in_b = Client(
         headers={"Authorization": f"Bearer {schluessel}", "X-KIPM-Ordner": r"W:\Projekte\B"}
     )
-    assert in_b.get(f"/api/auftraege/{freigegeben.pk}/").status_code == 404
+    # Der PC-Zugang ist Freds Assistent und sieht alle Projekte.
+    assert in_b.get(f"/api/auftraege/{freigegeben.pk}/").status_code == 200
     uebernahme = post(
         in_a, f"/api/auftraege/{freigegeben.pk}/uebernehmen/", revision=2, anfrage_kennung="pc1"
     )

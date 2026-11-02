@@ -6,7 +6,7 @@
   {% for b in bindungen %}
   <tr>
     <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span></td>
-    <td>{% if b.art == "pc" %}PC-Zugang (Claude Code){% else %}Projektschlüssel{% endif %}</td>
+    <td>{% if b.art == "pc" %}KI-Programm (Link){% else %}Projektschlüssel (alt){% endif %}</td>
     <td>{% if b.projekt %}{{ b.projekt.name }}{% elif b.letztes_projekt %}je nach Ordner, zuletzt {{ b.letztes_projekt.name }}{% else %}je nach Ordner{% endif %}</td>
     <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% else %}nie{% endif %}</td>
     <td>{{ b.gueltig_bis|date:"d.m.Y" }}</td>
@@ -22,7 +22,7 @@
   {% endfor %}
   </tbody>
 </table>
-{% elif archiv %}<p class="gedaempft">Kein gültiger Zugang.</p>{% else %}<div class="leer">Noch kein Zugang. Wähle oben eine Verbindungsart.</div>{% endif %}
+{% elif archiv %}<p class="gedaempft">Kein gültiger Zugang.</p>{% else %}<div class="leer">Noch kein KI-Programm verbunden.</div>{% endif %}
 {% if archiv %}
 <details class="archiv">
   <summary>Archiv: {{ archiv|length }} widerrufene oder abgelaufene Zugänge</summary>

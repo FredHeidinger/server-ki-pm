@@ -176,6 +176,9 @@ class Auftrag(models.Model):
     ENDZUSTAENDE = (ABGENOMMEN, ABGEBROCHEN)
 
     PRIO = [("hoch", "hoch"), ("mittel", "mittel"), ("niedrig", "niedrig")]
+    TYP_AUFTRAG = "auftrag"
+    TYP_ISSUE = "issue"
+    TYPEN = [(TYP_AUFTRAG, "Auftrag"), (TYP_ISSUE, "Issue")]
 
     projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="auftraege")
     modul = models.ForeignKey(
@@ -185,6 +188,13 @@ class Auftrag(models.Model):
     zustand = models.CharField("Zustand", max_length=24, choices=ZUSTAENDE, default=ENTWURF)
     zustand_vor_pause = models.CharField(max_length=24, blank=True)
     prioritaet = models.CharField("Priorität", max_length=10, choices=PRIO, default="mittel")
+    typ = models.CharField(
+        "Art",
+        max_length=10,
+        choices=TYPEN,
+        default=TYP_AUFTRAG,
+        help_text="Issue: Fehler oder Problem",
+    )
     revision_nr = models.PositiveIntegerField("Aktuelle Revision", default=0)
     abgeleitet_von = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="abgeleitete"

@@ -9,7 +9,7 @@ Django 5.2 (LTS) mit einer SQLite-Datei. Oberfläche und HTTP-Schnittstelle für
 | `steuerung/dienst.py` | Alle Regeln: Befugnis, Reifegrad, Freigabeprüfung mit Überschneidungssperre, exklusive Übernahme, Revisionen, Prüfung, Entscheidungen; jede Änderung schreibt ein Ereignis im selben Commit |
 | `steuerung/api.py` | HTTP-Schnittstelle für Chat-Bindungen (`Authorization: Bearer kipm_…`), Wiederholungsschutz über `anfrage_kennung` (Kennung wird vor der Ausführung reserviert, gleichzeitige Wiederholungen erhalten 409) |
 | `steuerung/views.py`, `templates/`, `static/` | Oberfläche: Posteingang, Meine Aufträge, Alle Aufträge, Entscheidungen, Verlauf, Projekte als Arbeitsbereiche mit Reitern, Verbindungen als Katalog mit Anleitung; Auftrag als Seitenpanel (Fragment `auftrag_panel`) oder Seite; serverseitig gerendert, ohne JavaScript bedienbar |
-| `steuerung/mcp.py` | MCP-Endpunkt `/mcp/` für Claude Code und andere KI-Chats; reicht Werkzeugaufrufe an `api.py` weiter |
+| `steuerung/mcp.py` | MCP-Endpunkt `/mcp/<schlüssel>/` für jedes KI-Programm (Assistent: anlegen, planen, Issues, antworten, lesen); reicht Werkzeugaufrufe an `api.py` weiter |
 | `tests/` | Tests: Dienstregeln, Schnittstelle, MCP-Endpunkt, Oberfläche, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung, Spiegelerzeugung |
 | `requirements.txt` | Aus `uv.lock` exportiert für die Serverinstallation (`uv export --no-dev --extra server`) |
 

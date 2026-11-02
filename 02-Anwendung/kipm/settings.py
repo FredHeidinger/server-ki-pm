@@ -110,6 +110,9 @@ X_FRAME_OPTIONS = "DENY"
 CSRF_TRUSTED_ORIGINS = [
     f"https://{h}" for h in ALLOWED_HOSTS if h not in ("localhost", "127.0.0.1")
 ]
+# Öffentliche Adresse für KI-Programme (z. B. Tunnel mit echtem Zertifikat); leer = Heimnetzadresse.
+KIPM_OEFFENTLICHE_URL = os.environ.get("KIPM_OEFFENTLICHE_URL", "")
+
 if os.environ.get("KIPM_HINTER_PROXY") == "1":
     # Caddy terminiert TLS und setzt X-Forwarded-Proto; nur so erkennt Django HTTPS.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

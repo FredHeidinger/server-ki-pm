@@ -1,25 +1,54 @@
 {% extends "steuerung/grund.html" %}
-{% block titel %}Verbindungen{% endblock %}
-{% block brotkrumen %}Verbindungen{% endblock %}
+{% block titel %}KI verbinden{% endblock %}
+{% block brotkrumen %}KI verbinden{% endblock %}
 {% block inhalt %}
-<h1>Verbindungen</h1>
-<p class="gedaempft">Wie Chats und Werkzeuge an Server-KI-PM angebunden werden. Nichts verbindet sich ohne Eintrag hier.</p>
+<h1>KI verbinden</h1>
+<p class="gedaempft">Ein geheimer Link je KI-Programm. Damit legt die KI Projekte, Aufträge, Issues und Arbeitspakete an, plant sie aus, liest alles und beantwortet Rückfragen. Freigeben und Abnehmen bleiben bei dir in dieser Oberfläche.</p>
 
-<div class="katalog">
-{% for kennung, a in arten.items %}
-  <a class="katalogkarte" href="{% url 'verbindung' art=kennung %}">
-    <h3>{{ a.titel }}</h3>
-    <p>{{ a.kurz }}</p>
-    <span class="knopf zweit klein">Einrichten und verwalten</span>
-  </a>
-{% endfor %}
-  <div class="katalogkarte geplant">
-    <h3>GitHub Pull Requests</h3>
-    <p>Chat arbeitet auf einem Branch, der Dienst legt den Pull Request an, Abnahme führt zusammen.</p>
-    <span class="status aus">geplant</span>
-  </div>
-</div>
+{% if neuer %}
+<section class="box warn" role="alert">
+  <h2>Link für „{{ neuer.name }}“, nur jetzt sichtbar</h2>
+  <pre id="link">{{ neuer.link }}</pre>
+  <button type="button" class="knopf klein" data-kopieren="link">Link kopieren</button>
+  <table class="klein">
+    <thead><tr><th scope="col">Programm</th><th scope="col">So eintragen</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Claude Code, auch der Code-Bereich der Claude-Desktop-App</td>
+        <td><pre id="claude">claude mcp add --transport http --scope user kipm {{ neuer.link }}</pre><button type="button" class="knopf zweit klein" data-kopieren="claude">Kopieren</button> in ein Terminal einfügen, dann neuen Chat starten.</td>
+      </tr>
+      <tr>
+        <td>Codex, auch Codex in der ChatGPT-Desktop-App</td>
+        <td><pre id="codex">codex mcp add kipm --url {{ neuer.link }}</pre><button type="button" class="knopf zweit klein" data-kopieren="codex">Kopieren</button> in ein Terminal einfügen, dann Codex neu starten.</td>
+      </tr>
+      <tr>
+        <td>ChatGPT-Chat, Claude-Chat (Desktop und Web)</td>
+        <td>Einstellungen → Connectors (bei ChatGPT im Entwicklermodus) → eigenen Connector hinzufügen → Link einfügen, Anmeldung „keine“.{% if eigenes_zertifikat %} <strong>Geht erst, wenn der Server aus dem Internet erreichbar ist</strong>: diese Chats verbinden sich aus der Cloud des Anbieters.{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Danach im Chat zum Beispiel: „Zeig mir die offenen Issues in Nexus“ oder „Leg in Nexus ein Arbeitspaket für den Export an“. Geht der Link verloren: unten löschen und neu erzeugen.</p>
+</section>
+{% else %}
+<section class="box">
+  <h2>KI-Programm verbinden</h2>
+  <form method="post" action="{% url 'zugang_neu' %}" class="formular klein">
+    {% csrf_token %}
+    {% include "steuerung/formular_felder.html" with form=form %}
+    <button type="submit" class="knopf">Link erzeugen</button>
+  </form>
+</section>
+{% endif %}
 
-<h2>Alle Zugänge</h2>
+{% if eigenes_zertifikat %}
+<section class="box">
+  <h2>Einmal pro PC: dem Server vertrauen</h2>
+  <p>Der Server nutzt ein eigenes Zertifikat. Damit Claude Code und Codex ihm vertrauen, diese Zeile einmal in ein Terminal einfügen und die Rückfrage von Windows mit „Ja“ bestätigen; danach ist auch die Warnung im Browser weg. Zeigt dein Browser hier keine Zertifikatswarnung, ist das schon erledigt.</p>
+  <pre id="zertbefehl">cmd /c "curl.exe -fsSk -o %TEMP%\kipm-root.crt {{ server_url }}static/kipm-root.crt &amp;&amp; certutil -user -addstore Root %TEMP%\kipm-root.crt"</pre>
+  <button type="button" class="knopf zweit klein" data-kopieren="zertbefehl">Kopieren</button>
+</section>
+{% endif %}
+
+<h2>Verbundene KI-Programme</h2>
 {% include "steuerung/zugangstabelle.html" %}
 {% endblock %}

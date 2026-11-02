@@ -86,22 +86,19 @@ class ArbeitsortForm(forms.Form):
 
 
 class ZugangForm(forms.Form):
-    """Zugang anlegen: Name und Gültigkeit; Projekt nur beim Projektschlüssel."""
+    """Geheimen Link für ein KI-Programm erzeugen: Name und Gültigkeit."""
 
     name = forms.CharField(
-        label="Name", max_length=120, help_text="Wer oder was diesen Zugang nutzt."
+        label="Für welches KI-Programm?",
+        max_length=120,
+        help_text="Zum Beispiel „Claude Desktop“ oder „ChatGPT Desktop“; je Programm ein Link.",
     )
-    projekt = NamensAuswahl(
-        label="Projekt", queryset=Projekt.objects.filter(aktiv=True), required=False
+    gueltig_tage = forms.IntegerField(
+        label="Gültig (Tage)", min_value=1, max_value=365, initial=365
     )
-    gueltig_tage = forms.IntegerField(label="Gültig (Tage)", min_value=1, max_value=365, initial=90)
 
-    def __init__(self, *args, projektpflicht: bool = False, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if projektpflicht:
-            self.fields["projekt"].required = True
-        else:
-            del self.fields["projekt"]
         _stufen(self)
 
 

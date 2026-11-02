@@ -21,7 +21,7 @@
   {% for p in seitenleiste_projekte %}
   <a class="projektlink" href="{% url 'projekt_detail' kennung=p.kennung %}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}aria-current="page"{% endif %}><span class="sym">▪</span> {{ p.name }}</a>
   {% endfor %}
-  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}><span class="sym">⚿</span> Verbindungen</a></p>
+  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}><span class="sym">⚿</span> KI verbinden</a></p>
 </nav>
 <main id="inhalt">
 <header class="kopfzeile">

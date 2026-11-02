@@ -58,8 +58,10 @@ class Akteur:
     bindung: ChatBindung | None
     name: str
     ist_owner: bool
-    projekt: Projekt | None = None  # Projekt der Bindung; bei PC-Zugang aus dem Ordner
+    projekt: Projekt | None = None  # Projekt der Bindung; bei PC-Zugang aus Ordner oder Angabe
     ordner: str = ""
+    # PC-Zugang: KI-Assistent des Owners; plant und legt an, gibt aber nie frei und nimmt nie ab.
+    ist_assistent: bool = False
 
     @classmethod
     def aus_benutzer(cls, benutzer: AbstractBaseUser) -> "Akteur":
@@ -81,6 +83,7 @@ class Akteur:
             ist_owner=False,
             projekt=projekt or bindung.projekt,
             ordner=ordner,
+            ist_assistent=bindung.art == ChatBindung.ART_PC,
         )
 
     @property
@@ -138,14 +141,23 @@ def _owner_erforderlich(akteur: Akteur, handlung: str) -> None:
         raise KeinZugriff(f"{handlung} darf nur der Owner.")
 
 
+def _planung_erforderlich(akteur: Akteur, handlung: str) -> None:
+    """Anlegen und Planen: Owner oder sein KI-Assistent; Freigabe und Abnahme bleiben beim Owner."""
+    if not (akteur.ist_owner or akteur.ist_assistent):
+        raise KeinZugriff(f"{handlung} darf nur der Owner oder sein KI-Assistent (PC-Zugang).")
+
+
 def _mensch_erforderlich(akteur: Akteur, handlung: str) -> None:
     if not akteur.ist_mensch:
         raise KeinZugriff(f"{handlung} darf nur ein Mensch.")
 
 
 def _projekt_sichtbar(akteur: Akteur, projekt: Projekt) -> None:
-    """Chats sehen nur ihr Projekt (aus Bindung oder Ordner); Fremdes gilt als nicht vorhanden."""
-    if akteur.bindung is not None and (akteur.projekt is None or akteur.projekt.pk != projekt.pk):
+    """Projektschlüssel sehen nur ihr Projekt; Fremdes gilt als nicht vorhanden. Der Assistent
+    (PC-Zugang) sieht alle Projekte."""
+    if akteur.bindung is None or akteur.ist_assistent:
+        return
+    if akteur.projekt is None or akteur.projekt.pk != projekt.pk:
         raise KeinZugriff("Nicht gefunden.")
 
 
@@ -206,7 +218,7 @@ def projekt_registrieren(
     module: list[tuple[str, str]] | None = None,
 ) -> Projekt:
     """Projekt mit optionalen Modulen anlegen. Erteilt keinem Chat Rechte."""
-    _owner_erforderlich(akteur, "Projekte registrieren")
+    _planung_erforderlich(akteur, "Projekte registrieren")
     kennung = slugify(kennung)
     if not kennung:
         raise DienstFehler("Die Kennung darf nur Buchstaben, Ziffern und Bindestriche enthalten.")
@@ -233,7 +245,7 @@ def projekt_registrieren(
 
 
 def modul_anlegen(akteur: Akteur, projekt: Projekt, *, kennung: str, name: str) -> Modul:
-    _owner_erforderlich(akteur, "Module anlegen")
+    _planung_erforderlich(akteur, "Module anlegen")
     kennung = slugify(kennung)
     if not kennung or not name.strip():
         raise DienstFehler("Kennung und Name sind erforderlich.")
@@ -262,7 +274,7 @@ def arbeitsort_anlegen(
     pfad: str = "",
     repository: str = "",
 ) -> Arbeitsort:
-    _owner_erforderlich(akteur, "Arbeitsorte anlegen")
+    _planung_erforderlich(akteur, "Arbeitsorte anlegen")
     kennung = slugify(kennung)
     if not kennung or not name.strip():
         raise DienstFehler("Kennung und Name sind erforderlich.")
@@ -470,11 +482,20 @@ def projekt_fuer_ordner(ordner: str) -> tuple[Projekt | None, Arbeitsort | None]
 
 
 def auftraege_fuer_bindung(
-    bindung: ChatBindung, projekt: Projekt, *, nur_meine: bool = False, alle: bool = False
+    bindung: ChatBindung,
+    projekt: Projekt | None,
+    *,
+    nur_meine: bool = False,
+    alle: bool = False,
+    typ: str | None = None,
 ):
-    """Aufträge des Projekts: standardmäßig alle offenen, wahlweise nur übernehmbare und
-    eigene, oder einschließlich abgeschlossener."""
-    qs = Auftrag.objects.filter(projekt=projekt).select_related("projekt", "modul")
+    """Aufträge des Projekts (ohne Projekt: aller Projekte): standardmäßig alle offenen,
+    wahlweise nur übernehmbare und eigene, oder einschließlich abgeschlossener."""
+    qs = Auftrag.objects.select_related("projekt", "modul")
+    if projekt is not None:
+        qs = qs.filter(projekt=projekt)
+    if typ:
+        qs = qs.filter(typ=typ)
     if nur_meine:
         qs = qs.filter(
             Q(zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None)
@@ -622,6 +643,7 @@ def wunsch_erfassen(
     abgeleitet_von: Auftrag | None = None,
     entscheidung: Entscheidung | None = None,
     erzwingen: bool = False,
+    typ: str = Auftrag.TYP_AUFTRAG,
 ) -> Auftrag:
     """Wunsch als Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; Freigabe bleibt
     beim Owner. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer ``erzwingen``."""
@@ -630,6 +652,8 @@ def wunsch_erfassen(
         raise DienstFehler("Der Titel darf nicht leer sein.")
     if modul is not None and modul.projekt_id != projekt.pk:
         raise DienstFehler("Das Modul gehört nicht zu diesem Projekt.")
+    if typ not in dict(Auftrag.TYPEN):
+        raise DienstFehler("Die Art muss „auftrag“ oder „issue“ sein.")
     if not erzwingen:
         doppelt = doppelte_auftraege(projekt, titel)
         if doppelt:
@@ -644,6 +668,7 @@ def wunsch_erfassen(
             modul=modul,
             titel=titel.strip(),
             prioritaet=prioritaet,
+            typ=typ,
             revision_nr=1,
             abgeleitet_von=abgeleitet_von,
             entscheidung=entscheidung,
@@ -656,7 +681,7 @@ def wunsch_erfassen(
             erstellt_von_name=akteur.name,
             anlass="Wunsch erfasst",
         )
-        anlass = "Wunsch"
+        anlass = "Issue" if typ == Auftrag.TYP_ISSUE else "Wunsch"
         if abgeleitet_von is not None:
             anlass = f"abgeleitet aus {abgeleitet_von.nummer}"
         if entscheidung is not None:
@@ -699,9 +724,10 @@ def auftrag_bearbeiten(
     prioritaet: str,
     modul: Modul | None,
     anlass: str = "",
+    typ: str | None = None,
 ) -> Revision:
     """Neue Revision anlegen. Freigabe erlischt; laufende Bearbeitung wird zur Klärung."""
-    _owner_erforderlich(akteur, "Aufträge bearbeiten")
+    _planung_erforderlich(akteur, "Aufträge bearbeiten")
     if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
         raise Konflikt(
             f"Ein Auftrag im Zustand „{auftrag.get_zustand_display()}“ kann nicht geändert werden."
@@ -712,6 +738,8 @@ def auftrag_bearbeiten(
         raise DienstFehler("Das Modul gehört nicht zu diesem Projekt.")
     if not titel.strip():
         raise DienstFehler("Der Titel darf nicht leer sein.")
+    if typ is not None and typ not in dict(Auftrag.TYPEN):
+        raise DienstFehler("Die Art muss „auftrag“ oder „issue“ sein.")
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
         if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
@@ -736,6 +764,8 @@ def auftrag_bearbeiten(
         auftrag.titel = titel.strip()
         auftrag.prioritaet = prioritaet
         auftrag.modul = modul
+        if typ is not None:
+            auftrag.typ = typ
         auftrag.revision_nr = nummer
         folge = ""
         if auftrag.zustand == Auftrag.FREIGEGEBEN:
@@ -771,7 +801,7 @@ def auftrag_bearbeiten(
 def vorgaenger_eintragen(
     akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag, grund: str = ""
 ) -> None:
-    _owner_erforderlich(akteur, "Abhängigkeiten eintragen")
+    _planung_erforderlich(akteur, "Abhängigkeiten eintragen")
     if vorgaenger.pk == auftrag.pk:
         raise DienstFehler("Ein Auftrag kann nicht von sich selbst abhängen.")
     if vorgaenger.projekt_id != auftrag.projekt_id:
@@ -805,7 +835,7 @@ def vorgaenger_eintragen(
 
 
 def vorgaenger_entfernen(akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag) -> None:
-    _owner_erforderlich(akteur, "Abhängigkeiten entfernen")
+    _planung_erforderlich(akteur, "Abhängigkeiten entfernen")
     with transaction.atomic():
         geloescht, _ = Abhaengigkeit.objects.filter(auftrag=auftrag, vorgaenger=vorgaenger).delete()
         if not geloescht:
@@ -824,7 +854,7 @@ def vorgaenger_entfernen(akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag) 
 
 
 def pruefer_festlegen(akteur: Akteur, auftrag: Auftrag, pruefer) -> None:
-    _owner_erforderlich(akteur, "Prüfer festlegen")
+    _planung_erforderlich(akteur, "Prüfer festlegen")
     if not pruefer.is_active:
         raise DienstFehler("Der Prüfer muss ein aktives Benutzerkonto sein.")
     with transaction.atomic():
@@ -1194,7 +1224,7 @@ def fehler_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str)
 
 def rueckfrage_beantworten(akteur: Akteur, auftrag: Auftrag, text: str) -> Meldung:
     """Antwort des Menschen auf Rückfrage, Hindernis oder Fehler; hebt die Blockade auf."""
-    _owner_erforderlich(akteur, "Rückfragen beantworten")
+    _planung_erforderlich(akteur, "Rückfragen beantworten")
     if not text.strip():
         raise DienstFehler("Die Antwort darf nicht leer sein.")
     with transaction.atomic():

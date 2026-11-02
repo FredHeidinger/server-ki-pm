@@ -10,13 +10,23 @@ import hashlib
 import json
 from functools import wraps
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, JsonResponse
+from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from . import dienst
-from .models import AnfrageKennung, Auftrag, ChatBindung, Entscheidung, Modul
+from .models import (
+    AnfrageKennung,
+    Arbeitsort,
+    Auftrag,
+    ChatBindung,
+    Entscheidung,
+    Modul,
+    Projekt,
+)
 
 
 def _fehler(status: int, text: str) -> JsonResponse:
@@ -36,13 +46,12 @@ def bindung_erforderlich(view):
         ordner = request.headers.get("X-KIPM-Ordner", "").strip()
         projekt = bindung.projekt
         arbeitsort = None
-        if bindung.art == bindung.ART_PC:
-            if not ordner:
-                return _fehler(
-                    400,
-                    "PC-Zugang: Kopfzeile X-KIPM-Ordner (Arbeitsordner) fehlt; "
-                    "daraus ergibt sich das Projekt.",
-                )
+        kennung = request.headers.get("X-KIPM-Projekt", "").strip()
+        if bindung.art == bindung.ART_PC and kennung:
+            projekt = Projekt.objects.filter(kennung=kennung, aktiv=True).first()
+            if projekt is None:
+                return _fehler(404, f"Projekt „{kennung}“ gibt es nicht; kipm_projekte zeigt alle.")
+        elif bindung.art == bindung.ART_PC and ordner:
             projekt, arbeitsort = dienst.projekt_fuer_ordner(ordner)
             if projekt is None:
                 dienst.ordner_unbekannt_melden(bindung, ordner)
@@ -60,6 +69,17 @@ def bindung_erforderlich(view):
         return view(request, *args, **kwargs)
 
     return innen
+
+
+def _projekt_noetig(request: HttpRequest) -> Projekt:
+    """Projekt der Anfrage; der PC-Zugang nennt es per Kennung oder Arbeitsordner."""
+    if request.projekt is None:
+        kennungen = ", ".join(Projekt.objects.filter(aktiv=True).values_list("kennung", flat=True))
+        raise dienst.DienstFehler(
+            "Welches Projekt? „projekt“ (Kennung) oder „ordner“ angeben. "
+            f"Vorhanden: {kennungen or 'keine'}."
+        )
+    return request.projekt
 
 
 def _json(request: HttpRequest) -> dict:
@@ -153,6 +173,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
         "titel": auftrag.titel,
         "projekt": auftrag.projekt.kennung,
         "modul": str(auftrag.modul.kennung) if auftrag.modul else None,
+        "art": auftrag.typ,
         "zustand": auftrag.zustand,
         "prioritaet": auftrag.prioritaet,
         "revision": auftrag.revision_nr,
@@ -193,6 +214,9 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                     for m in auftrag.meldungen.all()[:20]
                 ],
                 "letzte_pruefung": _letzte_pruefung(auftrag),
+                "fuer_freigabe_fehlt": [
+                    p.text for p in dienst.freigabepruefung(auftrag) if not p.erfuellt
+                ],
             }
         )
     return daten
@@ -221,8 +245,8 @@ def _letzte_pruefung(auftrag: Auftrag) -> dict | None:
 @bindung_erforderlich
 @_behandeln
 def projekt_lesen(request: HttpRequest) -> JsonResponse:
-    """Das Projekt der Anfrage (aus Bindung oder Arbeitsordner) mit Modulen und Arbeitsorten."""
-    p = request.projekt
+    """Das Projekt der Anfrage (aus Bindung, Kennung oder Arbeitsordner) mit Modulen und Orten."""
+    p = _projekt_noetig(request)
     return JsonResponse(
         {
             "ok": True,
@@ -258,16 +282,19 @@ def projekt_lesen(request: HttpRequest) -> JsonResponse:
 def meine_auftraege(request: HttpRequest) -> JsonResponse:
     """Alle offenen Aufträge des Projekts; ``?nur_meine=1`` nur übernehmbare und eigene,
     ``?alle=1`` auch abgeschlossene."""
+    if request.projekt is None and not request.akteur.ist_assistent:
+        raise dienst.KeinZugriff("Nicht gefunden.")
     auftraege = dienst.auftraege_fuer_bindung(
         request.bindung,
         request.projekt,
         nur_meine=request.GET.get("nur_meine") == "1",
         alle=request.GET.get("alle") == "1",
+        typ=request.GET.get("art") or None,
     )
     return JsonResponse(
         {
             "ok": True,
-            "projekt": request.projekt.kennung,
+            "projekt": request.projekt.kennung if request.projekt else "alle",
             "bindung": request.bindung.name,
             "auftraege": [_auftrag_json(a) for a in auftraege],
         }
@@ -281,8 +308,9 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
 @_behandeln
 def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     """Chat legt einen Wunsch als Entwurf an; Freigabe bleibt beim Owner.
-    Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``."""
-    projekt = request.projekt
+    Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``.
+    ``art`` „issue“ legt ein Issue (Fehler oder Problem) an."""
+    projekt = _projekt_noetig(request)
     modul = None
     if daten.get("modul"):
         modul = Modul.objects.filter(projekt=projekt, kennung=str(daten["modul"])).first()
@@ -299,6 +327,7 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         modul=modul,
         prioritaet=prioritaet,
         erzwingen=bool(daten.get("erzwingen", False)),
+        typ=str(daten.get("art") or Auftrag.TYP_AUFTRAG),
     )
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
@@ -449,7 +478,7 @@ def _entscheidung_json(e: Entscheidung) -> dict:
 @_behandeln
 def entscheidungen(request: HttpRequest) -> JsonResponse:
     liste = (
-        Entscheidung.objects.filter(betroffene_projekte=request.projekt)
+        Entscheidung.objects.filter(betroffene_projekte=_projekt_noetig(request))
         .exclude(zustand=Entscheidung.ZURUECKGEZOGEN)
         .distinct()
     )
@@ -469,7 +498,7 @@ def entscheidung_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
         titel=str(daten.get("titel", "")),
         text=str(daten.get("text", "")),
         verweis=str(daten.get("verweis", "")),
-        projekte=[request.projekt],
+        projekte=[_projekt_noetig(request)],
     )
     return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)}, status=201)
 
@@ -482,8 +511,138 @@ def entscheidung_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
 def entscheidung_bestaetigen(
     request: HttpRequest, daten: dict, entscheidung_id: int
 ) -> JsonResponse:
+    projekt = _projekt_noetig(request)
     e = Entscheidung.objects.filter(pk=entscheidung_id).first()
-    if e is None or not e.betroffene_projekte.filter(pk=request.projekt.pk).exists():
+    if e is None or not e.betroffene_projekte.filter(pk=projekt.pk).exists():
         raise dienst.KeinZugriff("Nicht gefunden.")
-    dienst.uebernahme_bestaetigen(request.akteur, e, request.projekt)
+    dienst.uebernahme_bestaetigen(request.akteur, e, projekt)
     return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)})
+
+
+# --- Assistent (PC-Zugang): Projekte anlegen, Aufträge planen, Rückfragen beantworten --------
+
+
+def _projekt_json(p: Projekt) -> dict:
+    return {
+        "kennung": p.kennung,
+        "name": p.name,
+        "beschreibung": p.beschreibung,
+        "module": [{"kennung": m.kennung, "name": m.name} for m in p.module.filter(aktiv=True)],
+        "arbeitsorte": [
+            {"kennung": o.kennung, "name": o.name, "pfad": o.pfad}
+            for o in p.arbeitsorte.filter(aktiv=True)
+        ],
+        "offene_auftraege": p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count(),
+    }
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
+def projekte(request: HttpRequest) -> JsonResponse:
+    """Alle Projekte (Assistent) oder das eine Projekt des Projektschlüssels."""
+    if request.akteur.ist_assistent:
+        liste = list(Projekt.objects.filter(aktiv=True).order_by("name"))
+    else:
+        liste = [request.projekt]
+    return JsonResponse({"ok": True, "projekte": [_projekt_json(p) for p in liste]})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
+    name = str(daten.get("name", ""))
+    p = dienst.projekt_registrieren(
+        request.akteur,
+        kennung=str(daten.get("kennung") or slugify(name)),
+        name=name,
+        beschreibung=str(daten.get("beschreibung", "")),
+        module=dienst.module_aus_text(_liste(daten.get("module"))),
+    )
+    return JsonResponse({"ok": True, "projekt": _projekt_json(p)}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def modul_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
+    projekt = _projekt_noetig(request)
+    name = str(daten.get("name", ""))
+    dienst.modul_anlegen(
+        request.akteur, projekt, kennung=str(daten.get("kennung") or slugify(name)), name=name
+    )
+    return JsonResponse({"ok": True, "projekt": _projekt_json(projekt)}, status=201)
+
+
+PLANFELDER = ("beschreibung", "ziel", "nicht_ziele", "schreibumfang", "quellen", "abnahmekriterien")
+
+
+def _nach_kennung(modell, projekt: Projekt, wert, was: str):
+    if not wert:
+        return None
+    treffer = modell.objects.filter(projekt=projekt, kennung=str(wert)).first()
+    if treffer is None:
+        raise dienst.DienstFehler(f"{was} „{wert}“ gibt es in diesem Projekt nicht.")
+    return treffer
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Auftrag zum Arbeitspaket planen oder ändern; nur angegebene Felder ändern sich. Eine
+    bestehende Freigabe erlischt dabei. Freigeben und Abnehmen gehen nur in der Oberfläche."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    rev = auftrag.aktuelle_revision
+    werte = {feld: getattr(rev, feld) for feld in PLANFELDER}
+    for feld in PLANFELDER:
+        if feld in daten:
+            werte[feld] = _liste(daten[feld])
+    modul = auftrag.modul
+    if "modul" in daten:
+        modul = _nach_kennung(Modul, auftrag.projekt, daten["modul"], "Modul")
+    arbeitsort = rev.arbeitsort
+    if "arbeitsort" in daten:
+        arbeitsort = _nach_kennung(Arbeitsort, auftrag.projekt, daten["arbeitsort"], "Arbeitsort")
+    prioritaet = str(daten.get("prioritaet") or auftrag.prioritaet)
+    if prioritaet not in dict(Auftrag.PRIO):
+        raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
+    if set(daten) - {"pruefer", "anfrage_kennung"}:
+        dienst.auftrag_bearbeiten(
+            request.akteur,
+            auftrag,
+            titel=str(daten.get("titel") or auftrag.titel),
+            arbeitsort=arbeitsort,
+            prioritaet=prioritaet,
+            modul=modul,
+            anlass=str(daten.get("anlass") or "Geplant durch KI-Assistent"),
+            typ=str(daten["art"]) if daten.get("art") else None,
+            **werte,
+        )
+    if daten.get("pruefer"):
+        pruefer = get_user_model().objects.filter(username=str(daten["pruefer"])).first()
+        if pruefer is None:
+            raise dienst.DienstFehler(f"Benutzer „{daten['pruefer']}“ gibt es nicht.")
+        dienst.pruefer_festlegen(request.akteur, auftrag, pruefer)
+    auftrag.refresh_from_db()
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def antworten(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Antwort des Owners (über seinen Assistenten) auf Rückfrage, Hindernis oder Fehler."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    dienst.rueckfrage_beantworten(request.akteur, auftrag, str(daten.get("text", "")))
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})

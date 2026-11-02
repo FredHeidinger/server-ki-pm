@@ -1,6 +1,6 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}Verbindung prüfen{% endblock %}
-{% block brotkrumen %}<a href="{% url 'verbindungen' %}">Verbindungen</a> › {{ b.name }}{% endblock %}
+{% block brotkrumen %}<a href="{% url 'verbindungen' %}">KI verbinden</a> › {{ b.name }}{% endblock %}
 {% block inhalt %}
 <h1>Verbindung prüfen: {{ b.name }}</h1>
 <section class="box {% if b.widerrufen_am or b.gueltig_bis < jetzt %}warn{% endif %}">
@@ -23,5 +23,5 @@
   <table class="klein"><tbody>{% for e in ereignisse %}<tr><td>{{ e.zeitpunkt|date:"d.m.Y H:i" }}</td><td>{{ e.projekt.name|default:"–" }}</td><td>{{ e.objekt_typ }} <code>{{ e.objekt_kennung }}</code></td><td>{{ e.ereignis }}</td><td>{{ e.anlass|default:"–" }}</td></tr>{% endfor %}</tbody></table>
   {% else %}<p class="gedaempft">Noch keine Ereignisse.</p>{% endif %}
 </section>
-<p><a class="knopf zweit" href="{% url 'verbindungen' %}">← Verbindungen</a></p>
+<p><a class="knopf zweit" href="{% url 'verbindungen' %}">← KI verbinden</a></p>
 {% endblock %}

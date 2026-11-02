@@ -7,6 +7,7 @@ Seitenpanel (Fragment) oder als eigene Seite.
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
@@ -937,62 +938,25 @@ def entscheidung_aktion(request: HttpRequest, entscheidung_id: int, aktion: str)
 
 # --- Verbindungen --------------------------------------------------------------------------
 
-VERBINDUNGSARTEN = {
-    "mcp": {
-        "titel": "Claude Code (MCP)",
-        "kurz": "Ein Befehl auf deinem PC, dann hat jeder Claude-Code-Chat die Werkzeuge von Server-KI-PM; das Projekt erkennt er am Ordner.",
-        "zugangsart": ChatBindung.ART_PC,
-        "notiz": "Claude Code (Benutzereinstellungen)",
-        "voraussetzungen": [
-            "Claude Code ist installiert (Befehl „claude“ funktioniert).",
-            "Dieser PC erreicht den Server im Heimnetz.",
-        ],
-    },
-    "http": {
-        "titel": "HTTP-Schnittstelle (eigene Integration)",
-        "kurz": "Für Skripte, Automatisierungen (z. B. n8n) oder eigene Werkzeuge: dieselben Regeln, direkt über HTTPS.",
-        "zugangsart": ChatBindung.ART_PROJEKT,
-        "notiz": "eigene Integration",
-        "voraussetzungen": ["Das Werkzeug kann HTTPS-Anfragen mit Kopfzeilen senden."],
-    },
-}
+
+def _link_basis(request: HttpRequest) -> str:
+    """Adresse, unter der KI-Programme den Server erreichen (öffentlicher Name, sobald es ihn gibt)."""
+    basis = settings.KIPM_OEFFENTLICHE_URL or f"{request.scheme}://{request.get_host()}/"
+    return basis.rstrip("/") + "/"
 
 
 @login_required
 def verbindungen(request: HttpRequest) -> HttpResponse:
+    neuer = request.session.pop("neuer_link", None)
     return render(
         request,
         "steuerung/verbindungen.html",
         {
-            "arten": VERBINDUNGSARTEN,
-            **_zugaenge(ChatBindung.objects.all()),
-        },
-    )
-
-
-@login_required
-def verbindung(request: HttpRequest, art: str) -> HttpResponse:
-    if art not in VERBINDUNGSARTEN:
-        raise Http404
-    info = VERBINDUNGSARTEN[art]
-    neuer = request.session.pop("neuer_schluessel", None)
-    if neuer and neuer.get("art") != art:
-        neuer = None
-    form = ZugangForm(
-        prefix="zugang",
-        initial={"name": {"mcp": "Claude Code auf meinem PC", "http": "Integration"}[art]},
-        projektpflicht=info["zugangsart"] == ChatBindung.ART_PROJEKT,
-    )
-    return render(
-        request,
-        "steuerung/verbindung.html",
-        {
-            "art": art,
-            "info": info,
-            "form": form,
-            "neuer_schluessel": neuer,
+            "form": ZugangForm(prefix="zugang"),
+            "neuer": neuer,
             "server_url": f"{request.scheme}://{request.get_host()}/",
-            **_zugaenge(ChatBindung.objects.filter(art=info["zugangsart"])),
+            "eigenes_zertifikat": not settings.KIPM_OEFFENTLICHE_URL,
+            **_zugaenge(ChatBindung.objects.all()),
         },
     )
 
@@ -1000,35 +964,28 @@ def verbindung(request: HttpRequest, art: str) -> HttpResponse:
 @login_required
 @require_POST
 def zugang_neu(request: HttpRequest) -> HttpResponse:
-    art = request.POST.get("art", "")
-    if art not in VERBINDUNGSARTEN:
-        raise Http404
-    info = VERBINDUNGSARTEN[art]
-    form = ZugangForm(
-        request.POST, prefix="zugang", projektpflicht=info["zugangsart"] == ChatBindung.ART_PROJEKT
-    )
+    """Geheimen Link für ein KI-Programm erzeugen; er wird genau einmal angezeigt."""
+    form = ZugangForm(request.POST, prefix="zugang")
     if form.is_valid():
         d = form.cleaned_data
         try:
             bindung, schluessel = dienst.bindung_anlegen(
                 _akteur(request),
-                d.get("projekt") if info["zugangsart"] == ChatBindung.ART_PROJEKT else None,
+                None,
                 name=d["name"],
                 gueltig_tage=d["gueltig_tage"],
-                notiz=info["notiz"],
+                notiz="geheimer Link im KI-Programm",
             )
-            request.session["neuer_schluessel"] = {
-                "art": art,
+            request.session["neuer_link"] = {
                 "name": bindung.name,
-                "schluessel": schluessel,
-                "projekt": bindung.projekt.kennung if bindung.projekt else "",
+                "link": f"{_link_basis(request)}mcp/{schluessel}/",
             }
         except dienst.DienstFehler as fehler:
             _fehler_anzeigen(request, fehler)
     else:
         for feld, fehler in form.errors.items():
             messages.error(request, f"{feld}: {fehler[0]}")
-    return redirect("verbindung", art=art)
+    return redirect("verbindungen")
 
 
 @login_required

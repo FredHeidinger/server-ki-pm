@@ -1,4 +1,4 @@
-"""MCP-Endpunkt: Claude Code bindet sich mit einem Befehl an; dieselben Regeln wie die Schnittstelle."""
+"""MCP-Endpunkt: jedes KI-Programm verbindet sich mit einem geheimen Link; gleiche Regeln."""
 
 import json
 
@@ -14,16 +14,15 @@ def _rpc(client, schluessel, methode, params=None, rid: int | None = 1, **kopf):
     if rid is not None:
         nachricht["id"] = rid
     return client.post(
-        reverse("mcp"),
+        reverse("mcp_link", kwargs={"schluessel": schluessel}),
         data=json.dumps(nachricht),
         content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {schluessel}",
         **kopf,
     )
 
 
-def _werkzeug(client, schluessel, name, **argumente):
-    antwort = _rpc(client, schluessel, "tools/call", {"name": name, "arguments": argumente})
+def _werkzeug(client, schluessel, werkzeug, /, **argumente):
+    antwort = _rpc(client, schluessel, "tools/call", {"name": werkzeug, "arguments": argumente})
     assert antwort.status_code == 200
     ergebnis = antwort.json()["result"]
     return ergebnis["isError"], json.loads(ergebnis["content"][0]["text"])
@@ -65,7 +64,8 @@ def test_initialize_werkzeugliste_und_benachrichtigung(client, pc_zugang):
     namen = {w["name"] for w in werkzeuge}
     assert {"kipm_auftraege", "kipm_uebernehmen", "kipm_ergebnis"} <= namen
     assert not {"kipm_freigeben", "kipm_abnehmen"} & namen
-    assert all("ordner" in w["inputSchema"]["required"] for w in werkzeuge)
+    assert all("projekt" in w["inputSchema"]["properties"] for w in werkzeuge)
+    assert {"kipm_projekte", "kipm_planen", "kipm_antworten", "kipm_projekt_anlegen"} <= namen
 
     fehler = _rpc(client, pc_zugang.klartext, "gibt/es/nicht").json()
     assert fehler["error"]["code"] == -32601
@@ -161,3 +161,83 @@ def test_zugang_loeschen_nur_wenn_unbenutzt(owner_client, akteur, projekt, freig
     owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": bindung.pk}))
     seite = owner_client.get(reverse("verbindungen")).content.decode()
     assert "Archiv: 1" in seite and "bleibt für den Verlauf" in seite
+
+
+def test_schluessel_auch_als_kopfzeile(client, pc_zugang):
+    antwort = client.post(
+        reverse("mcp"),
+        data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {pc_zugang.klartext}",
+    )
+    assert antwort.status_code == 200 and antwort.json()["result"] == {}
+
+
+def test_assistent_plant_issues_und_arbeitspakete(client, owner, projekt, projekt_b, pc_zugang):
+    k = pc_zugang.klartext
+    fehler, daten = _werkzeug(client, k, "kipm_projekte")
+    assert not fehler and {p["kennung"] for p in daten["projekte"]} == {"synth-a", "synth-b"}
+
+    fehler, daten = _werkzeug(
+        client, k, "kipm_projekt_anlegen", name="Nexus Web", module=["Kern", "ui: Oberfläche"]
+    )
+    assert not fehler and daten["projekt"]["kennung"] == "nexus-web"
+    assert [m["kennung"] for m in daten["projekt"]["module"]] == ["kern", "ui"]
+    fehler, _ = _werkzeug(client, k, "kipm_modul_anlegen", projekt="nexus-web", name="Export")
+    assert not fehler
+
+    fehler, daten = _werkzeug(
+        client,
+        k,
+        "kipm_auftrag_anlegen",
+        titel="Login hängt",
+        text="Spinner bleibt stehen",
+        art="issue",
+    )
+    assert fehler and "Welches Projekt" in daten["fehler"]
+    fehler, daten = _werkzeug(
+        client,
+        k,
+        "kipm_auftrag_anlegen",
+        projekt="synth-a",
+        titel="Login hängt",
+        text="Spinner bleibt stehen",
+        art="issue",
+    )
+    assert not fehler and daten["auftrag"]["art"] == "issue"
+    nr = daten["auftrag"]["nummer"]
+    assert daten["auftrag"]["fuer_freigabe_fehlt"]
+
+    fehler, daten = _werkzeug(client, k, "kipm_auftraege", art="issue")
+    assert not fehler and [a["nummer"] for a in daten["auftraege"]] == [nr]
+
+    fehler, daten = _werkzeug(
+        client,
+        k,
+        "kipm_planen",
+        auftrag=nr,
+        ziel="Login endet nach höchstens 3 s",
+        nicht_ziele="keine",
+        arbeitsort="repo",
+        schreibumfang=["src/login/**"],
+        abnahmekriterien=["Spinner verschwindet", "Fehlertext sichtbar"],
+        pruefer=owner.get_username(),
+    )
+    assert not fehler, daten
+    assert daten["auftrag"]["fuer_freigabe_fehlt"] == []
+    assert daten["auftrag"]["beschreibung"] == "Spinner bleibt stehen"  # unverändert übernommen
+    auftrag = Auftrag.objects.get(pk=daten["auftrag"]["id"])
+    assert auftrag.zustand == Auftrag.ENTWURF and dienst.freigabefaehig(auftrag)
+
+    akteur = dienst.Akteur.aus_bindung(pc_zugang)
+    with pytest.raises(dienst.KeinZugriff):
+        dienst.auftrag_freigeben(akteur, auftrag)
+
+
+def test_assistent_beantwortet_rueckfrage(client, akteur, projekt, freigegeben, bindung, pc_zugang):
+    dienst.auftrag_uebernehmen(dienst.Akteur.aus_bindung(bindung), freigegeben, 2)
+    dienst.rueckfrage_melden(dienst.Akteur.aus_bindung(bindung), freigegeben, 2, "Welche Sprache?")
+    fehler, daten = _werkzeug(
+        client, pc_zugang.klartext, "kipm_antworten", auftrag=freigegeben.nummer, text="Deutsch"
+    )
+    assert not fehler and daten["auftrag"]["zustand"] == Auftrag.IN_ARBEIT
