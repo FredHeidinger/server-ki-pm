@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """kipm – Kommandozeile für Projektchats. Spricht nur mit der HTTP-Schnittstelle.
 
-Einrichtung (vom Owner je Chat):
-  KIPM_URL        Basisadresse des Dienstes, z. B. https://kipm.example/ oder http://127.0.0.1:8765/
-  KIPM_SCHLUESSEL Zugangsschlüssel der Chat-Bindung (kipm_…); nie in Dateien oder Chats kopieren.
+Einrichtung (vom Owner je Chat): Datei .kipm im Projektordner (oder Benutzerordner) mit
+  [kipm]
+  url = https://<server>/
+  schluessel = kipm_...          Zugangsschlüssel der Chat-Bindung, nie in den Chat kopieren
+  ca = kipm-root.crt             optional: Zertifikat der internen CA (vom Server: /static/kipm-root.crt)
+Umgebungsvariablen KIPM_URL, KIPM_SCHLUESSEL, KIPM_CA_DATEI gehen vor; KIPM_TLS_PRUEFEN=0 schaltet
+die Zertifikatsprüfung ab (nur im Heimnetz vertretbar).
 
 Befehle:
   projekt                                Projekt mit Modulen und Arbeitsorten
@@ -29,12 +33,15 @@ Nur die Standardbibliothek; keine Abhängigkeiten.
 """
 
 import argparse
+import configparser
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 for _strom in (sys.stdout, sys.stderr):
     _reconfigure = getattr(_strom, "reconfigure", None)
@@ -42,18 +49,64 @@ for _strom in (sys.stdout, sys.stderr):
         _reconfigure(encoding="utf-8")
 
 
+def _konfig() -> dict:
+    """Einstellungen aus Datei .kipm (im Arbeitsordner, sonst im Benutzerordner); Umgebung geht vor.
+
+    Beispiel .kipm:
+        [kipm]
+        url = https://192.168.254.157/
+        schluessel = kipm_...
+        ca = kipm-root.crt
+    """
+    werte: dict = {}
+    for pfad in (Path.cwd() / ".kipm", Path.home() / ".kipm"):
+        if pfad.is_file():
+            cp = configparser.ConfigParser()
+            cp.read(pfad, encoding="utf-8")
+            if cp.has_section("kipm"):
+                werte = {k: v for k, v in cp["kipm"].items()}
+                werte["_ordner"] = str(pfad.parent)
+            break
+    for schluessel, env in (
+        ("url", "KIPM_URL"),
+        ("schluessel", "KIPM_SCHLUESSEL"),
+        ("ca", "KIPM_CA_DATEI"),
+    ):
+        if os.environ.get(env):
+            werte[schluessel] = os.environ[env]
+    return werte
+
+
+KONFIG = _konfig()
+
+
 def _basis() -> str:
-    url = os.environ.get("KIPM_URL", "").rstrip("/")
+    url = (KONFIG.get("url") or "").rstrip("/")
     if not url:
-        sys.exit("KIPM_URL fehlt (z. B. http://127.0.0.1:8765/).")
+        sys.exit("Adresse fehlt: KIPM_URL setzen oder in .kipm unter [kipm] url eintragen.")
     return url
 
 
 def _schluessel() -> str:
-    schluessel = os.environ.get("KIPM_SCHLUESSEL", "").strip()
+    schluessel = (KONFIG.get("schluessel") or "").strip()
     if not schluessel:
-        sys.exit("KIPM_SCHLUESSEL fehlt (Zugangsschlüssel der Chat-Bindung).")
+        sys.exit(
+            "Zugangsschlüssel fehlt: KIPM_SCHLUESSEL setzen oder in .kipm unter [kipm] schluessel eintragen."
+        )
     return schluessel
+
+
+def _tls_kontext():
+    """Vertrauen in das Serverzertifikat: eigene CA-Datei, oder Prüfung aus (nur im Heimnetz)."""
+    if os.environ.get("KIPM_TLS_PRUEFEN") == "0":
+        return ssl._create_unverified_context()
+    ca = KONFIG.get("ca")
+    if ca:
+        ca_pfad = Path(ca)
+        if not ca_pfad.is_absolute() and KONFIG.get("_ordner"):
+            ca_pfad = Path(KONFIG["_ordner"]) / ca_pfad
+        return ssl.create_default_context(cafile=str(ca_pfad))
+    return ssl.create_default_context()
 
 
 def _nummer(text: str) -> int:
@@ -77,7 +130,7 @@ def anfrage(pfad: str, daten: dict | None = None) -> tuple[int, dict]:
         url, data=koerper, headers=kopf, method="POST" if daten is not None else "GET"
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as antwort:
+        with urllib.request.urlopen(req, timeout=30, context=_tls_kontext()) as antwort:
             return antwort.status, json.loads(antwort.read().decode("utf-8"))
     except urllib.error.HTTPError as fehler:
         try:

@@ -65,6 +65,13 @@ systemctl restart caddy
 echo "== Tägliche Sicherung 03:30"
 printf '30 3 * * * root /usr/local/sbin/kipm-sichern >>/var/log/kipm-sicherung.log 2>&1\n' > /etc/cron.d/kipm-sicherung
 
+echo "== Zertifikat der internen CA für Clients bereitstellen (/static/kipm-root.crt)"
+for _ in $(seq 1 15); do
+  WURZEL=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  [ -f "$WURZEL" ] && { install -m 0644 "$WURZEL" "$DATEN/static/kipm-root.crt"; break; }
+  sleep 1
+done
+
 sleep 2
 systemctl is-active --quiet kipm && echo "   Dienst kipm läuft." || { echo "!! Dienst kipm läuft nicht: journalctl -u kipm"; exit 3; }
 systemctl is-active --quiet caddy && echo "   Proxy caddy läuft." || { echo "!! caddy läuft nicht: journalctl -u caddy"; exit 3; }

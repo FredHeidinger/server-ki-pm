@@ -81,3 +81,25 @@ def test_cli_ablauf(live_server, owner):
 
     falsch = kipm(live_server, "kipm_x_y", "meine-auftraege")
     assert falsch.returncode == 1 and "ungültig" in falsch.stdout
+
+
+@pytest.mark.django_db(transaction=True)
+def test_cli_liest_konfigurationsdatei(live_server, owner, tmp_path):
+    akteur = dienst.Akteur.aus_benutzer(owner)
+    projekt = dienst.projekt_registrieren(akteur, kennung="cli-k", name="CLI Konfig")
+    _, schluessel = dienst.bindung_anlegen(akteur, projekt, name="Konfig-Chat")
+    (tmp_path / ".kipm").write_text(
+        "[kipm]\n" + f"url = {live_server.url}\n" + f"schluessel = {schluessel}\n",
+        encoding="utf-8",
+    )
+    umgebung = {k: v for k, v in os.environ.items() if not k.startswith("KIPM_")}
+    ergebnis = subprocess.run(
+        [sys.executable, "-I", str(KIPM), "projekt"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=umgebung,
+        cwd=tmp_path,
+        timeout=60,
+    )
+    assert ergebnis.returncode == 0 and "CLI Konfig" in ergebnis.stdout

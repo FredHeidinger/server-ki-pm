@@ -1,22 +1,36 @@
-# Anleitung für einen Projektchat
+# Einen Projektchat anbinden
 
-Diesen Text in den Projektchat einfügen. Vorher auf der Projektseite in Server-KI-PM einen Chat-Zugang anlegen und den angezeigten Schlüssel bereithalten (er wird nur einmal angezeigt). Den Schlüssel dem Chat als Umgebungsvariable geben, nicht in den Chattext schreiben.
+## Einmal je Projekt (du, im Browser)
 
-```text
-Du arbeitest an das Projekt <PROJEKTNAME> und bist über Server-KI-PM an die zentrale Auftragssteuerung angebunden.
+1. In Server-KI-PM die Projektseite öffnen, unter „Chat-Zugänge“ einen Zugang anlegen. Der Schlüssel wird nur einmal angezeigt.
+2. Im Projektordner des Chats (dort, wo der Chat arbeitet) eine Datei `.kipm` anlegen, mit einem Editor, nicht im Chat:
 
-Einrichtung (einmalig in diesem Chat):
-1. Lade das Werkzeug: curl -fsSL -o kipm.py https://raw.githubusercontent.com/FredHeidinger/server-ki-pm/main/02-Anwendung/client/kipm.py
-2. Die Umgebungsvariablen KIPM_URL (https://192.168.254.157/) und KIPM_SCHLUESSEL sind gesetzt; der Server nutzt ein Zertifikat einer internen CA, verwende bei Bedarf die Umgebungsvariable PYTHONHTTPSVERIFY=0 nur im Heimnetz.
-3. Prüfe den Zugang mit: python kipm.py projekt
-
-Regeln:
-- Bevor du etwas anlegst: python kipm.py auftraege ansehen, damit nichts doppelt entsteht. Gleiche Titel werden vom Dienst abgewiesen.
-- Neue Aufgaben legst du nur als Entwurf an: python kipm.py auftrag-anlegen --titel "…" --text "…" --modul <modulkennung> --prio hoch|mittel|niedrig. Modulkennungen zeigt python kipm.py projekt.
-- Arbeiten darfst du nur an Aufträgen, die freigegeben sind und die du übernommen hast: python kipm.py uebernehmen A-<nr> --revision <rev>. Halte dich genau an Ziel, Schreibumfang und Abnahmekriterien aus python kipm.py lesen A-<nr>.
-- Während der Arbeit: python kipm.py fortschritt A-<nr> --revision <rev> "…" oder bei Problemen hindernis.
-- Am Ende: python kipm.py ergebnis A-<nr> --revision <rev> --zusammenfassung "…" --datei "pfad@commit" --pruefung "befehl: ergebnis" --luecken "…".
-- Änderungswünsche am Auftrag selbst meldest du mit vorschlag; du änderst Umfang, Freigabe oder Abnahme nie selbst.
+```ini
+[kipm]
+url = https://192.168.254.157/
+schluessel = HIER-DEN-SCHLUESSEL-EINFUEGEN
+ca = kipm-root.crt
 ```
 
-Platzhalter `<PROJEKTNAME>` ersetzen. Die Adresse anpassen, falls der Server unter einem anderen Namen erreichbar ist.
+3. `.kipm` und `kipm-root.crt` in die `.gitignore` des Projekts eintragen, damit der Schlüssel nie ins Repository gelangt.
+
+## Im Projektchat (diesen Text einfügen)
+
+```text
+Du bist über Server-KI-PM an die zentrale Auftragssteuerung angebunden. Die Datei .kipm im Projektordner enthält Adresse und Zugang; lies sie nicht vor und kopiere sie nirgendwohin.
+
+Einrichtung (einmalig in diesem Chat, im Projektordner):
+1. curl -fsSL -o kipm.py https://raw.githubusercontent.com/FredHeidinger/server-ki-pm/main/02-Anwendung/client/kipm.py
+2. curl -k -fsSL -o kipm-root.crt https://192.168.254.157/static/kipm-root.crt
+3. python kipm.py projekt   (zeigt Projekt, Module und Arbeitsorte; damit ist der Zugang geprüft)
+
+Regeln:
+- Vor jedem Anlegen zuerst: python kipm.py auftraege  (alle offenen Aufträge; nichts doppelt anlegen)
+- Neue Aufgabe nur als Entwurf: python kipm.py auftrag-anlegen --titel "…" --text "…" --modul <modulkennung> --prio hoch|mittel|niedrig
+- Arbeiten nur an freigegebenen Aufträgen nach Übernahme: python kipm.py uebernehmen A-<nr> --revision <rev>; Ziel, Schreibumfang und Abnahmekriterien aus python kipm.py lesen A-<nr> sind bindend.
+- Unterwegs: python kipm.py fortschritt A-<nr> --revision <rev> "…" oder hindernis.
+- Zum Schluss: python kipm.py ergebnis A-<nr> --revision <rev> --zusammenfassung "…" --datei "pfad@commit" --pruefung "befehl: ergebnis" --luecken "…"
+- Änderungswünsche am Auftrag mit vorschlag melden; Umfang, Freigabe und Abnahme änderst du nie selbst.
+```
+
+Dann sagst du dem Chat in normalen Worten, was du willst, zum Beispiel: „Lege im Modul Core einen Auftrag an: Anmeldefehler verständlich melden.“ Der Chat legt den Entwurf an, du konkretisierst und gibst im Browser frei, der Chat übernimmt und arbeitet.
