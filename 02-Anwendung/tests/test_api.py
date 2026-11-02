@@ -213,3 +213,10 @@ def test_chat_legt_auftrag_an_und_sieht_alle_offenen(freigegeben, bindung):
     assert len(alle) == 3 and {a["zustand"] for a in alle} == {"FREIGEGEBEN", "ENTWURF"}
     meine = c.get("/api/auftraege/?nur_meine=1").json()["auftraege"]
     assert [a["nummer"] for a in meine] == [freigegeben.nummer]
+
+
+def test_projekt_lesen(projekt, bindung):
+    antwort = api(bindung.klartext).get("/api/projekt/").json()
+    assert antwort["projekt"]["kennung"] == "synth-a"
+    assert antwort["projekt"]["module"] == [{"kennung": "kern", "name": "Kern"}]
+    assert antwort["projekt"]["arbeitsorte"][0]["kennung"] == "repo"

@@ -188,6 +188,33 @@ def _letzte_pruefung(auftrag: Auftrag) -> dict | None:
 @require_GET
 @bindung_erforderlich
 @_behandeln
+def projekt_lesen(request: HttpRequest) -> JsonResponse:
+    """Das gebundene Projekt mit Modulen und Arbeitsorten."""
+    p = request.bindung.projekt
+    return JsonResponse(
+        {
+            "ok": True,
+            "projekt": {
+                "kennung": p.kennung,
+                "name": p.name,
+                "beschreibung": p.beschreibung,
+                "module": [
+                    {"kennung": m.kennung, "name": m.name} for m in p.module.filter(aktiv=True)
+                ],
+                "arbeitsorte": [
+                    {"kennung": o.kennung, "name": o.name, "rechner": o.rechner, "pfad": o.pfad}
+                    for o in p.arbeitsorte.filter(aktiv=True)
+                ],
+            },
+            "bindung": request.bindung.name,
+        }
+    )
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
 def meine_auftraege(request: HttpRequest) -> JsonResponse:
     """Alle offenen Aufträge des Projekts; ``?nur_meine=1`` nur übernehmbare und eigene,
     ``?alle=1`` auch abgeschlossene."""

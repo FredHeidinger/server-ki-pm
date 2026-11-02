@@ -6,6 +6,7 @@ Einrichtung (vom Owner je Chat):
   KIPM_SCHLUESSEL Zugangsschlüssel der Chat-Bindung (kipm_…); nie in Dateien oder Chats kopieren.
 
 Befehle:
+  projekt                                Projekt mit Modulen und Arbeitsorten
   auftraege [--alle]                     alle offenen Aufträge des Projekts (mit --alle auch abgeschlossene)
   meine-auftraege                        nur übernehmbare und eigene Aufträge
   auftrag-anlegen --titel "…" --text "…" [--modul kennung] [--prio hoch|mittel|niedrig] [--erzwingen]
@@ -96,7 +97,18 @@ def _ausgeben(status: int, antwort: dict, roh: bool) -> int:
         return 1
     if antwort.get("wiederholt"):
         print("Hinweis: Anfrage war bereits ausgeführt; gespeicherte Antwort.")
-    if "auftraege" in antwort:
+    if "projekt" in antwort and isinstance(antwort["projekt"], dict):
+        p = antwort["projekt"]
+        print(f"Projekt {p['name']} ({p['kennung']}) · Bindung {antwort['bindung']}")
+        print(
+            "Module: "
+            + (", ".join(f"{m['name']} [{m['kennung']}]" for m in p["module"]) or "keine")
+        )
+        print(
+            "Arbeitsorte: "
+            + (", ".join(f"{o['name']} [{o['kennung']}]" for o in p["arbeitsorte"]) or "keine")
+        )
+    elif "auftraege" in antwort:
         print(f"Projekt {antwort['projekt']} · Bindung {antwort['bindung']}")
         if not antwort["auftraege"]:
             print("Keine Aufträge.")
@@ -158,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kipm", description="Chat-Zugang zu Server-KI-PM")
     unter = p.add_subparsers(dest="befehl", required=True)
 
+    unter.add_parser("projekt", parents=[gemeinsam])
     unter.add_parser("meine-auftraege", parents=[gemeinsam])
     s = unter.add_parser("auftraege", parents=[gemeinsam])
     s.add_argument("--alle", action="store_true")
@@ -193,7 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     kennung = a.kennung or uuid.uuid4().hex
 
-    if a.befehl == "meine-auftraege":
+    if a.befehl == "projekt":
+        status, antwort = anfrage("projekt/")
+    elif a.befehl == "meine-auftraege":
         status, antwort = anfrage("auftraege/?nur_meine=1")
     elif a.befehl == "auftraege":
         status, antwort = anfrage("auftraege/?alle=1" if a.alle else "auftraege/")

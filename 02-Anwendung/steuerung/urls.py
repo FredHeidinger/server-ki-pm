@@ -51,6 +51,7 @@ urlpatterns = [
     ),
     path("verlauf/", views.verlauf, name="verlauf"),
     # HTTP-Schnittstelle für Chats
+    path("api/projekt/", api.projekt_lesen, name="api_projekt"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),
     path("api/auftraege/<int:auftrag_id>/", api.auftrag_lesen, name="api_auftrag"),
