@@ -240,3 +240,8 @@ a.katalogkarte:hover { border-color: var(--akzent); }
 pre { background: #0f172a; color: #e5e7eb; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .archiv { margin-top: 14px; } .archiv summary { cursor: pointer; color: var(--gedaempft); font-size: 14px; margin-bottom: 8px; }
 td.aktionen { white-space: nowrap; }
+.programmwahl { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.programmkarte { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 14px 16px; cursor: pointer; font: inherit; color: var(--text); }
+.programmkarte:hover, .programmkarte:focus-visible { border-color: var(--akzent); }
+.programmkarte strong { font-size: 16px; } .programmkarte span { color: var(--gedaempft); font-size: 14px; }
+.anleitung { padding-left: 22px; margin: 0 0 12px; } .anleitung li { margin-bottom: 10px; } .anleitung pre { margin: 6px 0; }

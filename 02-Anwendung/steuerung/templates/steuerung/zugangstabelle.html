@@ -1,14 +1,12 @@
 {% comment %}Zugangsliste; erwartet bindungen (gültig) und archiv (widerrufen oder abgelaufen).{% endcomment %}
 {% if bindungen %}
 <table class="klein">
-  <thead><tr><th scope="col">Name</th><th scope="col">Art</th><th scope="col">Projekt</th><th scope="col">Zuletzt verwendet</th><th scope="col">Gültig bis</th><th scope="col"></th></tr></thead>
+  <thead><tr><th scope="col">Programm</th><th scope="col">Zuletzt verwendet</th><th scope="col">Gültig bis</th><th scope="col"></th></tr></thead>
   <tbody>
   {% for b in bindungen %}
   <tr>
-    <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span></td>
-    <td>{% if b.art == "pc" %}KI-Programm (Link){% else %}Projektschlüssel (alt){% endif %}</td>
-    <td>{% if b.projekt %}{{ b.projekt.name }}{% elif b.letztes_projekt %}je nach Ordner, zuletzt {{ b.letztes_projekt.name }}{% else %}je nach Ordner{% endif %}</td>
-    <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% else %}nie{% endif %}</td>
+    <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span>{% if b.projekt %}<br><span class="gedaempft">alter Schlüssel nur für {{ b.projekt.name }}</span>{% endif %}</td>
+    <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% if b.letztes_projekt %} · {{ b.letztes_projekt.name }}{% endif %}{% else %}noch nie{% endif %}</td>
     <td>{{ b.gueltig_bis|date:"d.m.Y" }}</td>
     <td class="aktionen">
       <a class="knopf zweit klein" href="{% url 'zugang_pruefen' bindung_id=b.pk %}">Prüfen</a>
@@ -22,17 +20,16 @@
   {% endfor %}
   </tbody>
 </table>
-{% elif archiv %}<p class="gedaempft">Kein gültiger Zugang.</p>{% else %}<div class="leer">Noch kein KI-Programm verbunden.</div>{% endif %}
+{% elif archiv %}<p class="gedaempft">Kein gültiger Zugang.</p>{% else %}<div class="leer">Noch kein Programm verbunden. Oben ein Programm wählen.</div>{% endif %}
 {% if archiv %}
 <details class="archiv">
   <summary>Archiv: {{ archiv|length }} widerrufene oder abgelaufene Zugänge</summary>
   <table class="klein">
-    <thead><tr><th scope="col">Name</th><th scope="col">Projekt</th><th scope="col">Zuletzt verwendet</th><th scope="col">Zustand</th><th scope="col"></th></tr></thead>
+    <thead><tr><th scope="col">Programm</th><th scope="col">Zuletzt verwendet</th><th scope="col">Zustand</th><th scope="col"></th></tr></thead>
     <tbody>
     {% for b in archiv %}
     <tr>
       <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span></td>
-      <td>{% if b.projekt %}{{ b.projekt.name }}{% else %}je nach Ordner{% endif %}</td>
       <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% else %}nie{% endif %}</td>
       <td>{% if b.widerrufen_am %}<span class="status aus">widerrufen {{ b.widerrufen_am|date:"d.m.Y" }}</span>{% else %}<span class="status aus">abgelaufen</span>{% endif %}</td>
       <td>{% if b.loeschbar %}<form method="post" action="{% url 'bindung_loeschen' bindung_id=b.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ request.path }}"><button type="submit" class="knopf zweit klein gefahr">Löschen</button></form>{% else %}<span class="gedaempft">bleibt für den Verlauf</span>{% endif %}</td>

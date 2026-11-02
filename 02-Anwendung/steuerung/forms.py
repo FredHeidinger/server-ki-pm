@@ -85,23 +85,6 @@ class ArbeitsortForm(forms.Form):
         _stufen(self)
 
 
-class ZugangForm(forms.Form):
-    """Geheimen Link für ein KI-Programm erzeugen: Name und Gültigkeit."""
-
-    name = forms.CharField(
-        label="Für welches KI-Programm?",
-        max_length=120,
-        help_text="Zum Beispiel „Claude Desktop“ oder „ChatGPT Desktop“; je Programm ein Link.",
-    )
-    gueltig_tage = forms.IntegerField(
-        label="Gültig (Tage)", min_value=1, max_value=365, initial=365
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        _stufen(self)
-
-
 class WunschForm(forms.Form):
     projekt = NamensAuswahl(label="Projekt", queryset=Projekt.objects.filter(aktiv=True))
     modul = NamensAuswahl(label="Modul", queryset=Modul.objects.none(), required=False)

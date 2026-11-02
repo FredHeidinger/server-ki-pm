@@ -28,7 +28,6 @@ from .forms import (
     ModulForm,
     ProjektForm,
     WunschForm,
-    ZugangForm,
     listen_zusammenfuehren,
 )
 from .models import (
@@ -939,22 +938,71 @@ def entscheidung_aktion(request: HttpRequest, entscheidung_id: int, aktion: str)
 # --- Verbindungen --------------------------------------------------------------------------
 
 
+# Je Programm: Name in der Zugangsliste, Befehl zum Eintragen (mit {link}), Befehl zum Entfernen
+# eines früheren Eintrags und was nach dem Einfügen zu tun ist.
+KI_PROGRAMME = {
+    "claude": {
+        "titel": "Claude",
+        "hinweis": "Claude-Desktop-App und Claude Code",
+        "name": "Claude Desktop",
+        "eintragen": "claude mcp add --transport http --scope user kipm {link}",
+        "entfernen": "claude mcp remove kipm --scope user",
+        "neustart": "Die Claude-App ganz schließen und wieder öffnen.",
+        "frage": "Neuen Chat öffnen und schreiben: „Zeig mir alle Projekte in Server-KI-PM.“",
+    },
+    "codex": {
+        "titel": "ChatGPT",
+        "hinweis": "Codex in der ChatGPT-Desktop-App",
+        "name": "ChatGPT Desktop (Codex)",
+        "eintragen": "codex mcp add kipm --url {link}",
+        "entfernen": "codex mcp remove kipm",
+        "neustart": "Die ChatGPT-App ganz schließen und wieder öffnen.",
+        "frage": "Codex öffnen und schreiben: „Zeig mir alle Projekte in Server-KI-PM.“",
+    },
+    "anderes": {
+        "titel": "Anderes Programm",
+        "hinweis": "jedes Programm mit MCP-Unterstützung",
+        "name": "Anderes KI-Programm",
+        "eintragen": "",
+        "entfernen": "",
+        "neustart": "",
+        "frage": "Im Programm fragen: „Zeig mir alle Projekte in Server-KI-PM.“",
+    },
+}
+
+
 def _link_basis(request: HttpRequest) -> str:
     """Adresse, unter der KI-Programme den Server erreichen (öffentlicher Name, sobald es ihn gibt)."""
     basis = settings.KIPM_OEFFENTLICHE_URL or f"{request.scheme}://{request.get_host()}/"
     return basis.rstrip("/") + "/"
 
 
+def _einrichtungszeile(request: HttpRequest, programm: dict, link: str) -> str:
+    """Eine Zeile für das Terminal: Zertifikat vertrauen (solange der Server ein eigenes hat),
+    einen früheren Eintrag entfernen und den Link eintragen. Läuft in cmd und PowerShell."""
+    teile = []
+    if not settings.KIPM_OEFFENTLICHE_URL:
+        crt = f"{request.scheme}://{request.get_host()}/static/kipm-root.crt"
+        teile.append(
+            rf"curl.exe -fsSk -o %TEMP%\kipm-root.crt {crt} && "
+            rf"certutil -user -addstore Root %TEMP%\kipm-root.crt >nul & "
+        )
+    eintragen = programm["eintragen"].format(link=link)
+    teile.append(f"({programm['entfernen']} >nul 2>&1 & {eintragen})")
+    return f'cmd /c "{"".join(teile)}"'
+
+
 @login_required
 def verbindungen(request: HttpRequest) -> HttpResponse:
     neuer = request.session.pop("neuer_link", None)
+    if neuer:
+        neuer["programm"] = KI_PROGRAMME.get(neuer["art"], KI_PROGRAMME["anderes"])
     return render(
         request,
         "steuerung/verbindungen.html",
         {
-            "form": ZugangForm(prefix="zugang"),
+            "programme": KI_PROGRAMME,
             "neuer": neuer,
-            "server_url": f"{request.scheme}://{request.get_host()}/",
             "eigenes_zertifikat": not settings.KIPM_OEFFENTLICHE_URL,
             **_zugaenge(ChatBindung.objects.all()),
         },
@@ -964,27 +1012,30 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def zugang_neu(request: HttpRequest) -> HttpResponse:
-    """Geheimen Link für ein KI-Programm erzeugen; er wird genau einmal angezeigt."""
-    form = ZugangForm(request.POST, prefix="zugang")
-    if form.is_valid():
-        d = form.cleaned_data
-        try:
-            bindung, schluessel = dienst.bindung_anlegen(
-                _akteur(request),
-                None,
-                name=d["name"],
-                gueltig_tage=d["gueltig_tage"],
-                notiz="geheimer Link im KI-Programm",
-            )
-            request.session["neuer_link"] = {
-                "name": bindung.name,
-                "link": f"{_link_basis(request)}mcp/{schluessel}/",
-            }
-        except dienst.DienstFehler as fehler:
-            _fehler_anzeigen(request, fehler)
-    else:
-        for feld, fehler in form.errors.items():
-            messages.error(request, f"{feld}: {fehler[0]}")
+    """Link für das gewählte KI-Programm erzeugen; Zeile und Link werden genau einmal angezeigt."""
+    art = request.POST.get("programm", "")
+    if art not in KI_PROGRAMME:
+        messages.error(request, "Bitte ein Programm wählen.")
+        return redirect("verbindungen")
+    programm = KI_PROGRAMME[art]
+    try:
+        bindung, schluessel = dienst.bindung_anlegen(
+            _akteur(request),
+            None,
+            name=programm["name"],
+            gueltig_tage=365,
+            notiz="geheimer Link im KI-Programm",
+        )
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+        return redirect("verbindungen")
+    link = f"{_link_basis(request)}mcp/{schluessel}/"
+    request.session["neuer_link"] = {
+        "art": art,
+        "name": bindung.name,
+        "link": link,
+        "zeile": _einrichtungszeile(request, programm, link) if programm["eintragen"] else "",
+    }
     return redirect("verbindungen")
 
 

@@ -1,5 +1,7 @@
 """Oberfläche: Seiten rendern, Formulare wirken, Aktionen laufen über den Dienst, kein HTML-Durchgriff."""
 
+import html
+
 import pytest
 from django.urls import reverse
 
@@ -172,16 +174,15 @@ def test_selbstabnahme_in_oberflaeche_gesperrt(
 
 
 def test_link_wird_einmal_angezeigt_und_ist_widerrufbar(owner_client):
-    antwort = owner_client.post(
-        reverse("zugang_neu"), {"zugang-name": "ChatGPT Desktop", "zugang-gueltig_tage": 30}
-    )
+    antwort = owner_client.post(reverse("zugang_neu"), {"programm": "anderes"})
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "nur jetzt sichtbar" in seite and "http://testserver/mcp/kipm_" in seite
+    assert "nur jetzt angezeigt" in seite and "http://testserver/mcp/kipm_" in seite
+    assert "Streamable HTTP" in seite
     nochmal = owner_client.get(reverse("verbindungen")).content.decode()
-    assert "/mcp/kipm_" not in nochmal and "Link erzeugen" in nochmal
+    assert "/mcp/kipm_" not in nochmal and "Welches Programm?" in nochmal
     from steuerung.models import ChatBindung
 
-    bindung = ChatBindung.objects.get(name="ChatGPT Desktop")
+    bindung = ChatBindung.objects.get(name="Anderes KI-Programm")
     assert bindung.art == "pc" and bindung.projekt is None
     owner_client.post(reverse("bindung_widerrufen", kwargs={"bindung_id": bindung.pk}))
     bindung.refresh_from_db()
@@ -310,17 +311,21 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
 
 def test_eine_seite_ki_verbinden(owner_client, settings):
     seite = owner_client.get(reverse("verbindungen")).content.decode()
-    assert "KI verbinden" in seite and "certutil -user -addstore Root" in seite
-    for alt in ("Kommandozeile", "Wo gespeichert", "HTTP-Schnittstelle", "Claude Code (MCP)"):
+    assert "Welches Programm?" in seite and "Claude" in seite and "ChatGPT" in seite
+    for alt in ("Kommandozeile", "Wo gespeichert", "HTTP-Schnittstelle", "certutil"):
         assert alt not in seite
-    antwort = owner_client.post(
-        reverse("zugang_neu"), {"zugang-name": "Claude Desktop", "zugang-gueltig_tage": 90}
-    )
-    assert antwort.status_code == 302
+    assert owner_client.post(reverse("zugang_neu"), {"programm": "gibts-nicht"}).status_code == 302
+
+    antwort = owner_client.post(reverse("zugang_neu"), {"programm": "claude"})
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "claude mcp add --transport http --scope user kipm http://testserver/mcp/kipm_" in seite
-    assert "codex mcp add kipm --url http://testserver/mcp/kipm_" in seite
-    assert "Connector" in seite and "aus dem Internet erreichbar" in seite
+    zeile = html.unescape(seite.split('<pre id="zeile">')[1].split("</pre>")[0])
+    assert zeile.startswith('cmd /c "curl.exe -fsSk -o %TEMP%')
+    assert "certutil -user -addstore Root" in zeile
+    assert (
+        "(claude mcp remove kipm --scope user >nul 2>&1 & claude mcp add --transport http" in zeile
+    )
+    assert "http://testserver/mcp/kipm_" in zeile
+    assert "Rechtsklick" in seite and "Zertifikat installieren" in seite
     from steuerung.models import ChatBindung
 
     pc = ChatBindung.objects.get(name="Claude Desktop")
@@ -329,10 +334,12 @@ def test_eine_seite_ki_verbinden(owner_client, settings):
     ).content.decode()
     assert "noch nie" in pruefen
 
+    antwort = owner_client.post(reverse("zugang_neu"), {"programm": "codex"})
+    seite = owner_client.get(antwort["Location"]).content.decode()
+    assert "codex mcp add kipm --url http://testserver/mcp/kipm_" in seite
+
     settings.KIPM_OEFFENTLICHE_URL = "https://kipm.example.net"
-    antwort = owner_client.post(
-        reverse("zugang_neu"), {"zugang-name": "ChatGPT", "zugang-gueltig_tage": 90}
-    )
+    antwort = owner_client.post(reverse("zugang_neu"), {"programm": "claude"})
     seite = owner_client.get(antwort["Location"]).content.decode()
     assert "https://kipm.example.net/mcp/kipm_" in seite and "certutil" not in seite
 

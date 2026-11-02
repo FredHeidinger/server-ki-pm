@@ -3,52 +3,48 @@
 {% block brotkrumen %}KI verbinden{% endblock %}
 {% block inhalt %}
 <h1>KI verbinden</h1>
-<p class="gedaempft">Ein geheimer Link je KI-Programm. Damit legt die KI Projekte, Aufträge, Issues und Arbeitspakete an, plant sie aus, liest alles und beantwortet Rückfragen. Freigeben und Abnehmen bleiben bei dir in dieser Oberfläche.</p>
+<p class="gedaempft">Verbindet ein KI-Programm auf diesem PC mit Server-KI-PM. Die KI kann dann Projekte, Aufträge, Issues und Arbeitspakete anlegen, planen und lesen. Freigeben und Abnehmen bleiben bei dir.</p>
 
 {% if neuer %}
 <section class="box warn" role="alert">
-  <h2>Link für „{{ neuer.name }}“, nur jetzt sichtbar</h2>
-  <pre id="link">{{ neuer.link }}</pre>
-  <button type="button" class="knopf klein" data-kopieren="link">Link kopieren</button>
-  <table class="klein">
-    <thead><tr><th scope="col">Programm</th><th scope="col">So eintragen</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>Claude Code, auch der Code-Bereich der Claude-Desktop-App</td>
-        <td><pre id="claude">claude mcp add --transport http --scope user kipm {{ neuer.link }}</pre><button type="button" class="knopf zweit klein" data-kopieren="claude">Kopieren</button> in ein Terminal einfügen, dann neuen Chat starten.</td>
-      </tr>
-      <tr>
-        <td>Codex, auch Codex in der ChatGPT-Desktop-App</td>
-        <td><pre id="codex">codex mcp add kipm --url {{ neuer.link }}</pre><button type="button" class="knopf zweit klein" data-kopieren="codex">Kopieren</button> in ein Terminal einfügen, dann Codex neu starten.</td>
-      </tr>
-      <tr>
-        <td>ChatGPT-Chat, Claude-Chat (Desktop und Web)</td>
-        <td>Einstellungen → Connectors (bei ChatGPT im Entwicklermodus) → eigenen Connector hinzufügen → Link einfügen, Anmeldung „keine“.{% if eigenes_zertifikat %} <strong>Geht erst, wenn der Server aus dem Internet erreichbar ist</strong>: diese Chats verbinden sich aus der Cloud des Anbieters.{% endif %}</td>
-      </tr>
-    </tbody>
-  </table>
-  <p>Danach im Chat zum Beispiel: „Zeig mir die offenen Issues in Nexus“ oder „Leg in Nexus ein Arbeitspaket für den Export an“. Geht der Link verloren: unten löschen und neu erzeugen.</p>
+  <h2>{{ neuer.programm.titel }} verbinden</h2>
+  {% if neuer.zeile %}
+  <ol class="anleitung">
+    <li>Auf <strong>„Zeile kopieren“</strong> klicken.
+      <pre id="zeile">{{ neuer.zeile }}</pre>
+      <button type="button" class="knopf klein" data-kopieren="zeile">Zeile kopieren</button></li>
+    <li>Windows-Taste drücken, <strong>Terminal</strong> tippen, Enter. Es öffnet sich ein schwarzes Fenster.</li>
+    <li>Mit <strong>Rechtsklick</strong> ins Fenster einfügen, dann <strong>Enter</strong>.</li>
+    {% if eigenes_zertifikat %}<li>Fragt Windows „Möchten Sie dieses Zertifikat installieren?“: <strong>Ja</strong>. Die Frage kommt nur beim ersten Mal.</li>{% endif %}
+    <li>{{ neuer.programm.neustart }}</li>
+    <li>{{ neuer.programm.frage }} Antwortet es mit deinen Projekten, ist es verbunden.</li>
+  </ol>
+  {% else %}
+  <ol class="anleitung">
+    <li>Auf <strong>„Link kopieren“</strong> klicken.
+      <pre id="link">{{ neuer.link }}</pre>
+      <button type="button" class="knopf klein" data-kopieren="link">Link kopieren</button></li>
+    <li>Im Programm die Einstellungen für <strong>MCP-Server</strong> oder <strong>Connectors</strong> öffnen und einen Server hinzufügen.</li>
+    <li>Art <strong>HTTP</strong> (oft „Streamable HTTP“), Adresse: den Link einfügen, Anmeldung: <strong>keine</strong>. Speichern.</li>
+    <li>{{ neuer.programm.frage }}</li>
+  </ol>
+  {% endif %}
+  <p class="gedaempft">Die Zeile enthält einen geheimen Schlüssel und wird nur jetzt angezeigt. Nicht weitergeben und nicht in Screenshots zeigen. Ging etwas schief: unten löschen und neu verbinden.</p>
+  <p><a class="knopf zweit" href="{% url 'verbindungen' %}">Fertig</a></p>
 </section>
 {% else %}
 <section class="box">
-  <h2>KI-Programm verbinden</h2>
-  <form method="post" action="{% url 'zugang_neu' %}" class="formular klein">
+  <h2>Welches Programm?</h2>
+  <form method="post" action="{% url 'zugang_neu' %}" class="programmwahl">
     {% csrf_token %}
-    {% include "steuerung/formular_felder.html" with form=form %}
-    <button type="submit" class="knopf">Link erzeugen</button>
+    {% for kennung, p in programme.items %}
+    <button type="submit" name="programm" value="{{ kennung }}" class="programmkarte"><strong>{{ p.titel }}</strong><span>{{ p.hinweis }}</span></button>
+    {% endfor %}
   </form>
+  <p class="gedaempft">ChatGPT und Claude im Browser verbinden sich aus der Cloud des Anbieters; das geht erst, wenn der Server aus dem Internet erreichbar ist.</p>
 </section>
 {% endif %}
 
-{% if eigenes_zertifikat %}
-<section class="box">
-  <h2>Einmal pro PC: dem Server vertrauen</h2>
-  <p>Der Server nutzt ein eigenes Zertifikat. Damit Claude Code und Codex ihm vertrauen, diese Zeile einmal in ein Terminal einfügen und die Rückfrage von Windows mit „Ja“ bestätigen; danach ist auch die Warnung im Browser weg. Zeigt dein Browser hier keine Zertifikatswarnung, ist das schon erledigt.</p>
-  <pre id="zertbefehl">cmd /c "curl.exe -fsSk -o %TEMP%\kipm-root.crt {{ server_url }}static/kipm-root.crt &amp;&amp; certutil -user -addstore Root %TEMP%\kipm-root.crt"</pre>
-  <button type="button" class="knopf zweit klein" data-kopieren="zertbefehl">Kopieren</button>
-</section>
-{% endif %}
-
-<h2>Verbundene KI-Programme</h2>
+<h2>Verbundene Programme</h2>
 {% include "steuerung/zugangstabelle.html" %}
 {% endblock %}
