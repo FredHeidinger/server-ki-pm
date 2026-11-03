@@ -17,9 +17,10 @@
 <ul class="projektwahl">
 {% for p in projekte %}
   <li>
-    <a class="projektwahl-karte" href="{% url 'projekt_detail' kennung=p.kennung %}">
-      <span class="projektwahl-kopf"><strong>{{ p.name }}</strong><span class="kuerzel">{{ p.kennung }}</span>{% if p.phase %}<span class="chip">{{ p.phase }}</span>{% endif %}</span>
-      <span class="gedaempft">{% if p.zweck %}{{ p.zweck|truncatechars:180 }}{% elif p.beschreibung %}{{ p.beschreibung|truncatechars:180 }}{% else %}Zweck noch nicht erfasst.{% endif %}</span>
+    <a class="projektwahl-karte" href="{% url 'projekt_detail' kennung=p.kennung %}" title="{{ p.name }}">
+      <span class="projektwahl-kopf"><strong class="projektwahl-name">{{ p.name }}</strong>{% if p.phase %}<span class="chip projektwahl-phase">{{ p.phase }}</span>{% else %}<span class="projektwahl-phase gedaempft klein">Phase –</span>{% endif %}</span>
+      <span class="kuerzel projektwahl-kuerzel">{{ p.kennung }}</span>
+      <span class="projektwahl-zweck{% if not p.zweck and not p.beschreibung %} leer-text{% endif %}">{% if p.zweck %}{{ p.zweck }}{% elif p.beschreibung %}{{ p.beschreibung }}{% else %}Zweck noch nicht erfasst.{% endif %}</span>
     </a>
   </li>
 {% endfor %}

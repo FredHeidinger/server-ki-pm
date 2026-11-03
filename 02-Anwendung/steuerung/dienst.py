@@ -60,7 +60,7 @@ class Akteur:
     ist_owner: bool
     projekt: Projekt | None = None  # Projekt der Bindung; bei PC-Zugang aus Ordner oder Angabe
     ordner: str = ""
-    # PC-Zugang: KI-Assistent des Owners; plant und legt an, gibt aber nie frei und nimmt nie ab.
+    # PC-Zugang: KI-Assistent des Owners; legt an, plant und gibt auf Freds Anweisung im Chat frei.
     ist_assistent: bool = False
 
     @classmethod
@@ -150,9 +150,12 @@ def _owner_erforderlich(akteur: Akteur, handlung: str) -> None:
 
 
 def _planung_erforderlich(akteur: Akteur, handlung: str) -> None:
-    """Anlegen und Planen: Owner oder sein KI-Assistent; Freigabe und Abnahme bleiben beim Owner."""
+    """Anlegen, Planen und Freigeben: Owner oder sein KI-Assistent (PC-Zugang); der Assistent
+    gibt nur auf Freds Anweisung im Chat frei."""
     if not (akteur.ist_owner or akteur.ist_assistent):
         raise KeinZugriff(f"{handlung} darf nur der Owner oder sein KI-Assistent (PC-Zugang).")
+    if akteur.bindung is not None and not akteur.bindung.aktiv:
+        raise KeinZugriff("Zugangsschlüssel ungültig, abgelaufen oder widerrufen.")
 
 
 def _mensch_erforderlich(akteur: Akteur, handlung: str) -> None:
@@ -252,58 +255,240 @@ def projekt_registrieren(
     return projekt
 
 
-def modul_anlegen(akteur: Akteur, projekt: Projekt, *, kennung: str, name: str) -> Modul:
+def modul_anlegen(
+    akteur: Akteur, projekt: Projekt, *, kennung: str, name: str, eltern: Modul | None = None
+) -> Modul:
+    """Modul oder, mit ``eltern``, Untermodul anlegen; beliebig tief."""
     _planung_erforderlich(akteur, "Module anlegen")
+    _projekt_sichtbar(akteur, projekt)
     kennung = slugify(kennung)
     if not kennung or not name.strip():
         raise DienstFehler("Kennung und Name sind erforderlich.")
+    if eltern is not None:
+        if eltern.projekt_id != projekt.pk:
+            raise KeinZugriff("Nicht gefunden.")
+        if not eltern.aktiv:
+            raise DienstFehler(f"Modul „{eltern.name}“ ist archiviert.")
     try:
         with transaction.atomic():
-            modul = Modul.objects.create(projekt=projekt, kennung=kennung, name=name.strip())
+            modul = Modul.objects.create(
+                projekt=projekt, kennung=kennung, name=name.strip(), eltern=eltern
+            )
             _ereignis(
                 akteur,
                 projekt=projekt,
                 objekt_typ="Modul",
                 objekt_kennung=str(modul),
-                ereignis="Modul angelegt",
+                ereignis="Untermodul angelegt" if eltern else "Modul angelegt",
+                anlass=f"unter {eltern.name}" if eltern else "",
             )
     except IntegrityError as fehler:
         raise DienstFehler(f"Modulkennung „{kennung}“ gibt es in diesem Projekt schon.") from fehler
     return modul
 
 
-def modul_aendern(akteur: Akteur, modul: Modul, *, name: str) -> None:
-    """Modul umbenennen; die Kennung bleibt, damit Verweise und KI-Aufrufe gültig bleiben."""
+def _vorfahren(modul: Modul | None) -> list[int]:
+    """Das Modul und seine Elternkette bis zur Wurzel (ids); bricht bei einem Kreis ab."""
+    kette: list[int] = []
+    while modul is not None and modul.pk not in kette:
+        kette.append(modul.pk)
+        modul = modul.eltern
+    return kette
+
+
+_UNVERAENDERT = object()
+
+
+def _modul_revision(modul: Modul, erwartete_revision) -> None:
+    if erwartete_revision is not None and int(erwartete_revision) != modul.revision:
+        raise Konflikt(
+            f"Modul „{modul.name}“ wurde inzwischen geändert (jetzt Revision "
+            f"{modul.revision}, gelesen {erwartete_revision})."
+        )
+
+
+def modul_aendern(
+    akteur: Akteur,
+    modul: Modul,
+    *,
+    name: str | None = None,
+    eltern=_UNVERAENDERT,
+    erwartete_revision: int | None = None,
+    grund: str = "",
+) -> Modul:
+    """Modul umbenennen oder umhängen (``eltern`` None = direkt unter das Projekt). Die Kennung
+    bleibt, damit Verweise und KI-Aufrufe gültig bleiben. Kein Modul unter sich selbst oder
+    eines seiner Untermodule."""
     _planung_erforderlich(akteur, "Module ändern")
-    if not name.strip():
+    _projekt_sichtbar(akteur, modul.projekt)
+    if name is not None and not name.strip():
         raise DienstFehler("Der Name darf nicht leer sein.")
     with transaction.atomic():
-        alt = modul.name
-        modul.name = name.strip()
-        modul.save(update_fields=["name"])
+        modul = Modul.objects.select_related("projekt", "eltern").get(pk=modul.pk)
+        _modul_revision(modul, erwartete_revision)
+        teile = []
+        if name is not None and name.strip() != modul.name:
+            teile.append(f"umbenannt {modul.name} → {name.strip()}")
+            modul.name = name.strip()
+        if eltern is not _UNVERAENDERT and getattr(eltern, "pk", None) != modul.eltern_id:
+            if eltern is not None:
+                # Unter Sperre frisch lesen: ein veraltetes Elternobjekt ließe einen Kreis zu.
+                eltern = Modul.objects.select_related("eltern").get(pk=eltern.pk)
+                if eltern.projekt_id != modul.projekt_id:
+                    raise KeinZugriff("Nicht gefunden.")
+                if modul.pk in _vorfahren(eltern):
+                    raise Konflikt(
+                        f"„{eltern.name}“ liegt unter „{modul.name}“; das ergäbe einen Kreis."
+                    )
+                if not eltern.aktiv:
+                    raise DienstFehler(f"Modul „{eltern.name}“ ist archiviert.")
+            teile.append(f"umgehängt unter {eltern.name if eltern else 'Gesamtes Projekt'}")
+            modul.eltern = eltern
+        if not teile:
+            return modul
+        if grund.strip():
+            teile.append(grund.strip())
+        modul.revision += 1
+        modul.save()
         _ereignis(
             akteur,
             projekt=modul.projekt,
             objekt_typ="Modul",
             objekt_kennung=str(modul),
-            ereignis="Modul umbenannt",
-            anlass=f"{alt} → {modul.name}",
+            ereignis="Modul geändert",
+            anlass="; ".join(teile),
+            revision=str(modul.revision),
         )
+    return modul
 
 
-def modul_archivieren(akteur: Akteur, modul: Modul, *, aktiv: bool) -> None:
-    """Modul archivieren oder zurückholen; Aufträge behalten ihr Modul."""
+def modul_archivieren(
+    akteur: Akteur, modul: Modul, *, aktiv: bool, erwartete_revision: int | None = None
+) -> Modul:
+    """Modul archivieren oder zurückholen; Aufträge, Funktionen und Unterlagen behalten ihr
+    Modul. Archivieren nur ohne aktive Untermodule, Zurückholen nur unter aktivem Elternmodul."""
     _planung_erforderlich(akteur, "Module archivieren")
+    _projekt_sichtbar(akteur, modul.projekt)
     with transaction.atomic():
+        modul = Modul.objects.select_related("projekt", "eltern").get(pk=modul.pk)
+        _modul_revision(modul, erwartete_revision)
+        if modul.aktiv == aktiv:
+            return modul
+        if not aktiv and modul.kinder.filter(aktiv=True).exists():
+            raise Konflikt(
+                f"„{modul.name}“ hat aktive Untermodule; zuerst diese archivieren oder umhängen."
+            )
+        if aktiv and modul.eltern is not None and not modul.eltern.aktiv:
+            raise Konflikt(f"Zuerst das Elternmodul „{modul.eltern.name}“ zurückholen.")
         modul.aktiv = aktiv
-        modul.save(update_fields=["aktiv"])
+        modul.revision += 1
+        modul.save()
         _ereignis(
             akteur,
             projekt=modul.projekt,
             objekt_typ="Modul",
             objekt_kennung=str(modul),
             ereignis="Modul wieder aktiv" if aktiv else "Modul archiviert",
+            revision=str(modul.revision),
         )
+    return modul
+
+
+def modul_teilbaum(modul: Modul) -> list[int]:
+    """Das Modul und alle seine Untermodule (ids), gleich in welchem Zustand."""
+    kinder: dict[int | None, list[int]] = {}
+    for pk, eltern_id in Modul.objects.filter(projekt_id=modul.projekt_id).values_list(
+        "pk", "eltern_id"
+    ):
+        kinder.setdefault(eltern_id, []).append(pk)
+    ergebnis: list[int] = []
+    stapel = [modul.pk]
+    while stapel:
+        pk = stapel.pop()
+        if pk in ergebnis:
+            continue
+        ergebnis.append(pk)
+        stapel.extend(kinder.get(pk, []))
+    return ergebnis
+
+
+ZAHLEN_LEER = {"funktionen": 0, "auftraege": 0, "issues": 0, "unterlagen": 0}
+
+
+@dataclass
+class Modulknoten:
+    modul: Modul
+    tiefe: int
+    kinder: list["Modulknoten"]
+    zahlen: dict  # Funktionen, Aufträge, Issues, Unterlagen – einschließlich Untermodule
+
+
+def modulbaum(projekt: Projekt) -> dict:
+    """Aktive Module als Baum unter „Gesamtes Projekt“. Die Zahlen je Knoten schließen alle
+    Untermodule ein, auch archivierte; „projektweit“ zählt, was keinem Modul zugeordnet ist."""
+    from .models import Funktion, Unterlage
+
+    module = {m.pk: m for m in projekt.module.order_by("name")}
+    eigene: dict[int | None, dict] = {}
+
+    def zaehle(modul_id, art):
+        eigene.setdefault(modul_id, dict(ZAHLEN_LEER))[art] += 1
+
+    for mid in (
+        Funktion.objects.filter(projekt=projekt)
+        .exclude(planung=Funktion.VERWORFEN)
+        .values_list("modul_id", flat=True)
+    ):
+        zaehle(mid, "funktionen")
+    for mid, typ in (
+        Auftrag.objects.filter(projekt=projekt)
+        .exclude(zustand=Auftrag.ABGEBROCHEN)
+        .values_list("modul_id", "typ")
+    ):
+        zaehle(mid, "issues" if typ == Auftrag.TYP_ISSUE else "auftraege")
+    for mid in Unterlage.objects.filter(projekt=projekt, archiviert=False).values_list(
+        "modul_id", flat=True
+    ):
+        zaehle(mid, "unterlagen")
+    kinder: dict[int | None, list[Modul]] = {}
+    for m in module.values():
+        kinder.setdefault(m.eltern_id, []).append(m)
+
+    def summe(m: Modul, weg: frozenset) -> dict:
+        # Ganzer Teilbaum, auch archivierte Untermodule; ``weg`` schützt vor Kreisen.
+        zahlen = dict(eigene.get(m.pk, ZAHLEN_LEER))
+        for k in kinder.get(m.pk, []):
+            if k.pk not in weg:
+                for art, wert in summe(k, weg | {k.pk}).items():
+                    zahlen[art] += wert
+        return zahlen
+
+    def knoten(m: Modul, tiefe: int, weg: frozenset) -> Modulknoten:
+        weg = weg | {m.pk}
+        unter = [
+            knoten(k, tiefe + 1, weg) for k in kinder.get(m.pk, []) if k.aktiv and k.pk not in weg
+        ]
+        return Modulknoten(m, tiefe, unter, summe(m, frozenset({m.pk})))
+
+    wurzeln = [knoten(m, 1, frozenset()) for m in kinder.get(None, []) if m.aktiv]
+    gesamt = dict(ZAHLEN_LEER)
+    for werte in eigene.values():
+        for art, wert in werte.items():
+            gesamt[art] += wert
+    return {
+        "knoten": wurzeln,
+        "gesamt": gesamt,
+        "projektweit": dict(eigene.get(None, ZAHLEN_LEER)),
+        "flach": _flach(wurzeln),
+    }
+
+
+def _flach(knoten: list[Modulknoten]) -> list[Modulknoten]:
+    liste: list[Modulknoten] = []
+    for k in knoten:
+        liste.append(k)
+        liste.extend(_flach(k.kinder))
+    return liste
 
 
 def arbeitsort_anlegen(
@@ -316,10 +501,19 @@ def arbeitsort_anlegen(
     pfad: str = "",
     repository: str = "",
 ) -> Arbeitsort:
+    """Arbeitsort anlegen. Legt ihn die KI an, ist er ein Vorschlag: er ordnet keinen Ordner zu
+    und zählt nicht für die Freigabe, bis ein Mensch ihn bestätigt. Schlägt die KI einen Ordner
+    vor, den das Projekt schon hat, gilt der vorhandene Arbeitsort (keine Doppelanlage)."""
     _planung_erforderlich(akteur, "Arbeitsorte anlegen")
+    _projekt_sichtbar(akteur, projekt)
     kennung = slugify(kennung)
     if not kennung or not name.strip():
         raise DienstFehler("Kennung und Name sind erforderlich.")
+    if not akteur.ist_mensch and pfad.strip():
+        norm = _ordner_normiert(pfad)
+        for vorhanden in projekt.arbeitsorte.filter(aktiv=True).exclude(pfad=""):
+            if _ordner_normiert(vorhanden.pfad) == norm:
+                return vorhanden
     try:
         with transaction.atomic():
             ort = Arbeitsort.objects.create(
@@ -329,18 +523,127 @@ def arbeitsort_anlegen(
                 rechner=rechner.strip(),
                 pfad=pfad.strip(),
                 repository=repository.strip(),
+                bestaetigt=akteur.ist_mensch,
+                vorgeschlagen_von="" if akteur.ist_mensch else akteur.name,
             )
             _ereignis(
                 akteur,
                 projekt=projekt,
                 objekt_typ="Arbeitsort",
                 objekt_kennung=str(ort),
-                ereignis="Arbeitsort angelegt",
+                ereignis="Arbeitsort angelegt" if ort.bestaetigt else "Arbeitsort vorgeschlagen",
                 anlass=f"{ort.rechner} {ort.pfad}".strip(),
             )
     except IntegrityError as fehler:
         raise DienstFehler(f"Arbeitsortkennung „{kennung}“ gibt es schon.") from fehler
     return ort
+
+
+def freie_kennung(modell, projekt: Projekt, name: str, ersatz: str) -> str:
+    """Kennung aus dem Namen, mit -2, -3 … falls schon vergeben."""
+    basis = slugify(name)[:30] or ersatz
+    kennung, nr = basis, 2
+    while modell.objects.filter(projekt=projekt, kennung=kennung).exists():
+        kennung, nr = f"{basis}-{nr}", nr + 1
+    return kennung
+
+
+def arbeitsort_aendern(
+    akteur: Akteur,
+    ort: Arbeitsort,
+    *,
+    erwartete_revision: int | None,
+    grund: str = "",
+    bestaetigen: bool = False,
+    **felder,
+) -> Arbeitsort:
+    """Name, Rechner, Ordner, Repository oder Aktiv ändern. Bestätigt wird ein Vorschlag nur
+    ausdrücklich (``bestaetigen``, das Häkchen oder „Speichern und übernehmen“), nie durch bloßes
+    Bearbeiten oder Archivieren. Ändert die KI Ordner oder Repository oder holt sie einen Ort zurück, wird
+    er wieder ein Vorschlag."""
+    _planung_erforderlich(akteur, "Arbeitsorte ändern")
+    _projekt_sichtbar(akteur, ort.projekt)
+    with transaction.atomic():
+        ort = Arbeitsort.objects.select_related("projekt").get(pk=ort.pk)
+        if erwartete_revision is not None and int(erwartete_revision) != ort.revision:
+            raise Konflikt(
+                f"Arbeitsort „{ort.name}“ wurde inzwischen geändert (jetzt Revision "
+                f"{ort.revision}, gelesen {erwartete_revision})."
+            )
+        geaendert = []
+        for feld in ("name", "rechner", "pfad", "repository"):
+            wert = felder.get(feld)
+            if wert is not None and getattr(ort, feld) != str(wert).strip():
+                setattr(ort, feld, str(wert).strip())
+                geaendert.append(feld)
+        if felder.get("aktiv") is not None and bool(felder["aktiv"]) != ort.aktiv:
+            ort.aktiv = bool(felder["aktiv"])
+            geaendert.append("aktiv")
+        if not ort.name:
+            raise DienstFehler("Der Name darf nicht leer sein.")
+        if akteur.ist_mensch and not ort.bestaetigt and bestaetigen:
+            ort.bestaetigt = True
+            geaendert.append("bestätigt")
+        elif not akteur.ist_mensch and (
+            {"pfad", "repository"} & set(geaendert) or ("aktiv" in geaendert and ort.aktiv)
+        ):
+            ort.bestaetigt = False
+            ort.vorgeschlagen_von = akteur.name
+        if not geaendert:
+            return ort
+        ort.revision += 1
+        ort.save()
+        _ereignis(
+            akteur,
+            projekt=ort.projekt,
+            objekt_typ="Arbeitsort",
+            objekt_kennung=str(ort),
+            ereignis="Arbeitsort archiviert"
+            if not ort.aktiv
+            else ("Arbeitsort geändert" if ort.bestaetigt else "Arbeitsort-Vorschlag geändert"),
+            anlass="; ".join(t for t in (", ".join(geaendert), grund.strip()) if t),
+            revision=str(ort.revision),
+        )
+    return ort
+
+
+def arbeitsort_bestaetigen(
+    akteur: Akteur, ort: Arbeitsort, *, erwartete_revision: int | None
+) -> Arbeitsort:
+    """Den Vorschlag einer KI übernehmen (das Häkchen); nur ein Mensch, und nur genau die
+    angezeigte Revision: hat die KI den Vorschlag inzwischen geändert, ist es ein Konflikt."""
+    _mensch_erforderlich(akteur, "Arbeitsorte bestätigen")
+    _owner_erforderlich(akteur, "Arbeitsorte bestätigen")
+    if erwartete_revision is None:
+        raise DienstFehler("Die angezeigte Revision des Vorschlags fehlt; Seite neu laden.")
+    return arbeitsort_aendern(akteur, ort, erwartete_revision=erwartete_revision, bestaetigen=True)
+
+
+def arbeitsort_setzen(akteur: Akteur, auftrag: Auftrag, ort: Arbeitsort) -> Revision:
+    """Arbeitsort eines Auftrags ändern; alle übrigen Angaben der aktuellen Revision bleiben.
+    Gelesen wird unter Sperre aus der Datenbank, nie aus einer womöglich veralteten Instanz."""
+    with transaction.atomic():
+        auftrag = Auftrag.objects.select_for_update().select_related("modul").get(pk=auftrag.pk)
+        rev = auftrag.aktuelle_revision
+        if rev.arbeitsort_id == ort.pk:
+            return rev
+        if not ort.aktiv:
+            raise DienstFehler(f"Arbeitsort „{ort.name}“ ist archiviert.")
+        return auftrag_bearbeiten(
+            akteur,
+            auftrag,
+            titel=auftrag.titel,
+            beschreibung=rev.beschreibung,
+            ziel=rev.ziel,
+            nicht_ziele=rev.nicht_ziele,
+            arbeitsort=ort,
+            schreibumfang=rev.schreibumfang,
+            quellen=rev.quellen,
+            abnahmekriterien=rev.abnahmekriterien,
+            prioritaet=auftrag.prioritaet,
+            modul=auftrag.modul,
+            anlass=f"Arbeitsort {ort.name}",
+        )
 
 
 def _schluessel_hash(schluessel: str) -> str:
@@ -450,10 +753,7 @@ def ordner_zuordnen(akteur: Akteur, anfrage: OrdnerAnfrage, projekt: Projekt) ->
     _owner_erforderlich(akteur, "Ordner zuordnen")
     ordner = anfrage.ordner.rstrip("/\\")
     name = ordner.replace("\\", "/").rsplit("/", 1)[-1] or ordner
-    basis = slugify(name)[:30] or "ordner"
-    kennung, nr = basis, 2
-    while Arbeitsort.objects.filter(projekt=projekt, kennung=kennung).exists():
-        kennung, nr = f"{basis}-{nr}", nr + 1
+    kennung = freie_kennung(Arbeitsort, projekt, name, "ordner")
     with transaction.atomic():
         ort = arbeitsort_anlegen(
             akteur, projekt, kennung=kennung, name=name, rechner=anfrage.bindung.name, pfad=ordner
@@ -506,13 +806,14 @@ def _ordner_normiert(pfad: str) -> str:
 
 
 def projekt_fuer_ordner(ordner: str) -> tuple[Projekt | None, Arbeitsort | None]:
-    """Projekt und Arbeitsort, dessen Ordnerpfad den Arbeitsordner umfasst (längster Treffer)."""
+    """Projekt und Arbeitsort, dessen Ordnerpfad den Arbeitsordner umfasst (längster Treffer).
+    Unbestätigte Vorschläge einer KI ordnen nichts zu."""
     norm = _ordner_normiert(ordner)
     if not norm:
         return None, None
     bester: Arbeitsort | None = None
     for ort in (
-        Arbeitsort.objects.filter(aktiv=True, projekt__aktiv=True)
+        Arbeitsort.objects.filter(aktiv=True, bestaetigt=True, projekt__aktiv=True)
         .exclude(pfad="")
         .select_related("projekt")
     ):
@@ -568,6 +869,8 @@ class Pruefpunkt:
     text: str
     hinweis: str = ""
     vorgaenger_angebot: Auftrag | None = None
+    # Oberfläche zeigt an diesem Punkt die Auswahl vorhandener Arbeitsorte und „+ Arbeitsort“.
+    arbeitsort_wahl: bool = False
 
 
 def _ueberschneidungen(auftrag: Auftrag, revision: Revision) -> list[tuple[Auftrag, str, str]]:
@@ -609,6 +912,27 @@ def _erzeugt_zyklus(auftrag: Auftrag, neuer_vorgaenger: Auftrag) -> bool:
     return False
 
 
+def _arbeitsort_punkt(rev: Revision) -> Pruefpunkt:
+    ort = rev.arbeitsort
+    if ort is None:
+        return Pruefpunkt(False, "Arbeitsort angegeben", "Wo liegt der Code?", arbeitsort_wahl=True)
+    if not ort.aktiv:
+        return Pruefpunkt(
+            False,
+            "Arbeitsort angegeben",
+            f"„{ort.name}“ ist archiviert; einen anderen wählen.",
+            arbeitsort_wahl=True,
+        )
+    if not ort.bestaetigt:
+        return Pruefpunkt(
+            False,
+            "Arbeitsort bestätigt",
+            f"„{ort.name}“ ist ein Vorschlag von {ort.vorgeschlagen_von or 'einer KI'}.",
+            arbeitsort_wahl=True,
+        )
+    return Pruefpunkt(True, "Arbeitsort angegeben")
+
+
 def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
     """Alle Bedingungen, die für Freigabe und Übernahme gelten, als anzeigbare Liste."""
     rev = auftrag.aktuelle_revision
@@ -619,9 +943,10 @@ def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
             "Nicht-Ziele angegeben",
             "Mindestens ein Eintrag oder „keine“.",
         ),
+        _arbeitsort_punkt(rev),
         Pruefpunkt(
-            rev.arbeitsort_id is not None and bool(rev.muster),
-            "Arbeitsort und Schreibumfang angegeben",
+            bool(rev.muster),
+            "Schreibumfang angegeben",
             "Welche Dateien oder Ordner darf der Bearbeiter ändern?",
         ),
         Pruefpunkt(
@@ -633,12 +958,12 @@ def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
     offene = [
         a.vorgaenger
         for a in auftrag.abhaengigkeiten.select_related("vorgaenger")
-        if a.vorgaenger.zustand != Auftrag.ABGENOMMEN
+        if a.vorgaenger.zustand != Auftrag.ERLEDIGT
     ]
     punkte.append(
         Pruefpunkt(
             not offene,
-            "Vorgänger abgenommen"
+            "Vorgänger erledigt"
             if auftrag.abhaengigkeiten.exists()
             else "Abhängigkeiten erfüllt (keine)",
             ", ".join(f"{v.nummer} ist {v.get_zustand_display()}" for v in offene),
@@ -686,10 +1011,22 @@ def wunsch_erfassen(
     entscheidung: Entscheidung | None = None,
     erzwingen: bool = False,
     typ: str = Auftrag.TYP_AUFTRAG,
+    planung: dict | None = None,
 ) -> Auftrag:
-    """Wunsch als Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; Freigabe bleibt
-    beim Owner. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer ``erzwingen``."""
+    """Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; mit ``planung`` (Ziel,
+    Nicht-Ziele, Arbeitsort, Schreibumfang, Quellen, Abnahmekriterien) gleich geplant, das dürfen
+    nur Owner und Assistent. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer
+    ``erzwingen``."""
     _projekt_sichtbar(akteur, projekt)
+    planung = {k: v for k, v in (planung or {}).items() if v not in (None, "")}
+    if planung:
+        _planung_erforderlich(akteur, "Aufträge planen")
+        if set(planung) - set(PLANFELDER):
+            fremd = ", ".join(sorted(set(planung) - set(PLANFELDER)))
+            raise DienstFehler(f"Unbekanntes Planungsfeld: {fremd}")
+        ort = planung.get("arbeitsort")
+        if ort is not None and ort.projekt_id != projekt.pk:
+            raise DienstFehler("Der Arbeitsort gehört nicht zu diesem Projekt.")
     if not titel.strip():
         raise DienstFehler("Der Titel darf nicht leer sein.")
     if modul is not None and modul.projekt_id != projekt.pk:
@@ -720,11 +1057,17 @@ def wunsch_erfassen(
             auftrag=auftrag,
             nummer=1,
             beschreibung=beschreibung.strip(),
+            ziel=str(planung.get("ziel", "")).strip(),
+            nicht_ziele=str(planung.get("nicht_ziele", "")).strip(),
+            arbeitsort=planung.get("arbeitsort"),
+            schreibumfang="\n".join(zeilen(planung.get("schreibumfang", ""))),
+            quellen=str(planung.get("quellen", "")).strip(),
+            abnahmekriterien="\n".join(zeilen(planung.get("abnahmekriterien", ""))),
             erstellt_von_name=akteur.name,
-            anlass="Angelegt",
+            anlass="Angelegt und geplant" if planung else "Angelegt",
         )
         wort = "Issue" if typ == Auftrag.TYP_ISSUE else "Auftrag"
-        anlass = ""
+        anlass = "geplant" if planung else ""
         if abgeleitet_von is not None:
             anlass = f"abgeleitet aus {abgeleitet_von.nummer}"
         if entscheidung is not None:
@@ -741,14 +1084,50 @@ def wunsch_erfassen(
     return auftrag
 
 
+PLANFELDER = ("ziel", "nicht_ziele", "arbeitsort", "schreibumfang", "quellen", "abnahmekriterien")
+
+
+def auftrag_anlegen(
+    akteur: Akteur,
+    projekt: Projekt,
+    *,
+    titel: str,
+    beschreibung: str = "",
+    modul: Modul | None = None,
+    prioritaet: str = "mittel",
+    typ: str = Auftrag.TYP_AUFTRAG,
+    erzwingen: bool = False,
+    planung: dict | None = None,
+    pruefer=None,
+    freigeben: bool = False,
+) -> Auftrag:
+    """Auftrag in einem Schritt anlegen, planen und auf Anweisung freigeben. Alles oder nichts:
+    scheitert die Freigabeprüfung, wird auch nichts angelegt."""
+    with transaction.atomic():
+        auftrag = wunsch_erfassen(
+            akteur,
+            projekt,
+            titel=titel,
+            beschreibung=beschreibung,
+            modul=modul,
+            prioritaet=prioritaet,
+            erzwingen=erzwingen,
+            typ=typ,
+            planung=planung,
+        )
+        if pruefer is not None:
+            pruefer_festlegen(akteur, auftrag, pruefer)
+        if freigeben:
+            auftrag_freigeben(akteur, auftrag)
+    auftrag.refresh_from_db()
+    return auftrag
+
+
 BEARBEITBARE_ZUSTAENDE = (
     Auftrag.ENTWURF,
     Auftrag.FREIGEGEBEN,
     Auftrag.IN_ARBEIT,
-    Auftrag.NACHARBEIT,
     Auftrag.BLOCKIERT,
-    Auftrag.KLAERUNG_ERFORDERLICH,
-    Auftrag.PAUSIERT,
 )
 
 
@@ -769,7 +1148,8 @@ def auftrag_bearbeiten(
     anlass: str = "",
     typ: str | None = None,
 ) -> Revision:
-    """Neue Revision anlegen. Freigabe erlischt; laufende Bearbeitung wird zur Klärung."""
+    """Neue Revision anlegen. Freigabe und laufende Übernahme erlöschen; der Auftrag geht zurück
+    in den Entwurf und braucht eine neue Freigabe."""
     _planung_erforderlich(akteur, "Aufträge bearbeiten")
     if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
         raise Konflikt(
@@ -815,19 +1195,11 @@ def auftrag_bearbeiten(
             auftrag.zustand = Auftrag.ENTWURF
             auftrag.freigegeben_am = None
             folge = "Freigabe erloschen"
-        elif auftrag.zustand in Auftrag.BEARBEITER_ZUSTAENDE or (
-            auftrag.zustand == Auftrag.PAUSIERT and auftrag.hat_bearbeiter
-        ):
+        elif auftrag.zustand in Auftrag.BEARBEITER_ZUSTAENDE:
             _bearbeiter_abloesen(auftrag)
-            auftrag.zustand = Auftrag.KLAERUNG_ERFORDERLICH
-            auftrag.zustand_vor_pause = ""
-            folge = (
-                f"Übernahme von {auftrag.letzter_bearbeiter_name} erloschen, Klärung erforderlich"
-            )
-        elif auftrag.zustand == Auftrag.PAUSIERT:
             auftrag.zustand = Auftrag.ENTWURF
-            auftrag.zustand_vor_pause = ""
-            folge = "Pause beendet, zurück in Entwurf"
+            auftrag.freigegeben_am = None
+            folge = f"Übernahme von {auftrag.letzter_bearbeiter_name} erloschen, zurück in Entwurf"
         auftrag.save()
         _ereignis(
             akteur,
@@ -914,12 +1286,17 @@ def pruefer_festlegen(akteur: Akteur, auftrag: Auftrag, pruefer) -> None:
         )
 
 
+IM_CHAT_FREIGEGEBEN = "freigegeben auf Freds Anweisung im Chat"
+
+
 def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
-    """Freigabe bindet die aktuelle Revision. Aus Entwurf oder nach Klärung."""
-    _owner_erforderlich(akteur, "Aufträge freigeben")
+    """Freigabe bindet die aktuelle Revision; nur aus dem Entwurf. Der Owner gibt in der
+    Oberfläche frei, sein Assistent auf Freds Anweisung im Chat (mit Vermerk)."""
+    _projekt_sichtbar(akteur, auftrag.projekt)  # Fremdes gilt als nicht vorhanden
+    _planung_erforderlich(akteur, "Aufträge freigeben")
     with transaction.atomic():
-        auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if auftrag.zustand not in (Auftrag.ENTWURF, Auftrag.KLAERUNG_ERFORDERLICH):
+        auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if auftrag.zustand != Auftrag.ENTWURF:
             raise Konflikt(
                 f"Freigabe ist aus dem Zustand „{auftrag.get_zustand_display()}“ nicht möglich."
             )
@@ -935,7 +1312,9 @@ def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
             ereignis="Freigegeben",
-            anlass=f"Prüfer {auftrag.pruefer.get_username()}",
+            anlass=IM_CHAT_FREIGEGEBEN
+            if akteur.bindung is not None
+            else f"Prüfer {auftrag.pruefer.get_username()}",
             revision=str(auftrag.revision_nr),
         )
 
@@ -963,36 +1342,13 @@ def freigabe_zuruecknehmen(akteur: Akteur, auftrag: Auftrag, grund: str = "") ->
 
 
 def auftrag_pausieren(akteur: Akteur, auftrag: Auftrag, grund: str = "") -> None:
+    """Den Zustand „Pausiert“ gibt es im Ablauf ohne Abnahme nicht mehr."""
     _owner_erforderlich(akteur, "Aufträge pausieren")
-    with transaction.atomic():
-        auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if auftrag.zustand not in (
-            Auftrag.FREIGEGEBEN,
-            Auftrag.IN_ARBEIT,
-            Auftrag.NACHARBEIT,
-            Auftrag.BLOCKIERT,
-        ):
-            raise Konflikt(f"Aus „{auftrag.get_zustand_display()}“ ist keine Pause möglich.")
-        auftrag.zustand_vor_pause = auftrag.zustand
-        auftrag.zustand = Auftrag.PAUSIERT
-        auftrag.save(update_fields=["zustand", "zustand_vor_pause", "aktualisiert_am"])
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Pausiert",
-            anlass=grund
-            or (
-                "Bearbeiter sieht die Pause bei der nächsten Anfrage"
-                if auftrag.hat_bearbeiter
-                else ""
-            ),
-            revision=str(auftrag.revision_nr),
-        )
+    raise Konflikt("Pausieren gibt es nicht mehr: Freigabe zurücknehmen oder abbrechen.")
 
 
 def auftrag_fortsetzen(akteur: Akteur, auftrag: Auftrag) -> None:
+    """Nur für pausierte Aufträge aus der Zeit vor Migration 0008."""
     _owner_erforderlich(akteur, "Aufträge fortsetzen")
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
@@ -1035,7 +1391,8 @@ def auftrag_abbrechen(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
 
 
 def bearbeitung_unklar(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
-    """Bearbeiter verschwunden oder Widerspruch zu Projektdateien: Übernahme erlischt."""
+    """Bearbeiter verschwunden oder Widerspruch zu Projektdateien: Übernahme erlischt, der
+    Auftrag geht zurück in den Entwurf und braucht eine neue Freigabe."""
     _owner_erforderlich(akteur, "Bearbeitung als unklar markieren")
     if not grund.strip():
         raise DienstFehler("Bitte angeben, was unklar ist.")
@@ -1044,14 +1401,15 @@ def bearbeitung_unklar(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
         if auftrag.zustand not in Auftrag.BEARBEITER_ZUSTAENDE:
             raise Konflikt("Nur ein Auftrag mit Bearbeiter kann als unklar markiert werden.")
         _bearbeiter_abloesen(auftrag)
-        auftrag.zustand = Auftrag.KLAERUNG_ERFORDERLICH
+        auftrag.zustand = Auftrag.ENTWURF
+        auftrag.freigegeben_am = None
         auftrag.save()
         _ereignis(
             akteur,
             projekt=auftrag.projekt,
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
-            ereignis="Klärung erforderlich",
+            ereignis="Übernahme beendet, zurück in Entwurf",
             anlass=grund.strip(),
             revision=str(auftrag.revision_nr),
         )
@@ -1192,15 +1550,7 @@ def _meldung(
         auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
         grund = _bearbeiter_pruefen(akteur, auftrag, revision_nr)
         gewechselt = False
-        if (
-            grund is None
-            and neuer_zustand is not None
-            and auftrag.zustand
-            in (
-                Auftrag.IN_ARBEIT,
-                Auftrag.NACHARBEIT,
-            )
-        ):
+        if grund is None and neuer_zustand is not None and auftrag.zustand == Auftrag.IN_ARBEIT:
             auftrag.zustand = neuer_zustand
             auftrag.save(update_fields=["zustand", "aktualisiert_am"])
             gewechselt = True
@@ -1382,9 +1732,12 @@ def ergebnis_einreichen(
     zusammenfassung: str,
     dateien: str = "",
     pruefungen: str = "",
+    fehlgeschlagen: str = "",
     luecken: str = "",
 ) -> Ergebnis:
-    """Ergebnis mit Nachweisen einreichen; wechselt auf ZUR_PRUEFUNG."""
+    """Ergebnis mit Nachweisen einreichen; die technischen Prüfungen schließen ab, es gibt keine
+    Nutzerabnahme. Alle bestanden → Erledigt; eine fehlgeschlagen → Blockiert mit dem Grund als
+    Fehlermeldung, der Bearbeiter bleibt; keine Prüfungen → Erledigt „ohne automatische Tests“."""
     _projekt_sichtbar(akteur, auftrag.projekt)
     with transaction.atomic():
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
@@ -1394,34 +1747,52 @@ def ergebnis_einreichen(
             raise Konflikt(
                 f"Revision {revision_nr} ist veraltet; aktuell ist Revision {aktuell.revision_nr}."
             )
-        if aktuell.zustand not in (Auftrag.IN_ARBEIT, Auftrag.NACHARBEIT, Auftrag.BLOCKIERT):
+        if aktuell.zustand not in Auftrag.BEARBEITER_ZUSTAENDE:
             raise Konflikt(f"Einreichen ist aus „{aktuell.get_zustand_display()}“ nicht möglich.")
         if not zusammenfassung.strip():
             raise DienstFehler("Die Zusammenfassung darf nicht leer sein.")
         if not zeilen(dateien):
             raise DienstFehler("Mindestens eine geänderte Datei mit Revision ist anzugeben.")
-        if not zeilen(pruefungen):
-            raise DienstFehler("Mindestens eine ausgeführte Prüfung ist anzugeben.")
         ergebnis = Ergebnis.objects.create(
             auftrag=aktuell,
             revision_nr=revision_nr,
             zusammenfassung=zusammenfassung.strip(),
             dateien="\n".join(zeilen(dateien)),
             pruefschritte="\n".join(zeilen(pruefungen)),
+            fehlgeschlagen="\n".join(zeilen(fehlgeschlagen)),
             luecken=luecken.strip(),
             eingereicht_von_name=akteur.name,
             bindung=akteur.bindung,
             benutzer=akteur.benutzer,
         )
-        aktuell.zustand = Auftrag.ZUR_PRUEFUNG
-        aktuell.zuletzt_gemeldet_am = timezone.now()
-        aktuell.save(update_fields=["zustand", "zuletzt_gemeldet_am", "aktualisiert_am"])
+        jetzt = timezone.now()
+        aktuell.zuletzt_gemeldet_am = jetzt
+        if ergebnis.fehlgeschlagenliste:
+            aktuell.zustand = Auftrag.BLOCKIERT
+            grund = "Prüfung fehlgeschlagen: " + "; ".join(ergebnis.fehlgeschlagenliste)
+            Meldung.objects.create(
+                auftrag=aktuell,
+                revision_nr=revision_nr,
+                art=Meldung.FEHLER,
+                text=grund,
+                akteur_name=akteur.name,
+                bindung=akteur.bindung,
+            )
+            ereignis = "Ergebnis eingereicht, Prüfung fehlgeschlagen, Auftrag Blockiert"
+        else:
+            aktuell.zustand = Auftrag.ERLEDIGT
+            aktuell.abgenommene_revision = revision_nr
+            _bearbeiter_abloesen(aktuell)
+            ereignis = "Ergebnis eingereicht, erledigt" + (
+                " ohne automatische Tests" if ergebnis.ohne_tests else ""
+            )
+        aktuell.save()
         _ereignis(
             akteur,
             projekt=aktuell.projekt,
             objekt_typ="Auftrag",
             objekt_kennung=aktuell.nummer,
-            ereignis="Ergebnis eingereicht",
+            ereignis=ereignis,
             anlass=zusammenfassung.strip()[:200],
             revision=str(revision_nr),
         )

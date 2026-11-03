@@ -73,11 +73,26 @@
   var panel = document.getElementById("panel");
   var inhalt = document.getElementById("panel-inhalt");
   var seite = document.getElementById("panel-seite");
+  // Reiter einer Auftragsansicht: ohne JavaScript stehen alle Teile untereinander (Anker).
+  function reiterZeigen(auftrag, name) {
+    auftrag.querySelectorAll(".reiterteil").forEach(function (t) { t.hidden = t.getAttribute("data-teil") !== name; });
+    auftrag.querySelectorAll("[data-reiter]").forEach(function (r) {
+      if (r.getAttribute("data-reiter") === name) { r.setAttribute("aria-current", "true"); } else { r.removeAttribute("aria-current"); }
+    });
+  }
+  function reiterStart(wurzel) {
+    wurzel.querySelectorAll(".auftrag").forEach(function (a) {
+      var ziel = location.hash ? a.querySelector('.reiterteil[id="' + location.hash.slice(1) + '"]') : null;
+      reiterZeigen(a, ziel ? ziel.getAttribute("data-teil") : "auftrag");
+    });
+  }
+  reiterStart(document);
   function oeffnen(url, seiteUrl) {
     fetch(url + (url.indexOf("?") > -1 ? "&" : "?") + "zurueck=" + encodeURIComponent(location.pathname + location.search), {credentials: "same-origin"})
       .then(function (r) { return r.text(); })
       .then(function (html) {
         inhalt.innerHTML = html;
+        reiterStart(inhalt);
         seite.href = seiteUrl;
         panel.hidden = false;
         document.body.classList.add("mit-panel");
@@ -88,6 +103,8 @@
   document.addEventListener("click", function (ev) {
     var a = ev.target.closest("a[data-panel]");
     if (a) { ev.preventDefault(); oeffnen(a.getAttribute("data-panel"), a.href); return; }
+    var reiter = ev.target.closest("[data-reiter]");
+    if (reiter) { ev.preventDefault(); reiterZeigen(reiter.closest(".auftrag"), reiter.getAttribute("data-reiter")); return; }
     if (ev.target.closest("#panel-zu")) { panel.hidden = true; document.body.classList.remove("mit-panel"); inhalt.innerHTML = ""; }
     var plus = ev.target.closest(".liste-plus");
     if (plus) {

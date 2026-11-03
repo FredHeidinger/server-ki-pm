@@ -43,6 +43,31 @@ def aktives_projekt(request: HttpRequest) -> tuple[Projekt | None, str]:
     return None, ""
 
 
+def modulwahl(projekt: Projekt, wert: str) -> tuple[dict | None, dict]:
+    """Auswahl im Modulbaum: Filter für Listen (``None`` = Gesamtes Projekt) und Vorlagendaten.
+    Ein Modul umfasst seine Untermodule; „ohne“ heißt nur projektweite Einträge."""
+    from . import dienst
+
+    baum = dienst.modulbaum(projekt) if projekt.module.exists() else None
+    gewaehlt = None
+    filter_ = None
+    if wert == "ohne":
+        filter_ = {"modul__isnull": True}
+    elif wert:
+        gewaehlt = projekt.module.filter(kennung=wert).first()
+        if gewaehlt is not None:
+            filter_ = {"modul_id__in": dienst.modul_teilbaum(gewaehlt)}
+        else:
+            wert = ""
+    offen = set(dienst._vorfahren(gewaehlt)) if gewaehlt else set()
+    return filter_, {
+        "baum": baum,
+        "modul": wert,
+        "modul_gewaehlt": gewaehlt,
+        "baum_offen": offen,
+    }
+
+
 def projektfilter(request: HttpRequest) -> dict:
     if not getattr(request, "user", None) or not request.user.is_authenticated:
         return {}

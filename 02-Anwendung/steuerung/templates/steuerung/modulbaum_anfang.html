@@ -1,0 +1,5 @@
+{% if baum %}<div class="mit-baum">
+<nav class="baumspalte" aria-label="Nach Modul filtern">{% include "steuerung/modulbaum.html" %}</nav>
+<div class="baumrechts">
+<details class="baum-schmal"><summary class="knopf zweit klein">Modul: {% if modul_gewaehlt %}{{ modul_gewaehlt.name }}{% elif modul == "ohne" %}nur projektweit{% else %}Gesamtes Projekt{% endif %}</summary>{% include "steuerung/modulbaum.html" %}</details>
+{% endif %}

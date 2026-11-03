@@ -3,7 +3,6 @@
 {% block projektinhalt %}
 <nav class="umschalter-zeile" aria-label="Ansicht der Arbeitsaufträge">
   <a class="umschalter aktiv" href="{% url 'projekt_auftraege' kennung=projekt.kennung %}" aria-current="page">Aufträge und Issues</a>
-  <a class="umschalter" href="{% url 'projekt_pruefung' kennung=projekt.kennung %}">Prüfung{% if pruefung_anzahl %} ({{ pruefung_anzahl }}){% endif %}</a>
 </nav>
 {% if eintraege %}
 <section class="box warn" aria-labelledby="h-wartet">
@@ -11,5 +10,7 @@
   {% include "steuerung/eingangsliste.html" %}
 </section>
 {% endif %}
+{% include "steuerung/modulbaum_anfang.html" %}
 {% include "steuerung/auftragsliste.html" %}
+{% include "steuerung/modulbaum_ende.html" %}
 {% endblock %}

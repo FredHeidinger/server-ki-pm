@@ -13,7 +13,7 @@
   {% if art == "datei" %}
     {% if fehler %}<div class="fehler" role="alert">{{ fehler }}</div>{% endif %}
     {% if not uploads_aktiv %}<p class="box warn">Uploads sind auf diesem Server noch nicht freigeschaltet. Zuerst müssen Speicher, Prüfdienst und Sicherung im Betrieb nachgewiesen sein.</p>{% endif %}
-    <p class="gedaempft">Erlaubt: PDF, PNG, JPEG, TXT, Markdown, DOCX und XLSX ohne Makros; höchstens {{ grenzen.datei_mib }} MiB je Datei, eine Datei je Vorgang, {{ grenzen.projekt_mib }} MiB je Projekt. Neue Dateien bleiben in Quarantäne, bis die Schadsoftwareprüfung unauffällig ist.</p>
+    <p class="gedaempft">Erlaubt: PDF, PNG, JPEG, TXT, Markdown, DOCX und XLSX ohne Makros; höchstens {{ grenzen.datei_mib }} MiB je Datei, {% if unterlage %}eine Datei als neue Version{% else %}bis zu {{ grenzen.dateien }} Dateien je Vorgang (je Datei eine eigene Unterlage){% endif %}, {{ grenzen.projekt_mib }} MiB je Projekt. Ist eine Datei nicht erlaubt, wird keine gespeichert. Neue Dateien bleiben in Quarantäne, bis die Schadsoftwareprüfung unauffällig ist.</p>
     <form method="post" enctype="multipart/form-data" class="formular" action="{% if unterlage %}{% url 'hochladen_version' kennung=projekt.kennung nummer=unterlage.nummer %}{% else %}{% url 'hochladen' kennung=projekt.kennung %}{% endif %}">
       {% csrf_token %}
       {% if unterlage %}<input type="hidden" name="erwartete_nr" value="{{ unterlage.aktuelle_nr }}">{% endif %}

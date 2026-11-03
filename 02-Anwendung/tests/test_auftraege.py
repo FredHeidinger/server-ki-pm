@@ -50,7 +50,7 @@ def test_konkretisieren_erzeugt_revision_und_freigabefaehigkeit(akteur, projekt)
     assert a.revision_nr == 2
     assert not a.aktuelle_revision.ist_wunsch
     assert dienst.freigabefaehig(a)
-    assert [p.erfuellt for p in dienst.freigabepruefung(a)] == [True] * 7
+    assert [p.erfuellt for p in dienst.freigabepruefung(a)] == [True] * 8
 
 
 def test_freigabe_bindet_revision_und_bearbeiten_laesst_sie_erloeschen(
@@ -89,7 +89,7 @@ def test_ueberschneidung_sperrt_und_bietet_vorgaenger_an(akteur, projekt, freige
     dienst.vorgaenger_eintragen(akteur, zweiter, freigegeben, "Überschneidung")
     punkte = dienst.freigabepruefung(zweiter)
     assert not [p for p in punkte if "Überschneidung" in p.text and not p.erfuellt]
-    assert any(p.text == "Vorgänger abgenommen" and not p.erfuellt for p in punkte)
+    assert any(p.text == "Vorgänger erledigt" and not p.erfuellt for p in punkte)
 
 
 def test_disjunkter_umfang_ueberschneidet_nicht(akteur, projekt, freigegeben):
@@ -143,7 +143,7 @@ def test_veraltete_revision_wird_abgelehnt(akteur, projekt, freigegeben, bindung
         dienst.auftrag_uebernehmen(dienst.Akteur.aus_bindung(bindung), freigegeben, 1)
 
 
-def test_uebernahme_nur_mit_abgenommenem_vorgaenger(akteur, projekt, freigegeben, bindung):
+def test_uebernahme_nur_mit_erledigtem_vorgaenger(akteur, projekt, freigegeben, bindung):
     zweiter = arbeitspaket(akteur, projekt, titel="Zweiter", umfang="src/auth/x.py")
     dienst.vorgaenger_eintragen(akteur, zweiter, freigegeben)
     with pytest.raises(dienst.Konflikt, match="Vorgänger"):
@@ -161,7 +161,9 @@ def test_fremdes_projekt_ist_nicht_sichtbar(akteur, projekt, projekt_b, freigege
     assert list(dienst.auftraege_fuer_bindung(bindung_b, bindung_b.projekt)) == []
 
 
-def test_bearbeiten_nach_uebernahme_fuehrt_zu_klaerung(akteur, projekt, freigegeben, bindung):
+def test_bearbeiten_nach_uebernahme_fuehrt_zurueck_in_entwurf(
+    akteur, projekt, freigegeben, bindung
+):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
     dienst.auftrag_bearbeiten(
@@ -179,7 +181,7 @@ def test_bearbeiten_nach_uebernahme_fuehrt_zu_klaerung(akteur, projekt, freigege
         modul=None,
     )
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.KLAERUNG_ERFORDERLICH
+    assert freigegeben.zustand == Auftrag.ENTWURF and freigegeben.freigegeben_am is None
     assert not freigegeben.hat_bearbeiter and freigegeben.letzter_bearbeiter_name == "Chat A"
     # Meldung des alten Bearbeiters auf alte Revision: historisch abgelegt, Konflikt gemeldet
     with pytest.raises(dienst.Konflikt, match="historisch"):
@@ -240,15 +242,14 @@ def test_hindernis_blockiert_und_owner_hebt_auf(akteur, projekt, freigegeben, bi
 def test_pause_abbruch_und_unklar(akteur, projekt, freigegeben, bindung):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
-    dienst.auftrag_pausieren(akteur, freigegeben, "Urlaub")
+    # Pausieren gibt es im Ablauf ohne Abnahme nicht mehr.
+    with pytest.raises(dienst.Konflikt, match="Pausieren gibt es nicht mehr"):
+        dienst.auftrag_pausieren(akteur, freigegeben, "Urlaub")
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.PAUSIERT and freigegeben.bearbeiter_name == "Chat A"
-    dienst.auftrag_fortsetzen(akteur, freigegeben)
-    freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.IN_ARBEIT
+    assert freigegeben.zustand == Auftrag.IN_ARBEIT and freigegeben.bearbeiter_name == "Chat A"
     dienst.bearbeitung_unklar(akteur, freigegeben, "Chat antwortet seit Tagen nicht")
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.KLAERUNG_ERFORDERLICH and not freigegeben.hat_bearbeiter
+    assert freigegeben.zustand == Auftrag.ENTWURF and not freigegeben.hat_bearbeiter
     with pytest.raises(dienst.DienstFehler, match="Begründung"):
         dienst.auftrag_abbrechen(akteur, freigegeben, "")
     dienst.auftrag_abbrechen(akteur, freigegeben, "nicht mehr nötig")

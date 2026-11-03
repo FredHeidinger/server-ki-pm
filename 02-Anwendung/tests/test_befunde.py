@@ -69,15 +69,21 @@ def test_kennung_wird_bei_fehler_freigegeben(freigegeben, bindung):
 
 
 @pytest.mark.django_db
-def test_pause_gibt_schreibumfang_nicht_frei(akteur, projekt, freigegeben, bindung):
-    dienst.auftrag_uebernehmen(dienst.Akteur.aus_bindung(bindung), freigegeben, 2)
-    dienst.auftrag_pausieren(akteur, freigegeben, "kurz warten")
+def test_blockiert_haelt_schreibumfang_erledigt_gibt_ihn_frei(
+    akteur, projekt, freigegeben, bindung
+):
+    chat = dienst.Akteur.aus_bindung(bindung)
+    dienst.auftrag_uebernehmen(chat, freigegeben, 2)
+    dienst.hindernis_melden(chat, freigegeben, 2, "kurz warten")
     zweiter = arbeitspaket(akteur, projekt, titel="Zweiter", umfang="src/auth/x.py")
     with pytest.raises(dienst.Konflikt, match="Überschneidung"):
         dienst.auftrag_freigeben(akteur, zweiter)
-    dienst.auftrag_fortsetzen(akteur, freigegeben)
+    dienst.ergebnis_einreichen(
+        chat, freigegeben, 2, zusammenfassung="fertig", dateien="src/auth/a.py@1", pruefungen="ok"
+    )
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.IN_ARBEIT
+    assert freigegeben.zustand == Auftrag.ERLEDIGT
+    dienst.auftrag_freigeben(akteur, zweiter)
 
 
 @pytest.mark.django_db

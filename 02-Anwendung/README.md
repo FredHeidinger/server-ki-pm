@@ -23,15 +23,19 @@ Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [
 | Methode und Pfad | Zweck |
 |---|---|
 | `GET /api/auftraege/` | Alle offenen Aufträge des Projekts; `?nur_meine=1` übernehmbare und eigene, `?alle=1` auch abgeschlossene |
-| `POST /api/auftraege/anlegen/` | `{titel, beschreibung, modul?, prioritaet?, erzwingen?, anfrage_kennung}`; Entwurf, 409 bei gleichem Titel eines offenen Auftrags |
+| `POST /api/auftraege/anlegen/` | `{titel, beschreibung, modul?, prioritaet?, ziel?, nicht_ziele?, arbeitsort?, schreibumfang[]?, quellen?, abnahmekriterien[]?, pruefer?, freigeben?, erzwingen?, anfrage_kennung}`; in einem Aufruf angelegt und geplant (Planen nur Freds Assistent, PC-Zugang); `freigeben` nur auf Freds Anweisung im Chat, mit Vermerk im Verlauf; scheitert die Freigabeprüfung, wird nichts angelegt; 409 bei gleichem Titel eines offenen Auftrags |
+| `POST /api/auftraege/<id>/planen/` | Nur angegebene Felder ändern sich, eine Freigabe erlischt; `freigeben` wie beim Anlegen |
 | `GET /api/auftraege/<id>/` | Gebundene Revision mit Umfang und Kriterien |
 | `POST /api/auftraege/<id>/uebernehmen/` | `{revision, anfrage_kennung}`; exklusiv, genau einer gewinnt |
 | `POST /api/auftraege/<id>/fortschritt/`, `…/rueckfrage/`, `…/hindernis/`, `…/fehler/`, `…/vorschlag/`, `…/pruefbericht/` | `{revision, text, anfrage_kennung}`; Rückfrage, Hindernis und Fehler blockieren den Auftrag bis zur Antwort des Menschen |
-| `POST /api/auftraege/<id>/ergebnis/` | `{revision, zusammenfassung, dateien[], pruefungen[], luecken, anfrage_kennung}` |
+| `POST /api/auftraege/<id>/ergebnis/` | `{revision, zusammenfassung, dateien[], pruefungen[]?, fehlgeschlagen[]?, luecken, anfrage_kennung}`; keine Nutzerabnahme: alle Prüfungen bestanden → Erledigt, eine fehlgeschlagen → Blockiert mit Grund, keine Prüfungen → Erledigt mit Vermerk „ohne automatische Tests“ |
 | `GET /api/entscheidungen/`, `POST /api/entscheidungen/vorschlagen/`, `POST /api/entscheidungen/<id>/bestaetigen/` | Entscheidungen des eigenen Projekts; ein Vorschlag betrifft immer nur das eigene Projekt |
 
 | `GET /api/projekt/akte/`, `GET /api/projekt/kontext/?auftrag=&kontext_id=&teil=`, `GET /api/projekt/verlauf/?seit=` | Projektakte, KI-Kontext (Teile mit gleicher Kontext-ID), Verlauf |
 | `GET /api/unterlagen/<nr>/` | Nur für KI freigegebene, geprüfte Unterlagen |
 | `POST /api/funktionen/vorschlagen/`, `…/nachweise/melden/`, `…/installationen/melden/`, `…/unterlagen/entwurf/`, `…/github/vorschlag/` | Vorschläge und Meldungen im Rahmen der Befugnisse; Funktionen nur als Idee, Unterlagen nur als Entwurf, GitHub nur als unbestätigter Entwurf |
+| `POST /api/stand/melden/`, `GET /api/stand/` | Meldevertrag `kipm-stand/1`: Stand nach Arbeitsabschluss (Umsetzung, Tests je Umgebung, Installation, Einschränkungen) mit stabiler `meldung_id`; Stand je Modul mit Lücken. Melder für lokale Abläufe und CI: `03-Server/skripte/kipm_melden.py` |
+| `POST /api/unterlagen/<nr>/version/` | Neue Textversion unter derselben Kennung (Entwurf) mit `erwartete_version` und `grund` |
+| `POST /api/profil/vorschlagen/`, `/api/umgebungen/vorschlagen/`, `/api/umgebungen/aendern/`, `/api/releases/vorschlagen/`, `/api/releases/aendern/`, `/api/arbeitsorte/vorschlagen/`, `/api/arbeitsorte/aendern/`, `/api/module/aendern/` | Pflege durch den Assistenten mit erwarteter Revision und Grund; Profil, Umgebung und Arbeitsort gelten erst nach Freds Übernahme |
 
-Es gibt keine Schnittstelle für Freigabe, Prüferwechsel, Abnahme, Funktionsabnahme, Grundlagen, KI-Freigabe, Datei-Upload, Rollen, Umfangsänderung oder Bestätigung von GitHub-Aktionen. Fremde Projekte antworten mit 404, Konflikte und veraltete Revisionen mit 409.
+Freigeben kann über die Schnittstelle nur Freds Assistent (PC-Zugang) auf seine Anweisung im Chat; eine Abnahme von Aufträgen gibt es nicht. Es gibt keine Schnittstelle für Funktionsabnahme, Grundlagen, KI-Freigabe, Datei-Upload, Rollen, Umfangsänderung oder Bestätigung von GitHub-Aktionen. Fremde Projekte antworten mit 404, Konflikte und veraltete Revisionen mit 409.

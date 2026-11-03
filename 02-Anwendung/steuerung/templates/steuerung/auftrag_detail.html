@@ -1,6 +1,6 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}{{ auftrag.nummer }} {{ auftrag.titel }}{% endblock %}
-{% block brotkrumen %}<a href="{% url 'projekt_detail' kennung=auftrag.projekt.kennung %}">{{ auftrag.projekt.name }}</a> › {{ auftrag.nummer }}{% endblock %}
+{% block brotkrumen %}<a href="{% url 'projekt_detail' kennung=auftrag.projekt.kennung %}">{{ auftrag.projekt.name }}</a> › <a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">Arbeitsaufträge</a> › {{ auftrag.nummer }}{% endblock %}
 {% block inhalt %}
 {% include "steuerung/auftrag_inhalt.html" %}
 {% endblock %}

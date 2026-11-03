@@ -5,32 +5,62 @@
 <p class="gedaempft">Technische Zuordnungen dieses Projekts. Die Inhalte stehen in den sechs Bereichen.</p>
 
 <section id="module" class="box" aria-labelledby="h-module">
-  <h2 id="h-module">Module <span class="zahl">{{ modulkarten|length }}</span> <span class="stufe optional">optional</span></h2>
-  <p class="gedaempft">Ein Projekt funktioniert vollständig ohne Module. Sobald es Module gibt, lassen sich Aufträge und Funktionen danach filtern; „Gesamtes Projekt“ gilt modulübergreifend.</p>
-  {% if modulkarten %}
-  <ul class="liste-schlicht">{% for m in modulkarten %}<li><strong>{{ m.name }}</strong> <span class="kuerzel">{{ m.kennung }}</span>
-    <details class="modulpflege"><summary>Ändern</summary>
-      <form method="post" action="{% url 'modul_aendern' kennung=projekt.kennung modul=m.kennung %}" class="zeile">{% csrf_token %}<label>Name <input type="text" name="name" value="{{ m.name }}" required maxlength="120"></label><button type="submit" class="knopf zweit klein">Speichern</button></form>
-      <form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=m.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="0"><button type="submit" class="knopf zweit klein gefahr">Archivieren</button></form>
-    </details></li>{% endfor %}</ul>
+  <h2 id="h-module">Module <span class="zahl">{{ modulbaum.flach|length }}</span> <span class="stufe optional">optional</span></h2>
+  <p class="gedaempft">Ein Projekt funktioniert vollständig ohne Module. Module lassen sich beliebig tief in Untermodule gliedern; in Funktionen &amp; Planung und Arbeitsaufträgen erscheint der Baum links, ein Modul zeigt dort auch alles aus seinen Untermodulen. „Gesamtes Projekt“ gilt modulübergreifend. Die Kennung bleibt beim Umbenennen und Umhängen gleich.</p>
+  {% if modulbaum.flach %}
+  <ul class="modulpflege-liste" role="list">{% for k in modulbaum.flach %}
+    <li style="--tiefe: {{ k.tiefe }}">
+      <div class="modulzeile"><span>{% include "steuerung/symbol.html" with name="ordner" %} <strong>{{ k.modul.name }}</strong> <span class="kuerzel">{{ k.modul.kennung }}</span></span>{% include "steuerung/modulzahlen.html" with z=k.zahlen %}</div>
+      <details class="modulpflege"><summary>Ändern, verschieben, Untermodul</summary>
+        <form method="post" action="{% url 'modul_aendern' kennung=projekt.kennung modul=k.modul.kennung %}" class="zeile">{% csrf_token %}<input type="hidden" name="revision" value="{{ k.modul.revision }}">
+          <label>Name <input type="text" name="name" value="{{ k.modul.name }}" required maxlength="120"></label>
+          <label>Hängt unter <select name="eltern"><option value="">Gesamtes Projekt</option>{% for z in k.ziele %}<option value="{{ z.kennung }}" {% if z.pk == k.modul.eltern_id %}selected{% endif %}>{{ z.name }}</option>{% endfor %}</select></label>
+          <button type="submit" class="knopf zweit klein">Speichern</button>
+        </form>
+        <form method="post" action="{% url 'modul_neu' kennung=projekt.kennung %}" class="zeile">{% csrf_token %}<input type="hidden" name="eltern" value="{{ k.modul.kennung }}">
+          <label>Neues Untermodul von {{ k.modul.name }} <input type="text" name="modul-name" required maxlength="120" placeholder="Name"></label>
+          <button type="submit" class="knopf zweit klein">+ Untermodul</button>
+        </form>
+        {% if k.aktive_kinder %}<p><span class="knopf zweit klein" aria-disabled="true">Archivieren – nicht möglich</span><br><span class="gedaempft klein">Hat aktive Untermodule; zuerst diese archivieren oder umhängen.</span></p>
+        {% else %}<form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=k.modul.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="0"><input type="hidden" name="revision" value="{{ k.modul.revision }}"><button type="submit" class="knopf zweit klein gefahr">Archivieren</button></form>{% endif %}
+      </details>
+    </li>{% endfor %}
+  </ul>
   {% endif %}
   <form method="post" action="{% url 'modul_neu' kennung=projekt.kennung %}" class="zeile">
     {% csrf_token %}
-    <label for="modul-neu-name">Neues Modul</label><input type="text" id="modul-neu-name" name="modul-name" maxlength="120" required placeholder="Name, z. B. Export">
+    <label for="modul-neu-name">Neues Modul direkt unter dem Projekt</label><input type="text" id="modul-neu-name" name="modul-name" maxlength="120" required placeholder="Name, z. B. Export">
     <button type="submit" class="knopf zweit klein">Anlegen</button>
   </form>
   {% if modularchiv %}
   <details class="archiv"><summary>Archiv: {{ modularchiv|length }} Module</summary>
-    <ul class="liste-schlicht">{% for m in modularchiv %}<li>{{ m.name }} <span class="kuerzel">{{ m.kennung }}</span> <form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=m.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="1"><button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
+    <ul class="liste-schlicht">{% for m in modularchiv %}<li>{{ m.name }} <span class="kuerzel">{{ m.kennung }}</span>{% if m.eltern %} <span class="gedaempft">unter {{ m.eltern.name }}</span>{% endif %} <form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=m.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="1"><button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>
 
+
 <section id="umgebungen" class="box" aria-labelledby="h-umg">
   <h2 id="h-umg">Umgebungen</h2>
-  <p class="gedaempft">Wo das Projekt läuft, z. B. lokal, Testserver, Betrieb. Adressen werden nicht automatisch abgefragt.</p>
-  {% if umgebungen %}<ul class="liste-schlicht">{% for u in umgebungen %}<li><strong>{{ u.name }}</strong> · {{ u.get_art_display }}{% if u.beschreibung %} · {{ u.beschreibung }}{% endif %}{% if u.url %} · {{ u.url }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="gedaempft">Noch keine Umgebung.</p>{% endif %}
-  <details{% if not umgebungen %} open{% endif %}>
+  <p class="gedaempft">Wo das Projekt läuft, z. B. lokal, Testserver, Betrieb. Adressen werden nicht automatisch abgefragt. Schlägt eine KI eine Umgebung vor, zählt sie erst nach deiner Übernahme für Installations- und Prüfmeldungen.</p>
+  {% if umgebungen_aktiv %}<ul class="liste-schlicht">{% for u in umgebungen_aktiv %}<li><strong>{{ u.name }}</strong> · {{ u.get_art_display }}{% if u.beschreibung %} · {{ u.beschreibung }}{% endif %}{% if u.url %} · {{ u.url }}{% endif %}{% if not u.bestaetigt %} <span class="status warn">Entwurf von {{ u.vorgeschlagen_von|default:"einer KI" }}</span>{% endif %}
+    {% if not u.bestaetigt %}<form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>{% endif %}
+    <details class="modulpflege"><summary>Ändern</summary>
+      <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='aendern' %}" class="formular klein">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}">
+        <p class="feld"><label for="u{{ u.pk }}-name">Name <span class="stufe pflicht">Pflicht</span></label><input type="text" id="u{{ u.pk }}-name" name="u{{ u.pk }}-name" value="{{ u.name }}" maxlength="120" required></p>
+        <p class="feld"><label for="u{{ u.pk }}-art">Art <span class="stufe pflicht">Pflicht</span></label><select id="u{{ u.pk }}-art" name="u{{ u.pk }}-art">{% for wert, wort in umgebungsarten %}<option value="{{ wert }}" {% if wert == u.art %}selected{% endif %}>{{ wort }}</option>{% endfor %}</select></p>
+        <p class="feld"><label for="u{{ u.pk }}-beschreibung">Zielsystem <span class="stufe optional">optional</span></label><input type="text" id="u{{ u.pk }}-beschreibung" name="u{{ u.pk }}-beschreibung" value="{{ u.beschreibung }}" maxlength="300"></p>
+        <p class="feld"><label for="u{{ u.pk }}-url">Dienstadresse <span class="stufe optional">optional</span></label><input type="text" id="u{{ u.pk }}-url" name="u{{ u.pk }}-url" value="{{ u.url }}" maxlength="300"></p>
+        <button type="submit" class="knopf zweit klein">Speichern</button>
+      </form>
+      <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='archivieren' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf zweit klein gefahr">{% if u.bestaetigt %}Archivieren{% else %}Verwerfen{% endif %}</button></form>
+    </details></li>{% endfor %}</ul>{% else %}<p class="gedaempft">Noch keine Umgebung.</p>{% endif %}
+  {% if umgebungen_archiv %}
+  <details class="archiv"><summary>Archiv: {{ umgebungen_archiv|length }} Umgebung{{ umgebungen_archiv|length|pluralize:"en" }}</summary>
+    <ul class="liste-schlicht">{% for u in umgebungen_archiv %}<li>{{ u.name }} · {{ u.get_art_display }} <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='zurueckholen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  <details{% if not umgebungen_aktiv %} open{% endif %}>
     <summary class="knopf zweit klein">+ Umgebung</summary>
     <form method="post" action="{% url 'umgebung_neu' kennung=projekt.kennung %}" class="formular klein">
       {% csrf_token %}
@@ -39,6 +69,7 @@
     </form>
   </details>
 </section>
+
 
 <section id="github" class="box" aria-labelledby="h-gh">
   <h2 id="h-gh">GitHub-Repositorys</h2>
@@ -59,13 +90,29 @@
   {% endif %}
 </section>
 
-<section class="box">
+<section id="arbeitsorte" class="box">
   <h2>Arbeitsorte</h2>
-  <p class="gedaempft">Wo der Code liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu. Ein Pfad ist ein Hinweis auf einen Arbeitsplatz; der Server liest dort nichts.</p>
-  {% if arbeitsorte %}
-  <ul class="liste-schlicht">{% for o in arbeitsorte %}<li><strong>{{ o.name }}</strong>{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}</li>{% endfor %}</ul>
+  <p class="gedaempft">Wo der Code liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu. Ein Pfad ist ein Hinweis auf einen Arbeitsplatz; der Server liest dort nichts. Schlägt eine KI einen Arbeitsort vor, gilt er erst nach deinem Häkchen.</p>
+  {% if arbeitsorte_aktiv %}
+  <ul class="liste-schlicht">{% for o in arbeitsorte_aktiv %}<li><strong>{{ o.name }}</strong>{% if not o.bestaetigt %} <span class="status warn">Vorschlag von {{ o.vorgeschlagen_von|default:"einer KI" }}</span>{% endif %}{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}
+    {% if not o.bestaetigt %}<form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ o.revision }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>{% endif %}
+    <details class="modulpflege"><summary>Ändern</summary>
+      <form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='aendern' %}" class="formular klein">{% csrf_token %}<input type="hidden" name="revision" value="{{ o.revision }}">
+        <p class="feld"><label for="ort{{ o.pk }}-name">Name <span class="stufe pflicht">Pflicht</span></label><input type="text" id="ort{{ o.pk }}-name" name="ort{{ o.pk }}-name" value="{{ o.name }}" maxlength="120" required></p>
+        <p class="feld"><label for="ort{{ o.pk }}-pfad">Ordner auf dem PC <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-pfad" name="ort{{ o.pk }}-pfad" value="{{ o.pfad }}" maxlength="300"></p>
+        <p class="feld"><label for="ort{{ o.pk }}-rechner">PC <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-rechner" name="ort{{ o.pk }}-rechner" value="{{ o.rechner }}" maxlength="120"></p>
+        <p class="feld"><label for="ort{{ o.pk }}-repository">Repository <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-repository" name="ort{{ o.pk }}-repository" value="{{ o.repository }}" maxlength="300"></p>
+        <button type="submit" class="knopf zweit klein">Speichern</button>
+      </form>
+      <form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='archivieren' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">{% if o.bestaetigt %}Archivieren{% else %}Verwerfen{% endif %}</button></form>
+    </details></li>{% endfor %}</ul>
   {% else %}<p class="gedaempft">Noch kein Arbeitsort.</p>{% endif %}
-  <details{% if not arbeitsorte %} open{% endif %}>
+  {% if arbeitsorte_archiv %}
+  <details class="archiv"><summary>Archiv: {{ arbeitsorte_archiv|length }} Arbeitsort{{ arbeitsorte_archiv|length|pluralize:"e" }}</summary>
+    <ul class="liste-schlicht">{% for o in arbeitsorte_archiv %}<li>{{ o.name }}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %} <form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='zurueckholen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  <details id="arbeitsort-neu"{% if not arbeitsorte_aktiv %} open{% endif %}>
     <summary class="knopf zweit klein">+ Arbeitsort hinzufügen</summary>
     <form method="post" action="{% url 'arbeitsort_neu' kennung=projekt.kennung %}" class="formular klein">
       {% csrf_token %}

@@ -6,7 +6,7 @@ import pytest
 from django.urls import reverse
 
 from steuerung import dienst
-from steuerung.models import Arbeitsort, Auftrag, ChatBindung, OrdnerAnfrage
+from steuerung.models import Arbeitsort, Auftrag, ChatBindung, Ereignis, OrdnerAnfrage
 
 
 def _rpc(client, schluessel, methode, params=None, rid: int | None = 1, **kopf):
@@ -140,10 +140,11 @@ def test_arbeitsablauf_ueber_mcp(client, projekt, freigegeben, pc_zugang):
         dateien=["src/auth/x.py@abc123"],
         pruefungen=["pytest: ok"],
     )
-    assert not fehler
+    assert not fehler and daten["auftrag"]["zustand"] == Auftrag.ERLEDIGT
+    assert daten["ergebnis"]["pruefungen"] == ["pytest: ok"]
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.ZUR_PRUEFUNG
-    assert freigegeben.bearbeiter_bindung == pc_zugang
+    assert freigegeben.zustand == Auftrag.ERLEDIGT and not freigegeben.hat_bearbeiter
+    assert freigegeben.letzter_bearbeiter_bindung == pc_zugang
 
     fehler, daten = _werkzeug(client, schluessel, "kipm_lesen", ordner=ordner, auftrag="A-x")
     assert fehler and "Ungültige Nummer" in daten["fehler"]
@@ -231,9 +232,13 @@ def test_assistent_plant_issues_und_arbeitspakete(client, owner, projekt, projek
     auftrag = Auftrag.objects.get(pk=daten["auftrag"]["id"])
     assert auftrag.zustand == Auftrag.ENTWURF and dienst.freigabefaehig(auftrag)
 
-    akteur = dienst.Akteur.aus_bindung(pc_zugang)
-    with pytest.raises(dienst.KeinZugriff):
-        dienst.auftrag_freigeben(akteur, auftrag)
+    # Freds Anweisung im Chat ist die Freigabe; der Verlauf vermerkt sie.
+    fehler, daten = _werkzeug(client, k, "kipm_planen", auftrag=nr, freigeben=True)
+    assert not fehler and daten["auftrag"]["zustand"] == Auftrag.FREIGEGEBEN
+    assert daten["auftrag"]["revision"] == auftrag.revision_nr  # keine neue Revision
+    assert Ereignis.objects.filter(
+        objekt_kennung=nr, ereignis="Freigegeben", anlass=dienst.IM_CHAT_FREIGEGEBEN
+    ).exists()
 
 
 def test_assistent_beantwortet_rueckfrage(client, akteur, projekt, freigegeben, bindung, pc_zugang):

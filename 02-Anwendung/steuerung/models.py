@@ -26,6 +26,11 @@ class Projekt(models.Model):
     entwicklungsstufe = models.TextField("Nächste Entwicklungsstufe", blank=True)
     phase = models.CharField("Phase", max_length=60, blank=True)
     profil_revision = models.PositiveIntegerField("Profilrevision", default=0)
+    # Ein offener Profilentwurf einer KI; gilt erst, wenn Fred ihn übernimmt.
+    profil_entwurf = models.JSONField("Profilentwurf", default=dict, blank=True)
+    profil_entwurf_von = models.CharField(max_length=120, blank=True)
+    profil_entwurf_am = models.DateTimeField(null=True, blank=True)
+    profil_entwurf_basis = models.PositiveIntegerField(default=0)
     # Steigt mit jedem fachlichen Ereignis des Projekts; Lesen und Besuchsmarken zählen nicht.
     inhalt_revision = models.PositiveIntegerField("Inhaltsrevision", default=0)
 
@@ -43,6 +48,11 @@ class Modul(models.Model):
     kennung = models.SlugField("Kennung", max_length=40)
     name = models.CharField("Name", max_length=120)
     aktiv = models.BooleanField("Aktiv", default=True)
+    # Untermodule beliebig tief; ohne Elternmodul hängt das Modul direkt am Projekt.
+    eltern = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="kinder"
+    )
+    revision = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ["name"]
@@ -66,6 +76,11 @@ class Arbeitsort(models.Model):
     pfad = models.CharField("Ordner auf dem Rechner", max_length=300, blank=True)
     repository = models.URLField("Repository (z. B. GitHub)", max_length=300, blank=True)
     aktiv = models.BooleanField("Aktiv", default=True)
+    # Ein Vorschlag einer KI gilt erst nach Bestätigung durch einen Menschen: vorher ordnet er
+    # keinen Ordner zu und zählt nicht für die Freigabe.
+    bestaetigt = models.BooleanField("Bestätigt", default=True)
+    vorgeschlagen_von = models.CharField("Vorgeschlagen von", max_length=120, blank=True)
+    revision = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ["name"]
@@ -147,42 +162,35 @@ class OrdnerAnfrage(models.Model):
 
 
 class Auftrag(models.Model):
-    """Ein Auftrag beginnt als Wunsch und reift zum Arbeitspaket. Nummer ist ``A-<id>``."""
+    """Ein Auftrag beginnt als Entwurf, wird freigegeben, bearbeitet und mit dem Ergebnis
+    erledigt (bestandene technische Prüfungen) oder blockiert. Nummer ist ``A-<id>``."""
 
     ENTWURF = "ENTWURF"
     FREIGEGEBEN = "FREIGEGEBEN"
     IN_ARBEIT = "IN_ARBEIT"
+    BLOCKIERT = "BLOCKIERT"
+    ERLEDIGT = "ERLEDIGT"
+    ABGEBROCHEN = "ABGEBROCHEN"
+    # Frühere Zustände des Ablaufs mit Nutzerabnahme. Migration 0008 überführt sie; kein Ablauf
+    # erreicht sie mehr.
     ZUR_PRUEFUNG = "ZUR_PRUEFUNG"
     NACHARBEIT = "NACHARBEIT"
     ABGENOMMEN = "ABGENOMMEN"
-    BLOCKIERT = "BLOCKIERT"
     KLAERUNG_ERFORDERLICH = "KLAERUNG_ERFORDERLICH"
     PAUSIERT = "PAUSIERT"
-    ABGEBROCHEN = "ABGEBROCHEN"
     ZUSTAENDE = [
         (ENTWURF, "Entwurf"),
         (FREIGEGEBEN, "Freigegeben"),
         (IN_ARBEIT, "In Arbeit"),
-        (ZUR_PRUEFUNG, "Zur Prüfung"),
-        (NACHARBEIT, "Nacharbeit"),
-        (ABGENOMMEN, "Abgenommen"),
         (BLOCKIERT, "Blockiert"),
-        (KLAERUNG_ERFORDERLICH, "Klärung erforderlich"),
-        (PAUSIERT, "Pausiert"),
+        (ERLEDIGT, "Erledigt"),
         (ABGEBROCHEN, "Abgebrochen"),
     ]
     # Zustände, in denen ein Schreibumfang als belegt gilt.
-    BELEGENDE_ZUSTAENDE = (
-        FREIGEGEBEN,
-        IN_ARBEIT,
-        NACHARBEIT,
-        ZUR_PRUEFUNG,
-        BLOCKIERT,
-        PAUSIERT,  # Pause gibt den Schreibumfang nicht frei
-    )
+    BELEGENDE_ZUSTAENDE = (FREIGEGEBEN, IN_ARBEIT, BLOCKIERT)
     # Zustände, in denen ein Bearbeiter zugeordnet ist.
-    BEARBEITER_ZUSTAENDE = (IN_ARBEIT, NACHARBEIT, BLOCKIERT)
-    ENDZUSTAENDE = (ABGENOMMEN, ABGEBROCHEN)
+    BEARBEITER_ZUSTAENDE = (IN_ARBEIT, BLOCKIERT)
+    ENDZUSTAENDE = (ERLEDIGT, ABGEBROCHEN)
 
     PRIO = [("hoch", "hoch"), ("mittel", "mittel"), ("niedrig", "niedrig")]
     TYP_AUFTRAG = "auftrag"
@@ -247,6 +255,7 @@ class Auftrag(models.Model):
         on_delete=models.PROTECT,
         related_name="fruehere_auftraege",
     )
+    # Revision, mit der der Auftrag erledigt wurde (Name aus dem früheren Ablauf mit Abnahme).
     abgenommene_revision = models.PositiveIntegerField(default=0)
     freigegeben_am = models.DateTimeField(null=True, blank=True)
     zuletzt_gemeldet_am = models.DateTimeField(null=True, blank=True)
@@ -381,7 +390,8 @@ class Ergebnis(models.Model):
     revision_nr = models.PositiveIntegerField()
     zusammenfassung = models.TextField("Zusammenfassung")
     dateien = models.TextField("Geänderte Dateien mit Revision (eine je Zeile)", blank=True)
-    pruefschritte = models.TextField("Ausgeführte Prüfungen (eine je Zeile)", blank=True)
+    pruefschritte = models.TextField("Bestandene Prüfungen (eine je Zeile)", blank=True)
+    fehlgeschlagen = models.TextField("Fehlgeschlagene Prüfungen (eine je Zeile)", blank=True)
     luecken = models.TextField("Bekannte Lücken", blank=True)
     eingereicht_von_name = models.CharField(max_length=120)
     bindung = models.ForeignKey(
@@ -406,6 +416,15 @@ class Ergebnis(models.Model):
     @property
     def pruefungsliste(self) -> list[str]:
         return [z.strip() for z in self.pruefschritte.splitlines() if z.strip()]
+
+    @property
+    def fehlgeschlagenliste(self) -> list[str]:
+        return [z.strip() for z in self.fehlgeschlagen.splitlines() if z.strip()]
+
+    @property
+    def ohne_tests(self) -> bool:
+        """Weder bestandene noch fehlgeschlagene Prüfungen gemeldet."""
+        return not (self.pruefungsliste or self.fehlgeschlagenliste)
 
 
 class Pruefung(models.Model):
@@ -663,6 +682,10 @@ class Umgebung(models.Model):
     beschreibung = models.TextField("Zielsystem", blank=True)
     url = models.URLField("Dienstadresse (ohne Geheimnisse)", max_length=300, blank=True)
     aktiv = models.BooleanField(default=True)
+    revision = models.PositiveIntegerField(default=1)
+    # Von einer KI vorgeschlagen: zählt erst nach Übernahme durch Fred für Meldungen.
+    bestaetigt = models.BooleanField("Bestätigt", default=True)
+    vorgeschlagen_von = models.CharField("Vorgeschlagen von", max_length=120, blank=True)
 
     class Meta:
         ordering = ["name"]
@@ -685,6 +708,7 @@ class Release(models.Model):
     zustand = models.CharField(max_length=16, choices=ZUSTAENDE, default=ENTWURF)
     externe_id = models.CharField("Externe Release-ID", max_length=80, blank=True)
     revision = models.PositiveIntegerField(default=1)
+    archiviert = models.BooleanField(default=False)
     angelegt_am = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -747,6 +771,12 @@ class Installation(models.Model):
         "self", null=True, blank=True, on_delete=models.PROTECT, related_name="nachfolger"
     )
     bemerkung = models.TextField(blank=True)
+    modul = models.ForeignKey(
+        Modul, null=True, blank=True, on_delete=models.PROTECT, related_name="installationen"
+    )
+    meldung = models.CharField("Meldungs-ID", max_length=80, blank=True, db_index=True)
+    meldung_hash = models.CharField(max_length=64, blank=True)
+    korrigiert_durch = models.CharField("Korrigiert durch Meldung", max_length=80, blank=True)
 
     class Meta:
         ordering = ["-installiert_am", "-id"]
@@ -802,6 +832,21 @@ class Nachweis(models.Model):
         Ergebnis, null=True, blank=True, on_delete=models.PROTECT, related_name="nachweise"
     )
     kriterien = models.TextField("Geprüfte Kriterien", blank=True)
+    # Meldevertrag (kipm-stand/1): Modul, Auftragsrevision, Herkunft der Meldung, Korrektur und
+    # die getrennte menschliche Bestätigung.
+    modul = models.ForeignKey(
+        Modul, null=True, blank=True, on_delete=models.PROTECT, related_name="nachweise"
+    )
+    komponente = models.CharField("Komponente", max_length=80, blank=True)
+    auftrag_revision = models.PositiveIntegerField(default=0)
+    meldung = models.CharField("Meldungs-ID", max_length=80, blank=True, db_index=True)
+    meldung_hash = models.CharField(max_length=64, blank=True)
+    korrigiert_durch = models.CharField("Korrigiert durch Meldung", max_length=80, blank=True)
+    einschraenkungen = models.TextField("Einschränkungen", blank=True)
+    bestaetigt_von = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    bestaetigt_am = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-beobachtet_am", "-id"]

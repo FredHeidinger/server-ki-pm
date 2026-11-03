@@ -8,6 +8,7 @@ _KLASSEN = {
     Auftrag.ENTWURF: "",
     Auftrag.FREIGEGEBEN: "ok",
     Auftrag.IN_ARBEIT: "ok",
+    Auftrag.ERLEDIGT: "fertig",
     Auftrag.ZUR_PRUEFUNG: "warn",
     Auftrag.NACHARBEIT: "warn",
     Auftrag.ABGENOMMEN: "fertig",

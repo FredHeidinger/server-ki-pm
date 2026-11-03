@@ -35,6 +35,7 @@ from .forms import (
     UnterlageTextForm,
     listen_zusammenfuehren,
 )
+from .kontext import modulwahl
 from .models import (
     Abrufstand,
     Auftrag,
@@ -51,6 +52,7 @@ from .models import (
     Objektversion,
     Projekt,
     Release,
+    Umgebung,
     Unterlage,
 )
 
@@ -116,15 +118,25 @@ def ueberblick(request: HttpRequest, kennung: str) -> HttpResponse:
             aenderungen=akte.aenderungen_seit_besuch(request.user, projekt, grenze),
             grenze=grenze,
             pruefbeduerftig=akte.pruefbeduerftige_auftraege(projekt),
+            modulstaende=(staende := akte.modulstaende(projekt)),
+            modulstand_zeigen=len(staende) > 1 or any(z["gemeldet"] for z in staende),
             kennzahlen={
                 "auftraege": offen.filter(typ=Auftrag.TYP_AUFTRAG).count(),
                 "issues": offen.filter(typ=Auftrag.TYP_ISSUE).count(),
-                "pruefung": offen.filter(zustand=Auftrag.ZUR_PRUEFUNG).count(),
-                "blockiert": offen.filter(
-                    zustand__in=(Auftrag.BLOCKIERT, Auftrag.KLAERUNG_ERFORDERLICH)
-                ).count(),
+                "blockiert": offen.filter(zustand=Auftrag.BLOCKIERT).count(),
             },
-            profil_alt=Ereignis.objects.filter(projekt=projekt, objekt_typ="Projektprofil").first(),
+            profil_alt=Ereignis.objects.filter(
+                projekt=projekt, objekt_typ="Projektprofil", ereignis__startswith="Profil Revision"
+            ).first(),
+            entwurf_hash=akte.entwurf_hash(projekt) if projekt.profil_entwurf else "",
+            profilentwurf=[
+                {
+                    "feld": Projekt._meta.get_field(feld).verbose_name,
+                    "alt": getattr(projekt, feld),
+                    "neu": wert,
+                }
+                for feld, wert in (projekt.profil_entwurf or {}).items()
+            ],
         ),
     )
 
@@ -170,11 +182,9 @@ def profil(request: HttpRequest, kennung: str) -> HttpResponse:
 def funktionen(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
     liste = projekt.funktionen.select_related("modul").prefetch_related("auftraege")
-    modul = request.GET.get("modul", "")
-    if modul == "ohne":
-        liste = liste.filter(modul__isnull=True)
-    elif modul:
-        liste = liste.filter(modul__kennung=modul)
+    filter_, auswahl = modulwahl(projekt, request.GET.get("modul", ""))
+    if filter_:
+        liste = liste.filter(**filter_)
     zeigen_verworfen = request.GET.get("verworfen") == "1"
     if not zeigen_verworfen:
         liste = liste.exclude(planung=Funktion.VERWORFEN)
@@ -185,14 +195,31 @@ def funktionen(request: HttpRequest, kennung: str) -> HttpResponse:
             projekt,
             "funktionen",
             zeilen=[(f, akte.funktionsstand(f)) for f in liste],
-            module_filter=projekt.module.filter(aktiv=True),
-            modul=modul,
             zeigen_verworfen=zeigen_verworfen,
-            meilensteine=projekt.meilensteine.prefetch_related("funktionen"),
+            meilensteine=_meilensteine_mit_form(projekt),
             meilenstein_form=MeilensteinForm(projekt=projekt, prefix="m"),
             zustaende=Meilenstein.ZUSTAENDE,
+            **auswahl,
         ),
     )
+
+
+def _meilensteine_mit_form(projekt: Projekt) -> list:
+    """Meilensteine mit vorbelegtem Bearbeitungsformular (ohne JavaScript bedienbar)."""
+    liste = list(projekt.meilensteine.prefetch_related("funktionen"))
+    for m in liste:
+        m.form = MeilensteinForm(
+            projekt=projekt,
+            prefix=f"m{m.pk}",
+            initial={
+                "name": m.name,
+                "ziel": m.ziel,
+                "zielversion": m.zielversion,
+                "termin": m.termin,
+                "funktionen": list(m.funktionen.all()),
+            },
+        )
+    return liste
 
 
 @login_required
@@ -418,7 +445,9 @@ def betrieb(request: HttpRequest, kennung: str) -> HttpResponse:
             verlauf_installationen=Installation.objects.filter(projekt=projekt).select_related(
                 "umgebung", "release"
             )[:30],
-            releases=projekt.releases.prefetch_related("komponenten"),
+            releases=projekt.releases.filter(archiviert=False).prefetch_related("komponenten"),
+            releases_archiv=projekt.releases.filter(archiviert=True),
+            auftraege_offen=projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE),
             nachweise=Nachweis.objects.filter(
                 projekt=projekt, art__in=(Nachweis.TEST, Nachweis.BETRIEB)
             ).select_related("umgebung", "funktion")[:40],
@@ -674,6 +703,7 @@ def _grenzen() -> dict:
 
     return {
         "datei_mib": settings.KIPM_UPLOAD_MAX // ablage.MIB,
+        "dateien": settings.KIPM_UPLOAD_DATEIEN,
         "projekt_mib": settings.KIPM_PROJEKT_QUOTE // ablage.MIB,
     }
 
@@ -699,45 +729,87 @@ def hochladen(request: HttpRequest, kennung: str, nummer: int | None = None) -> 
 
 @csrf_protect
 def _hochladen(request: HttpRequest, projekt: Projekt, unterlage: Unterlage | None) -> HttpResponse:
+    """Neue Unterlagen: bis zu ``KIPM_UPLOAD_DATEIEN`` Dateien je Vorgang, je Datei eine eigene
+    Unterlage. Neue Version einer Unterlage: genau eine Datei. Erst werden alle Dateien geprüft;
+    ist eine abzuweisen, wird keine gespeichert."""
+    from django.conf import settings
+
+    mehrere = unterlage is None
     if request.method != "POST":
-        form = UnterlageDateiForm(initial={"upload_schluessel": uuid.uuid4().hex})
+        form = UnterlageDateiForm(initial={"upload_schluessel": uuid.uuid4().hex}, mehrere=mehrere)
         return _upload_formular(request, projekt, unterlage, form)
-    form = UnterlageDateiForm(request.POST, request.FILES)
+    form = UnterlageDateiForm(request.POST, request.FILES, mehrere=mehrere)
     if getattr(request, "upload_zu_gross", False):
         fehler = (
-            f"Die Datei ist größer als {_grenzen()['datei_mib']} MiB; nichts wurde gespeichert."
+            f"Eine Datei ist größer als {_grenzen()['datei_mib']} MiB; nichts wurde gespeichert."
         )
-        neu = UnterlageDateiForm(initial={"upload_schluessel": uuid.uuid4().hex})
+        neu = UnterlageDateiForm(initial={"upload_schluessel": uuid.uuid4().hex}, mehrere=mehrere)
         return _upload_formular(request, projekt, unterlage, neu, 413, fehler=fehler)
     if not form.is_valid():
         return _upload_formular(request, projekt, unterlage, form, 400)
-    if len(request.FILES.getlist("datei")) > 1:
-        form.add_error(None, "Bitte genau eine Datei je Vorgang.")
+    dateien = form.cleaned_data["datei"]
+    grenze = 1 if unterlage is not None else settings.KIPM_UPLOAD_DATEIEN
+    # Gezählt wird, was gesendet wurde; das Einzelfeld einer Version sähe nur die erste Datei.
+    if len(request.FILES.getlist("datei")) > grenze:
+        form.add_error(
+            None,
+            "Eine neue Version besteht aus genau einer Datei."
+            if unterlage is not None
+            else f"Höchstens {grenze} Dateien je Vorgang; nichts wurde gespeichert.",
+        )
         return _upload_formular(request, projekt, unterlage, form, 400)
     d = form.cleaned_data
+    eingaenge = []
     try:
-        eingang = ablage.annehmen(d["datei"])
-        v = akte.datei_aufnehmen(
-            _akteur(request),
-            projekt,
-            eingang,
-            upload_schluessel=d["upload_schluessel"],
-            unterlage=unterlage,
-            erwartete_nr=int(request.POST["erwartete_nr"])
-            if request.POST.get("erwartete_nr")
-            else None,
-            titel=d["titel"],
-            beschreibung=d["beschreibung"],
-        )
+        for datei in dateien:
+            try:
+                eingaenge.append(ablage.annehmen(datei))
+            except ablage.Abgewiesen as fehler:
+                raise dienst.DienstFehler(f"{datei.name}: {fehler}") from fehler
     except dienst.DienstFehler as fehler:
-        form.add_error(None, str(fehler))
+        for e in eingaenge:
+            e.verwerfen()
+        form.add_error(None, f"{fehler} Nichts wurde gespeichert.")
         return _upload_formular(request, projekt, unterlage, form, 400)
-    messages.success(
-        request,
-        f"{v.unterlage.kennung} Version {v.nummer} gespeichert · Prüfung: {v.get_pruefung_display()}"
-        + (f" ({v.pruefhinweis})" if v.pruefhinweis else ""),
-    )
-    return redirect("unterlage_detail", kennung=projekt.kennung, nummer=v.unterlage.nummer)
+    gespeichert, fehlgeschlagen = [], []
+    for nr, eingang in enumerate(eingaenge):
+        try:
+            v = akte.datei_aufnehmen(
+                _akteur(request),
+                projekt,
+                eingang,
+                # Je Datei ein eigener, wiederholbarer Schlüssel: ein erneutes Absenden legt
+                # nichts doppelt an.
+                upload_schluessel=d["upload_schluessel"]
+                if nr == 0
+                else f"{d['upload_schluessel']}-{nr}",
+                unterlage=unterlage,
+                erwartete_nr=int(request.POST["erwartete_nr"])
+                if request.POST.get("erwartete_nr")
+                else None,
+                titel=d["titel"] if len(eingaenge) == 1 else "",
+                beschreibung=d["beschreibung"],
+            )
+        except dienst.DienstFehler as fehler:
+            fehlgeschlagen.append(f"{eingang.originalname}: {fehler}")
+            continue
+        gespeichert.append(v)
+    if fehlgeschlagen and not gespeichert:
+        form.add_error(None, " ".join(fehlgeschlagen))
+        return _upload_formular(request, projekt, unterlage, form, 400)
+    for v in gespeichert:
+        messages.success(
+            request,
+            f"{v.unterlage.kennung} Version {v.nummer} gespeichert · Prüfung: "
+            f"{v.get_pruefung_display()}" + (f" ({v.pruefhinweis})" if v.pruefhinweis else ""),
+        )
+    for text in fehlgeschlagen:
+        messages.error(request, f"Nicht gespeichert: {text}")
+    if len(gespeichert) == 1:
+        return redirect(
+            "unterlage_detail", kennung=projekt.kennung, nummer=gespeichert[0].unterlage.nummer
+        )
+    return redirect(reverse("akte_wissen", kwargs={"kennung": projekt.kennung}))
 
 
 @login_required
@@ -764,6 +836,10 @@ def unterlage_detail(request: HttpRequest, kennung: str, nummer: int) -> HttpRes
             ],
             funktionen=projekt.funktionen.exclude(planung=Funktion.VERWORFEN),
             auftraege=projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE),
+            entscheidungen=Entscheidung.objects.filter(betroffene_projekte=projekt)
+            .exclude(zustand=Entscheidung.ZURUECKGEZOGEN)
+            .distinct(),
+            releases=projekt.releases.filter(archiviert=False),
             text_form=UnterlageTextForm(
                 initial={"titel": u.titel, "text": aktuell.text if aktuell else ""}
             )
@@ -832,6 +908,12 @@ def unterlage_aktion(request: HttpRequest, kennung: str, nummer: int, aktion: st
             felder["funktion"] = get_object_or_404(Funktion, pk=pk or 0, projekt=projekt)
         elif art == "a":
             felder["auftrag"] = get_object_or_404(Auftrag, pk=pk or 0, projekt=projekt)
+        elif art == "e":
+            felder["entscheidung"] = get_object_or_404(
+                Entscheidung, pk=pk or 0, betroffene_projekte=projekt
+            )
+        elif art == "r":
+            felder["release"] = get_object_or_404(Release, pk=pk or 0, projekt=projekt)
         else:
             messages.error(request, "Bitte ein Ziel wählen.")
             return redirect("unterlage_detail", kennung=kennung, nummer=nummer)
@@ -958,20 +1040,29 @@ def ki_kontext(request: HttpRequest, kennung: str) -> HttpResponse:
 def einstellungen(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
     module = list(projekt.module.all())
+    baum = dienst.modulbaum(projekt)
+    for k in baum["flach"]:
+        # Umhängen nur unter Module außerhalb des eigenen Teilbaums.
+        eigene = set(dienst.modul_teilbaum(k.modul))
+        k.ziele = [z.modul for z in baum["flach"] if z.modul.pk not in eigene]
+        k.aktive_kinder = bool(k.kinder)
     return render(
         request,
         "steuerung/projekt_einstellungen.html",
         _kontext(
             projekt,
             "einstellungen",
-            arbeitsorte=projekt.arbeitsorte.all(),
+            arbeitsorte_aktiv=projekt.arbeitsorte.filter(aktiv=True),
+            arbeitsorte_archiv=projekt.arbeitsorte.filter(aktiv=False),
             bindungen=projekt.bindungen.all(),
             ki=ChatBindung.objects.filter(letztes_projekt=projekt).order_by("-zuletzt_aktiv")[:5],
             arbeitsort_form=ArbeitsortForm(prefix="ort"),
             modul_form=ModulForm(prefix="modul"),
-            modulkarten=[m for m in module if m.aktiv],
+            modulbaum=baum,
             modularchiv=[m for m in module if not m.aktiv],
-            umgebungen=projekt.umgebungen.all(),
+            umgebungen_aktiv=projekt.umgebungen.filter(aktiv=True),
+            umgebungen_archiv=projekt.umgebungen.filter(aktiv=False),
+            umgebungsarten=Umgebung.ARTEN,
             umgebung_form=UmgebungForm(prefix="u"),
             repos=projekt.repos.all(),
             repo_form=RepoForm(prefix="r"),
@@ -1193,3 +1284,173 @@ def github_aktion_schritt(
     else:
         raise Http404
     return redirect("github_aktion", kennung=kennung, aktions_id=aktions_id)
+
+
+# --- Pflege: Umgebungen, Releases, Meilensteine, GitHub-Verknüpfung, Profilentwurf ----------
+
+
+@login_required
+@require_POST
+def umgebung_pflegen(request: HttpRequest, kennung: str, pk: int, wahl: str) -> HttpResponse:
+    """Umgebung übernehmen (Entwurf einer KI), ändern, archivieren oder zurückholen."""
+    projekt = _projekt(kennung)
+    u = get_object_or_404(Umgebung, pk=pk, projekt=projekt)
+    akteur = _akteur(request)
+    if wahl == "bestaetigen":
+        _ausfuehren(
+            request,
+            f"Umgebung „{u.name}“ übernommen.",
+            akte.umgebung_bestaetigen,
+            akteur,
+            u,
+            erwartete_revision=request.POST.get("revision") or None,
+        )
+    elif wahl == "aendern":
+        form = UmgebungForm(request.POST, prefix=f"u{u.pk}")
+        if form.is_valid():
+            _ausfuehren(
+                request,
+                "Umgebung gespeichert.",
+                akte.umgebung_aendern,
+                akteur,
+                u,
+                erwartete_revision=request.POST.get("revision") or None,
+                **form.cleaned_data,
+            )
+        else:
+            messages.error(
+                request, "Umgebung: Name und Art sind erforderlich, die Adresse muss gültig sein."
+            )
+    elif wahl in ("archivieren", "zurueckholen"):
+        _ausfuehren(
+            request,
+            "Umgebung archiviert." if wahl == "archivieren" else "Umgebung wieder aktiv.",
+            akte.umgebung_aendern,
+            akteur,
+            u,
+            erwartete_revision=request.POST.get("revision") or None,
+            aktiv=wahl == "zurueckholen",
+        )
+    else:
+        raise Http404
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#umgebungen")
+
+
+@login_required
+@require_POST
+def release_pflegen(request: HttpRequest, kennung: str, pk: int, wahl: str) -> HttpResponse:
+    """Release bearbeiten (Komponenten nur im Entwurf), archivieren oder zurückholen."""
+    projekt = _projekt(kennung)
+    r = get_object_or_404(Release, pk=pk, projekt=projekt)
+    revision = request.POST.get("revision") or None
+    if wahl == "aendern":
+        felder = {
+            "titel": request.POST.get("titel", ""),
+            "beschreibung": request.POST.get("beschreibung", ""),
+        }
+        if r.zustand == Release.ENTWURF and "komponenten" in request.POST:
+            form = ReleaseForm(
+                {"kennung": r.kennung, "komponenten": request.POST.get("komponenten", "")}
+            )
+            form.is_valid()
+            felder["komponenten"] = (
+                form.komponentenliste() if "komponenten" in form.cleaned_data else []
+            )
+        _ausfuehren(
+            request,
+            f"Release {r.kennung} gespeichert.",
+            akte.release_aendern,
+            _akteur(request),
+            r,
+            erwartete_revision=revision,
+            **felder,
+        )
+    elif wahl in ("archivieren", "zurueckholen"):
+        _ausfuehren(
+            request,
+            f"Release {r.kennung} archiviert."
+            if wahl == "archivieren"
+            else "Release wieder aktiv.",
+            akte.release_aendern,
+            _akteur(request),
+            r,
+            erwartete_revision=revision,
+            archiviert=wahl == "archivieren",
+        )
+    else:
+        raise Http404
+    return redirect(reverse("akte_betrieb", kwargs={"kennung": kennung}) + "#releases")
+
+
+@login_required
+@require_POST
+def meilenstein_bearbeiten(request: HttpRequest, kennung: str, pk: int) -> HttpResponse:
+    projekt = _projekt(kennung)
+    m = get_object_or_404(Meilenstein, pk=pk, projekt=projekt)
+    form = MeilensteinForm(request.POST, projekt=projekt, prefix=f"m{m.pk}")
+    if form.is_valid():
+        d = form.cleaned_data
+        _ausfuehren(
+            request,
+            f"Meilenstein „{d['name']}“ gespeichert.",
+            akte.meilenstein_bearbeiten,
+            _akteur(request),
+            m,
+            erwartete_revision=request.POST.get("revision") or None,
+            name=d["name"],
+            ziel=d["ziel"],
+            zielversion=d["zielversion"],
+            termin=d["termin"],
+            funktionen=list(d["funktionen"]),
+        )
+    else:
+        messages.error(request, "Meilenstein: Name ist erforderlich, der Termin ein Datum.")
+    return redirect(reverse("akte_funktionen", kwargs={"kennung": kennung}) + "#meilensteine")
+
+
+@login_required
+@require_POST
+def github_objekt_verknuepfen(request: HttpRequest, kennung: str, pk: int) -> HttpResponse:
+    """GitHub-Issue oder Pull Request mit einem Auftrag dieses Projekts verknüpfen oder lösen."""
+    projekt = _projekt(kennung)
+    o = get_object_or_404(ExternesObjekt, pk=pk, verbindung__projekt=projekt)
+    auftrag = None
+    if request.POST.get("auftrag"):
+        auftrag = get_object_or_404(Auftrag, pk=request.POST["auftrag"], projekt=projekt)
+    _ausfuehren(
+        request,
+        f"Mit {auftrag.nummer} verknüpft." if auftrag else "Verknüpfung gelöst.",
+        abgleich.objekt_verknuepfen,
+        _akteur(request),
+        o,
+        auftrag,
+    )
+    return redirect(reverse("akte_betrieb", kwargs={"kennung": kennung}) + "#github")
+
+
+@login_required
+@require_POST
+def profil_entwurf(request: HttpRequest, kennung: str, wahl: str) -> HttpResponse:
+    projekt = _projekt(kennung)
+    if wahl not in ("uebernehmen", "verwerfen"):
+        raise Http404
+    _ausfuehren(
+        request,
+        "Profilentwurf übernommen." if wahl == "uebernehmen" else "Profilentwurf verworfen.",
+        akte.profil_entwurf_uebernehmen,
+        _akteur(request),
+        projekt,
+        uebernehmen=wahl == "uebernehmen",
+        erwarteter_entwurf=request.POST.get("entwurf", ""),
+    )
+    return redirect("projekt_detail", kennung=kennung)
+
+
+@login_required
+@require_POST
+def nachweis_bestaetigen(request: HttpRequest, kennung: str, pk: int) -> HttpResponse:
+    """Gemeldete Umsetzung oder Prüfung als Mensch bestätigen; nie die eigene Meldung."""
+    projekt = _projekt(kennung)
+    n = get_object_or_404(Nachweis, pk=pk, projekt=projekt)
+    _ausfuehren(request, "Meldung bestätigt.", akte.nachweis_bestaetigen, _akteur(request), n)
+    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#modulstand")

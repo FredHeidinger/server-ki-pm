@@ -33,7 +33,9 @@ from .forms import (
     WunschForm,
     listen_zusammenfuehren,
 )
+from .kontext import modulwahl
 from .models import (
+    Arbeitsort,
     Auftrag,
     ChatBindung,
     Entscheidung,
@@ -173,31 +175,20 @@ def _projekt_kontext(projekt: Projekt, reiter: str) -> dict:
 SPALTEN = [
     ("entwurf", "Entwurf", Auftrag.ENTWURF, (Auftrag.ENTWURF,)),
     ("freigegeben", "Freigegeben", Auftrag.FREIGEGEBEN, (Auftrag.FREIGEGEBEN,)),
-    (
-        "arbeit",
-        "In Arbeit",
-        Auftrag.IN_ARBEIT,
-        (
-            Auftrag.IN_ARBEIT,
-            Auftrag.NACHARBEIT,
-            Auftrag.BLOCKIERT,
-            Auftrag.PAUSIERT,
-            Auftrag.KLAERUNG_ERFORDERLICH,
-        ),
-    ),
-    ("pruefung", "Zur Prüfung", Auftrag.ZUR_PRUEFUNG, (Auftrag.ZUR_PRUEFUNG,)),
-    ("abgenommen", "Abgenommen", Auftrag.ABGENOMMEN, (Auftrag.ABGENOMMEN,)),
+    ("arbeit", "In Arbeit", Auftrag.IN_ARBEIT, (Auftrag.IN_ARBEIT,)),
+    ("blockiert", "Blockiert", Auftrag.BLOCKIERT, (Auftrag.BLOCKIERT,)),
+    ("erledigt", "Erledigt", Auftrag.ERLEDIGT, (Auftrag.ERLEDIGT,)),
 ]
 PRIO_RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
 
 
 def _spalten(auftraege) -> list[dict]:
-    """Aufträge auf die Board-Spalten verteilen; Abgenommene nur die letzten zehn."""
+    """Aufträge auf die Board-Spalten verteilen; Erledigte nur die letzten zehn."""
     spalten = []
     for klasse, titel, haupt, zustaende in SPALTEN:
         karten = [a for a in auftraege if a.zustand in zustaende]
         karten.sort(key=lambda a: (PRIO_RANG[a.prioritaet], -a.pk))
-        if haupt == Auftrag.ABGENOMMEN:
+        if haupt == Auftrag.ERLEDIGT:
             karten = sorted(karten, key=lambda a: -a.pk)[:10]
         spalten.append({"klasse": klasse, "titel": titel, "hauptzustand": haupt, "karten": karten})
     return spalten
@@ -221,14 +212,11 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     if art in dict(Auftrag.TYPEN):
         liste = liste.filter(typ=art)
     kontext["art"] = art
-    modul = request.GET.get("modul", "")
-    if modul == "ohne":
-        liste = liste.filter(modul__isnull=True)
-    elif modul:
-        liste = liste.filter(modul__kennung=modul)
-    kontext["modul"] = modul
     if kontext.get("projekt") is not None:
-        kontext["module_filter"] = kontext["projekt"].module.filter(aktiv=True)
+        filter_, auswahl = modulwahl(kontext["projekt"], request.GET.get("modul", ""))
+        if filter_:
+            liste = liste.filter(**filter_)
+        kontext.update(auswahl)
     if ansicht == "board":
         alle = list(liste)
         for a in alle:
@@ -286,7 +274,6 @@ def projekt_auftraege(request: HttpRequest, kennung: str) -> HttpResponse:
         for e in dienst.posteingang(request.user)
         if e.get("auftrag") is not None and e["auftrag"].projekt_id == projekt.pk
     ]
-    kontext["pruefung_anzahl"] = projekt.auftraege.filter(zustand=Auftrag.ZUR_PRUEFUNG).count()
     return _auftragsliste(request, liste, "steuerung/projekt_auftraege.html", kontext)
 
 
@@ -375,8 +362,18 @@ def modul_neu(request: HttpRequest, kennung: str) -> HttpResponse:
     if form.is_valid():
         try:
             name = form.cleaned_data["name"]
-            dienst.modul_anlegen(_akteur(request), projekt, kennung=slugify(name), name=name)
-            messages.success(request, f"Modul „{name}“ angelegt.")
+            eltern = None
+            if request.POST.get("eltern"):
+                eltern = _modul(kennung, request.POST["eltern"])
+            dienst.modul_anlegen(
+                _akteur(request),
+                projekt,
+                kennung=dienst.freie_kennung(Modul, projekt, name, "modul"),
+                name=name,
+                eltern=eltern,
+            )
+            wort = f"Untermodul von „{eltern.name}“" if eltern else "Modul"
+            messages.success(request, f"{wort} „{name}“ angelegt.")
         except dienst.DienstFehler as fehler:
             _fehler_anzeigen(request, fehler)
     else:
@@ -393,8 +390,14 @@ def _modul(kennung: str, modul: str) -> Modul:
 def modul_aendern(request: HttpRequest, kennung: str, modul: str) -> HttpResponse:
     m = _modul(kennung, modul)
     try:
-        dienst.modul_aendern(_akteur(request), m, name=request.POST.get("name", ""))
-        messages.success(request, f"Modul heißt jetzt „{m.name}“.")
+        felder = {"name": request.POST.get("name", "")}
+        if "eltern" in request.POST:
+            wert = request.POST["eltern"]
+            felder["eltern"] = _modul(kennung, wert) if wert else None
+        m = dienst.modul_aendern(
+            _akteur(request), m, erwartete_revision=request.POST.get("revision") or None, **felder
+        )
+        messages.success(request, f"Modul „{m.name}“ gespeichert.")
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
     return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#module")
@@ -406,7 +409,12 @@ def modul_archivieren(request: HttpRequest, kennung: str, modul: str) -> HttpRes
     m = _modul(kennung, modul)
     aktiv = request.POST.get("aktiv") == "1"
     try:
-        dienst.modul_archivieren(_akteur(request), m, aktiv=aktiv)
+        dienst.modul_archivieren(
+            _akteur(request),
+            m,
+            aktiv=aktiv,
+            erwartete_revision=request.POST.get("revision") or None,
+        )
         messages.success(
             request, f"Modul „{m.name}“ ist {'wieder aktiv' if aktiv else 'archiviert'}."
         )
@@ -454,6 +462,46 @@ def arbeitsort_neu(request: HttpRequest, kennung: str) -> HttpResponse:
             request, "Arbeitsort: Der Name ist erforderlich, das Repository muss eine Adresse sein."
         )
     return redirect("projekt_einstellungen", kennung=kennung)
+
+
+@login_required
+@require_POST
+def arbeitsort_pflegen(request: HttpRequest, kennung: str, pk: int, wahl: str) -> HttpResponse:
+    """Arbeitsort in den Projekteinstellungen: Vorschlag übernehmen, ändern, archivieren."""
+    ort = get_object_or_404(Arbeitsort, projekt__kennung=kennung, pk=pk)
+    akteur = _akteur(request)
+    try:
+        if wahl == "bestaetigen":
+            dienst.arbeitsort_bestaetigen(
+                akteur, ort, erwartete_revision=request.POST.get("revision") or None
+            )
+            messages.success(request, f"Arbeitsort „{ort.name}“ übernommen.")
+        elif wahl == "aendern":
+            form = ArbeitsortForm(request.POST, prefix=f"ort{ort.pk}")
+            if not form.is_valid():
+                raise dienst.DienstFehler(
+                    "Arbeitsort: Der Name ist erforderlich, das Repository muss eine Adresse sein."
+                )
+            dienst.arbeitsort_aendern(
+                akteur,
+                ort,
+                erwartete_revision=request.POST.get("revision") or None,
+                **form.cleaned_data,
+            )
+            messages.success(request, "Arbeitsort gespeichert.")
+        elif wahl in ("archivieren", "zurueckholen"):
+            dienst.arbeitsort_aendern(
+                akteur, ort, erwartete_revision=None, aktiv=wahl == "zurueckholen"
+            )
+            messages.success(
+                request,
+                f"Arbeitsort „{ort.name}“ ist {'wieder aktiv' if wahl == 'zurueckholen' else 'archiviert'}.",
+            )
+        else:
+            raise Http404
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#arbeitsorte")
 
 
 # --- Aufträge: Anlegen, Detail, Aktionen ---------------------------------------------------
@@ -510,11 +558,7 @@ def _auftrag_oder_404(auftrag_id: int) -> Auftrag:
 def _aktionen(auftrag: Auftrag, benutzer) -> tuple[list[dict], bool, list]:
     """Welche Aktionen gerade erlaubt sind, und warum nicht. Reihenfolge ist die Anzeige."""
     z = auftrag.zustand
-    pruefpunkte = (
-        dienst.freigabepruefung(auftrag)
-        if z in (Auftrag.ENTWURF, Auftrag.KLAERUNG_ERFORDERLICH)
-        else []
-    )
+    pruefpunkte = dienst.freigabepruefung(auftrag) if z == Auftrag.ENTWURF else []
     offen = [p.text for p in pruefpunkte if not p.erfuellt]
     aktionen: list[dict] = []
 
@@ -531,7 +575,7 @@ def _aktionen(auftrag: Auftrag, benutzer) -> tuple[list[dict], bool, list]:
         )
 
     bearbeitbar = z in dienst.BEARBEITBARE_ZUSTAENDE
-    if z in (Auftrag.ENTWURF, Auftrag.KLAERUNG_ERFORDERLICH):
+    if z == Auftrag.ENTWURF:
         a("freigeben", "Freigeben", not offen, "; ".join(offen))
     if z == Auftrag.FREIGEGEBEN:
         a(
@@ -545,13 +589,41 @@ def _aktionen(auftrag: Auftrag, benutzer) -> tuple[list[dict], bool, list]:
         a("hindernis_aufheben", "Blockade aufheben, weiter", True)
     if z in Auftrag.BEARBEITER_ZUSTAENDE:
         a("unklar", "Bearbeitung ist unklar", True, "", True, True)
-    if z in (Auftrag.FREIGEGEBEN, Auftrag.IN_ARBEIT, Auftrag.NACHARBEIT, Auftrag.BLOCKIERT):
-        a("pausieren", "Pausieren", True)
-    if z == Auftrag.PAUSIERT:
-        a("fortsetzen", "Fortsetzen", True)
     if not auftrag.ist_endzustand:
         a("abbrechen", "Abbrechen", True, "", True, True)
     return aktionen, bearbeitbar, pruefpunkte
+
+
+HAUPTAKTIONEN = ("freigeben", "selbst", "hindernis_aufheben")
+
+
+def _naechster_schritt(auftrag: Auftrag, pruefpunkte, ergebnis) -> dict:
+    """Was jetzt zu tun ist, in einem Satz; die Hauptaktion steht daneben."""
+    z = auftrag.zustand
+    offen = [p for p in pruefpunkte if not p.erfuellt]
+    if z == Auftrag.ENTWURF:
+        if auftrag.aktuelle_revision.ist_wunsch:
+            return {"text": "Planen: Ziel, Umfang und Abnahmekriterien festlegen", "planen": True}
+        if offen:
+            nur_ort = all(p.arbeitsort_wahl for p in offen)
+            return {
+                "text": "Arbeitsort festlegen, dann freigeben"
+                if nur_ort
+                else "Fertig planen: " + ", ".join(p.text for p in offen),
+                "planen": not nur_ort,
+            }
+        return {"text": "Bereit zur Freigabe"}
+    if z == Auftrag.FREIGEGEBEN:
+        return {"text": "Freigegeben; wartet auf Übernahme durch einen Bearbeiter"}
+    if z == Auftrag.IN_ARBEIT:
+        return {
+            "text": f"In Arbeit bei {auftrag.bearbeiter_name or 'einem Bearbeiter'}; nichts zu tun"
+        }
+    if z == Auftrag.BLOCKIERT:
+        return {"text": "Blockiert: Rückfrage, Hindernis oder Fehler beantworten"}
+    if z == Auftrag.ERLEDIGT and ergebnis is not None and ergebnis.ohne_tests:
+        return {"text": "Erledigt, ohne automatische Tests"}
+    return {"text": f"Abgeschlossen: {auftrag.get_zustand_display()}"}
 
 
 def _auftrag_kontext(request: HttpRequest, auftrag: Auftrag) -> dict:
@@ -597,6 +669,13 @@ def _auftrag_kontext(request: HttpRequest, auftrag: Auftrag) -> dict:
         "revisionen": auftrag.revisionen.all(),
         "abgeleitete": auftrag.abgeleitete.all(),
         "zurueck": request.GET.get("zurueck", ""),
+        "arbeitsorte": auftrag.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True),
+        "arbeitsort_form": ArbeitsortForm(prefix="ort"),
+        "schritt": _naechster_schritt(auftrag, pruefpunkte, ergebnis),
+        "hauptaktionen": [a for a in aktionen if a["name"] in HAUPTAKTIONEN],
+        "weitere_aktionen": [a for a in aktionen if a["name"] not in HAUPTAKTIONEN],
+        "pruef_erfuellt": sum(1 for p in pruefpunkte if p.erfuellt),
+        "arbeit_anzahl": auftrag.meldungen.count() + auftrag.ergebnisse.count(),
     }
 
 
@@ -683,11 +762,9 @@ def _folge_der_bearbeitung(auftrag: Auftrag) -> str:
         return "Die Freigabe erlischt; der Auftrag geht zurück in den Entwurf."
     if auftrag.zustand in Auftrag.BEARBEITER_ZUSTAENDE:
         return (
-            f"Die Übernahme von {auftrag.bearbeiter_name} erlischt; der Auftrag wird "
-            "„Klärung erforderlich“ und muss neu freigegeben und erneut übernommen werden."
+            f"Die Übernahme von {auftrag.bearbeiter_name} erlischt; der Auftrag geht zurück in "
+            "den Entwurf und muss neu freigegeben und erneut übernommen werden."
         )
-    if auftrag.zustand == Auftrag.PAUSIERT:
-        return "Die Pause endet; der Auftrag geht in Entwurf oder Klärung."
     return ""
 
 
@@ -717,9 +794,7 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
             messages.success(request, "Abgebrochen.")
         elif aktion == "unklar":
             dienst.bearbeitung_unklar(akteur, auftrag, grund)
-            messages.success(
-                request, "Als „Klärung erforderlich“ markiert; die Übernahme ist erloschen."
-            )
+            messages.success(request, "Die Übernahme ist beendet; der Auftrag ist wieder Entwurf.")
         elif aktion == "hindernis_aufheben":
             dienst.hindernis_aufheben(akteur, auftrag, grund)
             messages.success(request, "Blockade aufgehoben.")
@@ -727,7 +802,7 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
             dienst.auftrag_uebernehmen(akteur, auftrag, auftrag.revision_nr)
             messages.success(
                 request,
-                f"Du bearbeitest {auftrag.nummer} jetzt selbst. Dein Ergebnis prüft ein anderer Mensch.",
+                f"Du bearbeitest {auftrag.nummer} jetzt selbst. Mit deinem Ergebnis ist er erledigt.",
             )
         elif aktion == "vorgaenger":
             vorgaenger = get_object_or_404(Auftrag, pk=request.POST.get("vorgaenger"))
@@ -741,6 +816,67 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
             _pruefen(request, auftrag, akteur)
         else:
             raise Http404
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return _zurueck(request, f"/auftraege/{auftrag.pk}/")
+
+
+@login_required
+@require_POST
+def auftrag_arbeitsort(request: HttpRequest, auftrag_id: int, wahl: str) -> HttpResponse:
+    """Arbeitsort direkt aus der Freigabeprüfung: vorhandenen setzen, neuen anlegen und setzen,
+    den Vorschlag einer KI übernehmen, ändern oder verwerfen."""
+    auftrag = _auftrag_oder_404(auftrag_id)
+    akteur = _akteur(request)
+    orte = auftrag.projekt.arbeitsorte
+    try:
+        if wahl == "setzen":
+            ort = get_object_or_404(
+                orte, pk=request.POST.get("arbeitsort") or 0, aktiv=True, bestaetigt=True
+            )
+            dienst.arbeitsort_setzen(akteur, auftrag, ort)
+            messages.success(request, f"Arbeitsort „{ort.name}“ gesetzt.")
+        elif wahl == "neu":
+            form = ArbeitsortForm(request.POST, prefix="ort")
+            if not form.is_valid():
+                raise dienst.DienstFehler(
+                    "Arbeitsort: Der Name ist erforderlich, das Repository muss eine Adresse sein."
+                )
+            d = form.cleaned_data
+            kennung = dienst.freie_kennung(Arbeitsort, auftrag.projekt, d["name"], "ort")
+            ort = dienst.arbeitsort_anlegen(akteur, auftrag.projekt, kennung=kennung, **d)
+            dienst.arbeitsort_setzen(akteur, auftrag, ort)
+            messages.success(request, f"Arbeitsort „{ort.name}“ angelegt und gesetzt.")
+        else:
+            ort = get_object_or_404(orte, pk=request.POST.get("arbeitsort") or 0)
+            if wahl == "bestaetigen":
+                dienst.arbeitsort_bestaetigen(
+                    akteur, ort, erwartete_revision=request.POST.get("revision") or None
+                )
+                messages.success(request, f"Vorschlag „{ort.name}“ übernommen.")
+            elif wahl == "aendern":
+                form = ArbeitsortForm(request.POST, prefix="ort")
+                if not form.is_valid():
+                    raise dienst.DienstFehler(
+                        "Arbeitsort: Der Name ist erforderlich, das Repository muss eine Adresse sein."
+                    )
+                dienst.arbeitsort_aendern(
+                    akteur,
+                    ort,
+                    erwartete_revision=request.POST.get("revision") or None,
+                    bestaetigen=True,
+                    **form.cleaned_data,
+                )
+                messages.success(
+                    request, f"Arbeitsort „{form.cleaned_data['name']}“ gespeichert und übernommen."
+                )
+            elif wahl == "verwerfen":
+                dienst.arbeitsort_aendern(
+                    akteur, ort, erwartete_revision=None, aktiv=False, grund="Vorschlag verworfen"
+                )
+                messages.success(request, f"Vorschlag „{ort.name}“ verworfen.")
+            else:
+                raise Http404
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
     return _zurueck(request, f"/auftraege/{auftrag.pk}/")
@@ -812,7 +948,7 @@ def auftrag_teilen(request: HttpRequest, auftrag_id: int) -> HttpResponse:
 def eigenes_ergebnis(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     auftrag = _auftrag_oder_404(auftrag_id)
     form = EigenesErgebnisForm(
-        listen_zusammenfuehren(request.POST, "dateien", "pruefungen")
+        listen_zusammenfuehren(request.POST, "dateien", "pruefungen", "fehlgeschlagen")
         if request.method == "POST"
         else None
     )
@@ -824,7 +960,12 @@ def eigenes_ergebnis(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         except dienst.DienstFehler as fehler:
             form.add_error(None, str(fehler))
         else:
-            messages.success(request, f"Ergebnis zu {auftrag.nummer} ist eingereicht.")
+            auftrag.refresh_from_db()
+            messages.success(
+                request,
+                f"Ergebnis zu {auftrag.nummer} ist eingereicht; Auftrag "
+                f"{auftrag.get_zustand_display()}.",
+            )
             return redirect("auftrag_detail", auftrag_id=auftrag.pk)
     return render(request, "steuerung/eigenes_ergebnis.html", {"auftrag": auftrag, "form": form})
 

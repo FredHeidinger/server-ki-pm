@@ -1,0 +1,41 @@
+{% with ort=rev.arbeitsort %}
+<div class="ortwahl">
+{% if ort and ort.aktiv and not ort.bestaetigt %}
+  <div class="vorschlag">
+    <p class="gedaempft klein">Vorschlag von <span class="ki">KI</span> {{ ort.vorgeschlagen_von|default:"einer KI" }}</p>
+    <p><strong>{{ ort.name }}</strong>{% if ort.pfad %} · <code>{{ ort.pfad }}</code>{% endif %}{% if ort.repository %}<br><span class="gedaempft klein">{{ ort.repository }}</span>{% endif %}</p>
+    <div class="knopfzeile">
+      <form method="post" action="{% url 'auftrag_arbeitsort' auftrag_id=auftrag.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="arbeitsort" value="{{ ort.pk }}"><input type="hidden" name="revision" value="{{ ort.revision }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>
+      <form method="post" action="{% url 'auftrag_arbeitsort' auftrag_id=auftrag.pk wahl='verwerfen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="arbeitsort" value="{{ ort.pk }}"><button type="submit" class="knopf zweit klein">Verwerfen</button></form>
+    </div>
+    <details class="ortformular"><summary class="knopf zweit klein">Ändern</summary>
+      <form method="post" action="{% url 'auftrag_arbeitsort' auftrag_id=auftrag.pk wahl='aendern' %}" class="formular klein">{% csrf_token %}
+        <input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="arbeitsort" value="{{ ort.pk }}"><input type="hidden" name="revision" value="{{ ort.revision }}">
+        <p class="feld"><label for="ort-name-{{ ort.pk }}">Name <span class="stufe pflicht">Pflicht</span></label><input type="text" id="ort-name-{{ ort.pk }}" name="ort-name" value="{{ ort.name }}" maxlength="120" required></p>
+        <p class="feld"><label for="ort-pfad-{{ ort.pk }}">Ordner auf dem PC <span class="stufe optional">optional</span></label><input type="text" id="ort-pfad-{{ ort.pk }}" name="ort-pfad" value="{{ ort.pfad }}" maxlength="300"></p>
+        <p class="feld"><label for="ort-rechner-{{ ort.pk }}">PC <span class="stufe optional">optional</span></label><input type="text" id="ort-rechner-{{ ort.pk }}" name="ort-rechner" value="{{ ort.rechner }}" maxlength="120"></p>
+        <p class="feld"><label for="ort-repo-{{ ort.pk }}">Repository <span class="stufe optional">optional</span></label><input type="text" id="ort-repo-{{ ort.pk }}" name="ort-repository" value="{{ ort.repository }}" maxlength="300"></p>
+        <button type="submit" class="knopf klein">Speichern und übernehmen</button>
+      </form>
+    </details>
+    <p class="gedaempft klein">Gilt erst nach deinem Häkchen; vorher ordnet er keinen Ordner zu.</p>
+  </div>
+{% else %}
+  {% if arbeitsorte %}
+  <form method="post" action="{% url 'auftrag_arbeitsort' auftrag_id=auftrag.pk wahl='setzen' %}" class="ortauswahl">{% csrf_token %}
+    <input type="hidden" name="zurueck" value="{{ zurueck }}">
+    <label for="ortwahl-{{ auftrag.pk }}" class="gedaempft klein">Arbeitsort</label>
+    <select id="ortwahl-{{ auftrag.pk }}" name="arbeitsort" required><option value="">Arbeitsort wählen …</option>{% for o in arbeitsorte %}<option value="{{ o.pk }}">{{ o.name }}{% if o.pfad %} · {{ o.pfad }}{% endif %}</option>{% endfor %}</select>
+    <button type="submit" class="knopf zweit klein">Setzen</button>
+  </form>
+  {% endif %}
+  <details class="ortformular"{% if not arbeitsorte %} open{% endif %}><summary class="knopf zweit klein">+ Arbeitsort</summary>
+    <form method="post" action="{% url 'auftrag_arbeitsort' auftrag_id=auftrag.pk wahl='neu' %}" class="formular klein">{% csrf_token %}
+      <input type="hidden" name="zurueck" value="{{ zurueck }}">
+      {% include "steuerung/formular_felder.html" with form=arbeitsort_form %}
+      <button type="submit" class="knopf klein">Anlegen und setzen</button>
+    </form>
+  </details>
+{% endif %}
+</div>
+{% endwith %}

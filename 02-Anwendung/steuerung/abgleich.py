@@ -26,6 +26,7 @@ from .dienst import (
     Konflikt,
     _ereignis,
     _owner_erforderlich,
+    _planung_erforderlich,
     _projekt_sichtbar,
     zeilen,
 )
@@ -784,3 +785,29 @@ def aktion_verwerfen(akteur: Akteur, a: ExterneAktion) -> None:
             objekt_kennung=f"Aktion {a.aktions_id[:8]}",
             ereignis="Aktion verworfen",
         )
+
+
+def objekt_verknuepfen(akteur: Akteur, objekt: ExternesObjekt, auftrag) -> ExternesObjekt:
+    """GitHub-Issue oder Pull Request lokal mit einem Auftrag desselben Projekts verknüpfen
+    (``auftrag`` None löst die Verknüpfung). Bei GitHub ändert sich nichts; der Abgleich
+    überschreibt die Verknüpfung nicht, und eine Issue-Schließung nimmt keinen Auftrag ab."""
+    _planung_erforderlich(akteur, "GitHub-Objekte verknüpfen")
+    projekt = objekt.verbindung.projekt
+    _projekt_sichtbar(akteur, projekt)
+    if auftrag is not None and auftrag.projekt_id != projekt.pk:
+        raise KeinZugriff("Nicht gefunden.")
+    if objekt.typ not in ("issue", "pull"):
+        raise DienstFehler("Nur Issues und Pull Requests lassen sich mit Aufträgen verknüpfen.")
+    with transaction.atomic():
+        vorher = objekt.auftrag
+        ExternesObjekt.objects.filter(pk=objekt.pk).update(auftrag=auftrag)
+        objekt.refresh_from_db()
+        _ereignis(
+            akteur,
+            projekt=projekt,
+            objekt_typ="GitHub",
+            objekt_kennung=f"{objekt.verbindung.name}#{objekt.nummer or objekt.externe_id}",
+            ereignis=f"mit {auftrag.nummer} verknüpft" if auftrag else "Verknüpfung gelöst",
+            anlass=f"vorher {vorher.nummer}" if vorher else "",
+        )
+    return objekt

@@ -4,14 +4,7 @@
 {% block projektinhalt %}
 <div class="abschnittkopf"><h2>Funktionen <span class="zahl">{{ zeilen|length }}</span></h2><a class="knopf klein" href="{% url 'funktion_neu' kennung=projekt.kennung %}">+ Funktion</a></div>
 <p class="gedaempft">Was das Produkt können soll. Jede Zeile zeigt getrennt: Planung, Umsetzung, Prüfung je Umgebung und Abnahme. Ein abgenommener Auftrag macht keine Funktion fertig.</p>
-{% if module_filter %}
-<div class="werkzeuge umschalter-zeile modulfilter" aria-label="Nach Modul filtern">
-  <span class="gedaempft">Modul:</span>
-  <a class="umschalter {% if not modul %}aktiv{% endif %}" href="{% filterlink modul='' %}">Alle</a>
-  {% for m in module_filter %}<a class="umschalter {% if modul == m.kennung %}aktiv{% endif %}" href="{% filterlink modul=m.kennung %}">{{ m.name }}</a>{% endfor %}
-  <a class="umschalter {% if modul == 'ohne' %}aktiv{% endif %}" href="{% filterlink modul='ohne' %}">Gesamtes Projekt</a>
-</div>
-{% endif %}
+{% include "steuerung/modulbaum_anfang.html" %}
 {% if zeilen %}
 <div class="tabellenrahmen">
 <table>
@@ -32,6 +25,7 @@
 <div class="leer">Noch keine Funktionen. Eine Funktion ist eine Fähigkeit des Produkts, z. B. „Unterlagen einem Auftrag zuordnen“. <a href="{% url 'funktion_neu' kennung=projekt.kennung %}">Erste Funktion erfassen</a></div>
 {% endif %}
 <p class="kleinmeta">{% if zeigen_verworfen %}<a href="{% filterlink verworfen='' %}">Verworfene ausblenden</a>{% else %}<a href="{% filterlink verworfen='1' %}">Verworfene zeigen</a>{% endif %}</p>
+{% include "steuerung/modulbaum_ende.html" %}
 
 <section id="meilensteine" class="abschnitt">
   <div class="abschnittkopf"><h2>Meilensteine <span class="zahl">{{ meilensteine|length }}</span></h2></div>
@@ -42,6 +36,12 @@
       {% if m.ziel %}<br><span class="gedaempft">{{ m.ziel }}</span>{% endif %}
       {% if m.funktionen.all %}<br>{% for f in m.funktionen.all %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}">{{ f.kennung }} {{ f.titel }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
       <form method="post" action="{% url 'meilenstein_zustand' kennung=projekt.kennung pk=m.pk %}" class="zeile">{% csrf_token %}<input type="hidden" name="revision" value="{{ m.revision }}"><label>Zustand <select name="zustand">{% for wert, text in zustaende %}<option value="{{ wert }}" {% if wert == m.zustand %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></label><button type="submit" class="knopf zweit klein">Ändern</button></form>
+      <details class="modulpflege"><summary>Bearbeiten: Name, Ziel, Zielversion, Termin, Funktionen</summary>
+        <form method="post" action="{% url 'meilenstein_bearbeiten' kennung=projekt.kennung pk=m.pk %}" class="formular klein">{% csrf_token %}<input type="hidden" name="revision" value="{{ m.revision }}">
+          {% include "steuerung/formular_felder.html" with form=m.form %}
+          <button type="submit" class="knopf zweit klein">Speichern</button>
+        </form>
+      </details>
     </li>{% endfor %}
   </ul>
   {% endif %}

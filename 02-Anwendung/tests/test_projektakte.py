@@ -114,7 +114,7 @@ def test_p03_alte_links_fuehren_zum_richtigen_projekt(owner_client, akteur, alph
     assert alt.status_code == 302 and alt["Location"].startswith(_url("akte_wissen", beta))
 
 
-def test_p04_auftragsabnahme_macht_funktion_nicht_fertig(akteur, alpha, zweiter_mensch):
+def test_p04_erledigter_auftrag_macht_funktion_nicht_fertig(akteur, alpha, zweiter_mensch):
     f = akte.funktion_anlegen(akteur, alpha, titel="Unterlagen zuordnen", planung="vorgesehen")
     eins = arbeitspaket(akteur, alpha, titel="Teil eins", umfang="a/**", pruefer=zweiter_mensch)
     zwei = arbeitspaket(akteur, alpha, titel="Teil zwei", umfang="b/**", pruefer=zweiter_mensch)
@@ -131,15 +131,9 @@ def test_p04_auftragsabnahme_macht_funktion_nicht_fertig(akteur, alpha, zweiter_
         dateien="a/x.py@1111111",
         pruefungen="pytest: 3 bestanden",
     )
-    pruefer = dienst.Akteur.aus_benutzer(zweiter_mensch)
-    dienst.ergebnis_pruefen(
-        pruefer,
-        ergebnis,
-        bewertungen=[("ERFUELLT", ""), ("ERFUELLT", "")],
-        entscheidung="ABGENOMMEN",
-    )
     eins.refresh_from_db()
-    assert eins.zustand == Auftrag.ABGENOMMEN
+    assert eins.zustand == Auftrag.ERLEDIGT
+    pruefer = dienst.Akteur.aus_benutzer(zweiter_mensch)
     stand = akte.funktionsstand(f)
     assert stand["abnahme"] == "offen" and not stand["nutzbar"] and stand["version"] == ""
     assert not Installation.objects.exists() and not Nachweis.objects.exists()
@@ -466,7 +460,7 @@ def test_p19_migration_erhaelt_bestand(transactional_db):
         neu.revision_nr,
         neu.abgenommene_revision,
         neu.letzter_bearbeiter_name,
-    ) == ("Alt", "ABGENOMMEN", 3, 3, "Chat X")
+    ) == ("Alt", "ERLEDIGT", 3, 3, "Chat X")  # 0008 überführt Abgenommen in Erledigt
     assert (
         neu.ergebnisse.get().pk == e.pk
         and PruefungNeu.objects.get(pk=pr.pk).pruefer_id == mensch.pk
@@ -478,4 +472,5 @@ def test_p19_migration_erhaelt_bestand(transactional_db):
         and ereignis.version is None
     )
     projekt = ProjektNeu.objects.get(pk=p.pk)
-    assert projekt.zweck == "" and projekt.inhalt_revision == 0 and not projekt.funktionen.exists()
+    # Inhaltsrevision 1: Migration 0008 hält die Umstellung Abgenommen → Erledigt im Verlauf fest.
+    assert projekt.zweck == "" and projekt.inhalt_revision == 1 and not projekt.funktionen.exists()

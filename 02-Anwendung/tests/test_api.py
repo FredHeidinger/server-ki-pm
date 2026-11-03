@@ -107,15 +107,17 @@ def test_ergebnis_und_hindernis_ueber_api(freigegeben, bindung):
         luecken="",
         anfrage_kennung="e",
     )
-    assert e.status_code == 200 and e.json()["auftrag"]["zustand"] == "ZUR_PRUEFUNG"
-    fehlend = post(
+    assert e.status_code == 200 and e.json()["auftrag"]["zustand"] == "ERLEDIGT"
+    assert e.json()["ergebnis"]["vermerk"] is None
+    nochmal = post(
         c,
         f"/api/auftraege/{freigegeben.pk}/ergebnis/",
         revision=2,
         zusammenfassung="x",
+        dateien=["a@1"],
         anfrage_kennung="e2",
     )
-    assert fehlend.status_code == 409  # bereits zur Prüfung
+    assert nochmal.status_code == 403  # erledigt: kein Bearbeiter mehr
 
 
 def test_keine_schnittstelle_fuer_freigabe_oder_abnahme(freigegeben, bindung):
@@ -218,7 +220,9 @@ def test_chat_legt_auftrag_an_und_sieht_alle_offenen(freigegeben, bindung):
 def test_projekt_lesen(projekt, bindung):
     antwort = api(bindung.klartext).get("/api/projekt/").json()
     assert antwort["projekt"]["kennung"] == "synth-a"
-    assert antwort["projekt"]["module"] == [{"kennung": "kern", "name": "Kern"}]
+    assert antwort["projekt"]["module"] == [
+        {"kennung": "kern", "name": "Kern", "eltern": None, "revision": 1}
+    ]
     assert antwort["projekt"]["arbeitsorte"][0]["kennung"] == "repo"
 
 

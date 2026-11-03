@@ -1,0 +1,13 @@
+{% load steuerung_extras %}
+<ul class="baum" role="list">
+  <li>
+    <a class="baumknoten wurzel" href="{% filterlink modul='' %}" {% if not modul %}aria-current="true"{% endif %}>
+      <span class="baumname">{% include "steuerung/symbol.html" with name="ordner" %} Gesamtes Projekt</span>
+      {% include "steuerung/modulzahlen.html" with z=baum.gesamt %}
+    </a>
+    <ul class="baum-unter" role="list">
+      <li><a class="baumknoten projektweit" href="{% filterlink modul='ohne' %}" {% if modul == "ohne" %}aria-current="true"{% endif %}><span class="baumname gedaempft">nur projektweit</span>{% include "steuerung/modulzahlen.html" with z=baum.projektweit %}</a></li>
+      {% for k in baum.knoten %}{% include "steuerung/modulknoten.html" %}{% endfor %}
+    </ul>
+  </li>
+</ul>

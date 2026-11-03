@@ -57,6 +57,14 @@ from .models import Kontextbezug as KontextbezugModell
 
 VERALTET_TAGE = 30
 
+# Woher der Inhalt einer Unterlage stammt; für KI-Chats ausdrücklich unterschieden.
+UNTERLAGENART_KONTEXT = {
+    "text": "eingefügter Text",
+    "datei": "Originaldatei in der privaten Ablage (Auszug)",
+    "link": "nur Verweis auf eine Adresse, Inhalt nicht gespeichert",
+    "repo": "Verweis auf eine Repository-Datei an einem Commit",
+}
+
 
 # --- Hilfen ----------------------------------------------------------------------------------
 
@@ -384,6 +392,7 @@ def nachweis_melden(
     ``funktion_abnehmen``. Chats melden; eine Meldung ist keine menschliche Bestätigung."""
     _mensch_oder_chat(akteur, projekt)
     _gleiches_projekt(projekt, umgebung, funktion, release, installation, auftrag)
+    _umgebung_nutzbar(umgebung)
     if auftrag_ergebnis is not None and auftrag_ergebnis.auftrag.projekt_id != projekt.pk:
         raise KeinZugriff("Nicht gefunden.")
     if art not in (Nachweis.UMSETZUNG, Nachweis.TEST, Nachweis.BETRIEB):
@@ -611,13 +620,15 @@ def funktionsstand(f: Funktion, jetzt=None) -> dict:
 def umgebung_anlegen(
     akteur: Akteur, projekt: Projekt, *, name: str, art: str, beschreibung: str = "", url: str = ""
 ) -> Umgebung:
-    _owner_erforderlich(akteur, "Umgebungen anlegen")
+    """Umgebung anlegen. Fred legt sie fest; die KI (Assistent) schlägt sie als Entwurf vor, der
+    erst nach Freds Übernahme für Installations- und Prüfmeldungen zählt."""
+    _planung_erforderlich(akteur, "Umgebungen anlegen")
+    _projekt_sichtbar(akteur, projekt)
     from django.utils.text import slugify
 
     if not name.strip() or art not in dict(Umgebung.ARTEN):
         raise DienstFehler("Name und Art (lokal, test, produktion) sind erforderlich.")
-    if "@" in url.split("//", 1)[-1].split("/", 1)[0] or "?" in url:
-        raise DienstFehler("Die Adresse darf keine Zugangsdaten oder Parameter enthalten.")
+    _adresse_pruefen(url)
     try:
         with transaction.atomic():
             u = Umgebung.objects.create(
@@ -627,18 +638,321 @@ def umgebung_anlegen(
                 art=art,
                 beschreibung=beschreibung.strip(),
                 url=url.strip(),
+                bestaetigt=akteur.ist_mensch,
+                vorgeschlagen_von="" if akteur.ist_mensch else akteur.name,
             )
+            version = _version(akteur, projekt, "Umgebung", u, _umgebung_daten(u))
             _ereignis(
                 akteur,
                 projekt=projekt,
                 objekt_typ="Umgebung",
                 objekt_kennung=u.name,
-                ereignis="Umgebung angelegt",
+                ereignis="Umgebung angelegt" if u.bestaetigt else "Umgebung vorgeschlagen",
                 anlass=u.get_art_display(),
+                version=version,
             )
     except IntegrityError as fehler:
         raise DienstFehler("Eine Umgebung mit diesem Namen gibt es schon.") from fehler
     return u
+
+
+def _adresse_pruefen(url: str) -> None:
+    if "@" in url.split("//", 1)[-1].split("/", 1)[0] or "?" in url:
+        raise DienstFehler("Die Adresse darf keine Zugangsdaten oder Parameter enthalten.")
+
+
+def _umgebung_daten(u: Umgebung) -> dict:
+    return {
+        "kennung": u.kennung,
+        "name": u.name,
+        "art": u.art,
+        "beschreibung": u.beschreibung,
+        "url": u.url,
+        "aktiv": u.aktiv,
+        "bestaetigt": u.bestaetigt,
+    }
+
+
+def umgebung_aendern(
+    akteur: Akteur,
+    u: Umgebung,
+    *,
+    erwartete_revision: int | None,
+    grund: str = "",
+    bestaetigen: bool = False,
+    **felder,
+) -> Umgebung:
+    """Name, Art, Zielsystem, Adresse oder Aktiv ändern; die Kennung bleibt. Ändert Fred, ist
+    die Umgebung danach übernommen; ändert die KI Art oder Adresse, wird sie wieder ein Entwurf."""
+    _planung_erforderlich(akteur, "Umgebungen ändern")
+    _projekt_sichtbar(akteur, u.projekt)
+    with transaction.atomic():
+        u = Umgebung.objects.select_related("projekt").get(pk=u.pk)
+        _erwartet(u.revision, erwartete_revision, f"Umgebung {u.name}")
+        geaendert = []
+        for feld in ("name", "art", "beschreibung", "url"):
+            wert = felder.get(feld)
+            if wert is not None and getattr(u, feld) != str(wert).strip():
+                setattr(u, feld, str(wert).strip())
+                geaendert.append(feld)
+        if felder.get("aktiv") is not None and bool(felder["aktiv"]) != u.aktiv:
+            u.aktiv = bool(felder["aktiv"])
+            geaendert.append("aktiv")
+        if not u.name or u.art not in dict(Umgebung.ARTEN):
+            raise DienstFehler("Name und Art (lokal, test, produktion) sind erforderlich.")
+        _adresse_pruefen(u.url)
+        if akteur.ist_mensch and not u.bestaetigt and bestaetigen:
+            u.bestaetigt = True
+            geaendert.append("übernommen")
+        elif not akteur.ist_mensch and (
+            {"art", "url"} & set(geaendert) or ("aktiv" in geaendert and u.aktiv)
+        ):
+            u.bestaetigt = False
+            u.vorgeschlagen_von = akteur.name
+        if not geaendert:
+            return u
+        u.revision += 1
+        u.save()
+        version = _version(akteur, u.projekt, "Umgebung", u, _umgebung_daten(u))
+        _ereignis(
+            akteur,
+            projekt=u.projekt,
+            objekt_typ="Umgebung",
+            objekt_kennung=u.name,
+            ereignis="Umgebung archiviert" if not u.aktiv else "Umgebung geändert",
+            anlass="; ".join(t for t in (", ".join(geaendert), grund.strip()) if t),
+            revision=str(u.revision),
+            version=version,
+        )
+    return u
+
+
+def umgebung_bestaetigen(akteur: Akteur, u: Umgebung, *, erwartete_revision) -> Umgebung:
+    """Den Entwurf einer KI übernehmen; nur Fred und nur die angezeigte Revision."""
+    _mensch_erforderlich(akteur, "Umgebungen übernehmen")
+    _owner_erforderlich(akteur, "Umgebungen übernehmen")
+    if erwartete_revision is None:
+        raise DienstFehler("Die angezeigte Revision des Entwurfs fehlt; Seite neu laden.")
+    return umgebung_aendern(akteur, u, erwartete_revision=erwartete_revision, bestaetigen=True)
+
+
+def _umgebung_nutzbar(umgebung: Umgebung | None) -> None:
+    if umgebung is None:
+        return
+    if not umgebung.aktiv:
+        raise DienstFehler(f"Umgebung „{umgebung.name}“ ist archiviert.")
+    if not umgebung.bestaetigt:
+        raise DienstFehler(
+            f"Umgebung „{umgebung.name}“ ist ein Entwurf; Fred muss sie zuerst übernehmen."
+        )
+
+
+def release_aendern(
+    akteur: Akteur,
+    r: Release,
+    *,
+    erwartete_revision: int | None,
+    grund: str = "",
+    titel: str | None = None,
+    beschreibung: str | None = None,
+    komponenten: list[dict] | None = None,
+    archiviert: bool | None = None,
+) -> Release:
+    """Titel, Beschreibung und, solange das Release ein Entwurf ist, die Komponenten ändern;
+    archivieren oder zurückholen. Veröffentlichte Releases ändert nur Fred, Komponenten nie."""
+    _planung_erforderlich(akteur, "Releases ändern")
+    _projekt_sichtbar(akteur, r.projekt)
+    with transaction.atomic():
+        r = Release.objects.select_related("projekt").get(pk=r.pk)
+        _erwartet(r.revision, erwartete_revision, f"Release {r.kennung}")
+        if (
+            r.zustand != Release.ENTWURF
+            and not akteur.ist_owner
+            and (titel is not None or beschreibung is not None or archiviert is not None)
+        ):
+            raise KeinZugriff("Ein veröffentlichtes oder ersetztes Release ändert nur Fred.")
+        geaendert = []
+        if titel is not None and titel.strip() != r.titel:
+            r.titel = titel.strip()
+            geaendert.append("titel")
+        if beschreibung is not None and beschreibung.strip() != r.beschreibung:
+            r.beschreibung = beschreibung.strip()
+            geaendert.append("beschreibung")
+        if komponenten is not None:
+            if r.zustand != Release.ENTWURF:
+                raise Konflikt("Komponenten lassen sich nur im Entwurf ändern.")
+            neu = _komponenten_pruefen(komponenten)
+            r.komponenten.all().delete()
+            for k in neu:
+                ReleaseKomponente.objects.create(release=r, **k)
+            geaendert.append("komponenten")
+        if archiviert is not None and bool(archiviert) != r.archiviert:
+            r.archiviert = bool(archiviert)
+            geaendert.append("archiviert" if r.archiviert else "zurückgeholt")
+        if not geaendert:
+            return r
+        r.revision += 1
+        r.save()
+        version = _version(akteur, r.projekt, "Release", r, _release_daten(r))
+        _ereignis(
+            akteur,
+            projekt=r.projekt,
+            objekt_typ="Release",
+            objekt_kennung=r.kennung,
+            ereignis="Release archiviert"
+            if r.archiviert and "archiviert" in geaendert
+            else "Release geändert",
+            anlass="; ".join(t for t in (", ".join(geaendert), grund.strip()) if t),
+            revision=str(r.revision),
+            version=version,
+        )
+    return r
+
+
+def _komponenten_pruefen(komponenten: list[dict]) -> list[dict]:
+    neu = []
+    for k in komponenten:
+        name = str(k.get("komponente", "")).strip()
+        if not name:
+            continue
+        commit = str(k.get("commit", "")).strip()
+        artefakt = str(k.get("artefakt_hash", "")).strip()
+        if not (commit or artefakt):
+            raise DienstFehler(f"Komponente „{name}“ braucht Commit oder Artefakthash.")
+        neu.append(
+            {
+                "komponente": name[:80],
+                "repository": str(k.get("repository", "")).strip()[:200],
+                "commit": commit[:64],
+                "artefakt_hash": artefakt[:128],
+            }
+        )
+    if not neu:
+        raise DienstFehler("Mindestens eine Komponente mit Commit oder Artefakthash angeben.")
+    return neu
+
+
+def meilenstein_bearbeiten(
+    akteur: Akteur,
+    m: Meilenstein,
+    *,
+    erwartete_revision: int | None,
+    name: str,
+    ziel: str = "",
+    zielversion: str = "",
+    termin=None,
+    funktionen: list[Funktion] | None = None,
+) -> Meilenstein:
+    """Name, Ziel, Zielversion, Termin und Funktionen eines Meilensteins festlegen; nur Fred."""
+    _owner_erforderlich(akteur, "Meilensteine ändern")
+    _gleiches_projekt(m.projekt, *(funktionen or []))
+    if not name.strip():
+        raise DienstFehler("Der Name darf nicht leer sein.")
+    with transaction.atomic():
+        m = Meilenstein.objects.select_related("projekt").get(pk=m.pk)
+        _erwartet(m.revision, erwartete_revision, m.name)
+        vorher = _meilenstein_daten(m)
+        m.name, m.ziel, m.zielversion, m.termin = (
+            name.strip(),
+            ziel.strip(),
+            zielversion.strip(),
+            termin,
+        )
+        m.save()
+        m.funktionen.set(funktionen or [])
+        nachher = _meilenstein_daten(m)
+        if nachher == vorher:
+            return m
+        m.revision += 1
+        m.save(update_fields=["revision"])
+        version = _version(akteur, m.projekt, "Meilenstein", m, nachher)
+        _ereignis(
+            akteur,
+            projekt=m.projekt,
+            objekt_typ="Meilenstein",
+            objekt_kennung=m.name,
+            ereignis="Meilenstein geändert",
+            anlass=", ".join(k for k in nachher if nachher[k] != vorher[k]),
+            revision=str(m.revision),
+            version=version,
+        )
+    return m
+
+
+def profil_vorschlagen(
+    akteur: Akteur, projekt: Projekt, *, erwartete_revision: int | None, grund: str = "", **felder
+) -> Projekt:
+    """Profilentwurf einer KI: ersetzt einen älteren offenen Entwurf, ändert das geltende Profil
+    nicht. Fred übernimmt ihn (``profil_entwurf_uebernehmen``) oder verwirft ihn."""
+    _planung_erforderlich(akteur, "Projektprofile vorschlagen")
+    _projekt_sichtbar(akteur, projekt)
+    with transaction.atomic():
+        p = Projekt.objects.get(pk=projekt.pk)
+        _erwartet(p.profil_revision, erwartete_revision, "Das Projektprofil")
+        entwurf = {
+            feld: str(felder[feld]).strip()
+            for feld in ("beschreibung", *PROFILFELDER)
+            if felder.get(feld) is not None and str(felder[feld]).strip() != getattr(p, feld)
+        }
+        if not entwurf:
+            raise DienstFehler("Der Entwurf ändert nichts am geltenden Profil.")
+        p.profil_entwurf = entwurf
+        p.profil_entwurf_von = akteur.name
+        p.profil_entwurf_am = timezone.now()
+        p.profil_entwurf_basis = p.profil_revision
+        p.save()
+        _ereignis(
+            akteur,
+            projekt=p,
+            objekt_typ="Projektprofil",
+            objekt_kennung=p.kennung,
+            ereignis="Profilentwurf vorgeschlagen",
+            anlass="; ".join(t for t in (", ".join(entwurf), grund.strip()) if t),
+            revision=str(p.profil_revision),
+        )
+    p.refresh_from_db()
+    return p
+
+
+def entwurf_hash(projekt: Projekt) -> str:
+    """Kennzeichen des angezeigten Profilentwurfs; Übernehmen bindet genau diesen Stand."""
+    return _fingerabdruck(
+        {"entwurf": projekt.profil_entwurf, "basis": projekt.profil_entwurf_basis}
+    )[:16]
+
+
+def profil_entwurf_uebernehmen(
+    akteur: Akteur, projekt: Projekt, *, uebernehmen: bool, erwarteter_entwurf: str = ""
+) -> Projekt:
+    """Fred übernimmt den offenen Profilentwurf oder verwirft ihn. Hat sich das Profil seit dem
+    Entwurf geändert, ist Übernehmen ein Konflikt; der Entwurf bleibt dann zum Ansehen stehen."""
+    _mensch_erforderlich(akteur, "Profilentwürfe übernehmen")
+    _owner_erforderlich(akteur, "Profilentwürfe übernehmen")
+    with transaction.atomic():
+        p = Projekt.objects.get(pk=projekt.pk)
+        if not p.profil_entwurf:
+            raise Konflikt("Es gibt keinen offenen Profilentwurf.")
+        entwurf, von = dict(p.profil_entwurf), p.profil_entwurf_von
+        if uebernehmen and erwarteter_entwurf != entwurf_hash(p):
+            raise Konflikt(
+                "Der Profilentwurf wurde inzwischen ersetzt; bitte den neuen Entwurf ansehen."
+            )
+        if uebernehmen:
+            p = profil_bearbeiten(akteur, p, erwartete_revision=p.profil_entwurf_basis, **entwurf)
+        Projekt.objects.filter(pk=p.pk).update(
+            profil_entwurf={}, profil_entwurf_von="", profil_entwurf_am=None, profil_entwurf_basis=0
+        )
+        if not uebernehmen:
+            _ereignis(
+                akteur,
+                projekt=p,
+                objekt_typ="Projektprofil",
+                objekt_kennung=p.kennung,
+                ereignis="Profilentwurf verworfen",
+                anlass=f"von {von}",
+            )
+    p.refresh_from_db()
+    return p
 
 
 def _release_daten(r: Release) -> dict:
@@ -763,6 +1077,7 @@ def installation_melden(
     ein Zurückrollen ist eine neue Meldung mit älterer Version."""
     _mensch_oder_chat(akteur, projekt)
     _gleiches_projekt(projekt, umgebung, release)
+    _umgebung_nutzbar(umgebung)
     if not komponente.strip() or not version.strip():
         raise DienstFehler("Komponente und Version sind erforderlich.")
     if not herkunft.strip():
@@ -770,14 +1085,18 @@ def installation_melden(
     zeit = zeitpunkt_lesen(installiert_am) or timezone.now()
     with transaction.atomic():
         vorher = (
-            Installation.objects.filter(umgebung=umgebung, komponente=komponente.strip())
+            Installation.objects.filter(
+                umgebung=umgebung, komponente=komponente.strip(), korrigiert_durch=""
+            )
             .exclude(zustand__in=(Installation.ERSETZT, Installation.FEHLGESCHLAGEN))
             .first()
         )
         # Verglichen wird mit dem jüngsten bekannten Vorgang, gleich in welchem Zustand: auch
         # nach einer fehlgeschlagenen Installation wird ein älterer Nachtrag nicht aktuell.
         juengste = (
-            Installation.objects.filter(umgebung=umgebung, komponente=komponente.strip())
+            Installation.objects.filter(
+                umgebung=umgebung, komponente=komponente.strip(), korrigiert_durch=""
+            )
             .order_by("-installiert_am", "-id")
             .first()
         )
@@ -1461,9 +1780,16 @@ class Kontext:
         return "\n\n".join(self.teile)
 
 
-def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[str, str, bool]]:
-    """(Name, Text, Pflicht). Pflicht sind Kopf, gebundener Auftrag und Widersprüche."""
+def _abschnitte(
+    projekt: Projekt, auftrag: Auftrag | None, jetzt, modul: Modul | None = None
+) -> list[tuple[str, str, bool]]:
+    """(Name, Text, Pflicht). Pflicht sind Kopf, gebundener Auftrag und Widersprüche. Mit
+    ``modul`` beschränken sich Modulstand und aktive Aufträge auf dessen Teilbaum."""
+    from .dienst import modul_teilbaum
+
     abschnitte: list[tuple[str, str, bool]] = []
+    teilbaum = set(modul_teilbaum(modul)) if modul is not None else None
+    staende = modulstaende(projekt, jetzt)
     profil = [
         f"Projekt: {projekt.name} (Kennung {projekt.kennung})",
         "Zweck: " + (projekt.zweck or "noch nicht erfasst"),
@@ -1471,6 +1797,8 @@ def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[
         "Nicht-Ziele: " + (projekt.nicht_ziele or "noch nicht erfasst"),
         f"Profilrevision: {projekt.profil_revision}",
     ]
+    if modul is not None:
+        profil.append(f"Ausgewählt: Modul {modul.name} (Kennung {modul.kennung}) mit Untermodulen")
     abschnitte.append(("Projekt", "\n".join(profil), True))
     if auftrag is not None:
         rev = auftrag.aktuelle_revision
@@ -1523,8 +1851,24 @@ def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[
         )
     for i in Installation.objects.filter(projekt=projekt, zustand=Installation.FEHLGESCHLAGEN)[:5]:
         widersprueche.append(f"Installation {i.version} in {i.umgebung.name} fehlgeschlagen")
+    for z in staende:
+        for luecke in z["luecken"]:
+            if "widersprüchlich" in luecke:
+                widersprueche.append(f"{z['name']}: {luecke}")
     abschnitte.append(
         ("Widersprüche und Konflikte", "\n".join(widersprueche) or "keine bekannt", True)
+    )
+    stand = []
+    for z in staende:
+        if teilbaum is not None and (z["modul"] is None or z["modul"].pk not in teilbaum):
+            continue
+        stand.append(_standzeile(z, jetzt))
+    abschnitte.append(
+        (
+            "Stand je Modul (gemeldet; bestätigt nur, wo vermerkt)",
+            "\n".join(stand) or "keine Meldungen",
+            False,
+        )
     )
     funktionen = []
     for f in projekt.funktionen.exclude(planung=Funktion.VERWORFEN).select_related("modul"):
@@ -1549,7 +1893,10 @@ def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[
         v = geltende_grundlage(u) or u.versionen.first()
         if v is None:
             continue
-        kopf = f"- {u.kennung} {u.titel}, Version {v.nummer} ({v.get_rolle_display()})"
+        kopf = (
+            f"- {u.kennung} {u.titel}, Version {v.nummer} ({v.get_rolle_display()}), "
+            + UNTERLAGENART_KONTEXT.get(u.art, u.get_art_display())
+        )
         if v.uri and ki_lesbar(v):
             kopf += f", Link {v.uri}" + (
                 f" @ {v.quellversion}" if v.quellversion else " (veränderliche Quelle)"
@@ -1579,10 +1926,13 @@ def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[
     )
     aktive = []
     for a in projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).select_related("modul"):
+        if teilbaum is not None and a.modul_id not in teilbaum:
+            continue
         rev = a.aktuelle_revision
         aktive.append(
             f"- {a.nummer} {a.titel}: {a.get_zustand_display()}, Revision {a.revision_nr}, "
             f"Bearbeiter {a.bearbeiter_name or 'niemand'}, Umfang {', '.join(rev.muster) or '–'}"
+            + (f", Modul {a.modul.name}" if a.modul_id else "")
         )
     abschnitte.append(("Aktive Aufträge", "\n".join(aktive) or "keine", False))
     stufe = [projekt.entwicklungsstufe or "nicht festgelegt"]
@@ -1611,7 +1961,9 @@ def _abschnitte(projekt: Projekt, auftrag: Auftrag | None, jetzt) -> list[tuple[
         (
             "Zum Nachlesen",
             "kipm_lesen (Auftrag), kipm_projektakte (Funktionen, Unterlagen, Installationen), "
-            "kipm_verlauf (Änderungen), kipm_unterlage_lesen (freigegebene Unterlagen).",
+            "kipm_modulstand (Stand je Modul), kipm_verlauf (Änderungen), "
+            "kipm_unterlage_lesen (freigegebene Unterlagen). Nach Arbeitsabschluss den Stand "
+            "mit kipm_stand_melden melden.",
             False,
         )
     )
@@ -1623,6 +1975,7 @@ def kontext_erzeugen(
     projekt: Projekt,
     *,
     auftrag: Auftrag | None = None,
+    modul: Modul | None = None,
     budget: int | None = None,
     _kontext_id: str | None = None,
     _erstellt=None,
@@ -1631,14 +1984,13 @@ def kontext_erzeugen(
     """Deterministischer Projektkontext aus einem Datenbankstand. Pflichtabschnitte werden nie
     still gekürzt; passt das Budget nicht, entstehen nummerierte Teile mit Manifest."""
     _projekt_sichtbar(akteur, projekt)
-    if auftrag is not None:
-        _gleiches_projekt(projekt, auftrag)
+    _gleiches_projekt(projekt, auftrag, modul)
     budget = budget or settings.KIPM_KONTEXT_BUDGET
     kontext_id = _kontext_id or uuid.uuid4().hex
     with transaction.atomic():
         p = Projekt.objects.get(pk=projekt.pk)
         erstellt = (_erstellt or timezone.now()).replace(microsecond=0)
-        abschnitte = _abschnitte(p, auftrag, erstellt)
+        abschnitte = _abschnitte(p, auftrag, erstellt, modul)
         pflicht = [(n, t) for n, t, muss in abschnitte if muss]
         optional = [(n, t) for n, t, muss in abschnitte if not muss]
         rumpf = list(pflicht)
@@ -1671,6 +2023,7 @@ def kontext_erzeugen(
             "erstellt": erstellt.isoformat(timespec="seconds"),
             "auftrag": auftrag.nummer if auftrag else None,
             "auftrag_revision": auftrag.revision_nr if auftrag else None,
+            "modul": modul.kennung if modul else None,
             "abschnitte": [n for n, _ in rumpf],
             "ausgelassen": ausgelassen,
             "teile": len(teile_roh),
@@ -1727,6 +2080,7 @@ def kontext_teil(
         akteur,
         projekt,
         auftrag=bezug.auftrag,
+        modul=projekt.module.filter(kennung=bezug.manifest.get("modul") or "").first(),
         _kontext_id=bezug.kontext_id,
         _erstellt=datetime.fromisoformat(bezug.manifest["erstellt"]),
         _speichern=False,
@@ -1736,3 +2090,419 @@ def kontext_teil(
     if not 1 <= teil <= len(k.teile):
         raise DienstFehler(f"Teil {teil} gibt es nicht (1 bis {len(k.teile)}).")
     return k, k.teile[teil - 1]
+
+
+# --- Meldevertrag: Stand eines Moduls oder Projekts melden ------------------------------------
+
+MELDEVERTRAG = "kipm-stand/1"
+
+
+def _fingerabdruck(daten: dict) -> str:
+    return hashlib.sha256(json.dumps(daten, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def stand_melden(
+    akteur: Akteur,
+    projekt: Projekt,
+    *,
+    meldung_id: str,
+    version: str,
+    quelle: str,
+    modul: Modul | None = None,
+    komponente: str = "",
+    auftrag: Auftrag | None = None,
+    auftrag_revision: int | None = None,
+    arbeitsort=None,
+    umsetzung: dict | None = None,
+    tests: list[dict] | None = None,
+    installation: dict | None = None,
+    einschraenkungen: str = "",
+    beobachtet_am=None,
+    korrigiert: str = "",
+    beobachtet_ersatz=None,
+) -> dict:
+    """Eine Meldung nach Arbeitsabschluss (Meldevertrag ``kipm-stand/1``): Umsetzung, Tests je
+    Umgebung und Installation als verknüpfte Nachweise, nie als Freitext-Wahrheit.
+
+    Die ``meldung_id`` des Melders macht Wiederholungen wirkungslos: gleicher Inhalt liefert die
+    gespeicherte Meldung, anderer Inhalt unter derselben ID ist ein Konflikt. Ältere Meldungen
+    (früheres ``beobachtet_am``) verdrängen keinen neueren Stand; ``korrigiert`` ersetzt eine
+    frühere Meldung sichtbar, ohne sie zu löschen. Nichts davon ist eine menschliche Bestätigung."""
+    _mensch_oder_chat(akteur, projekt)
+    _gleiches_projekt(projekt, modul, auftrag, arbeitsort)
+    meldung_id = (meldung_id or "").strip()
+    if not meldung_id or len(meldung_id) > 80:
+        raise DienstFehler("meldung_id fehlt oder ist zu lang (höchstens 80 Zeichen).")
+    if not version.strip():
+        raise DienstFehler("version (Commit oder Dateihash) ist erforderlich.")
+    if not quelle.strip():
+        raise DienstFehler("quelle (Befehl, Bericht, Ablauf) ist erforderlich.")
+    if umsetzung is None and not tests and installation is None:
+        raise DienstFehler("Die Meldung enthält weder Umsetzung noch Tests noch Installation.")
+    if auftrag is not None:
+        rev = int(auftrag_revision or auftrag.revision_nr)
+        if not auftrag.revisionen.filter(nummer=rev).exists():
+            raise DienstFehler(f"{auftrag.nummer} hat keine Revision {rev}.")
+    else:
+        rev = 0
+    beobachtet = zeitpunkt_lesen(beobachtet_am) or _ersatzzeit(beobachtet_ersatz)
+    inhalt = {
+        "version": version.strip(),
+        "quelle": quelle.strip(),
+        "modul": modul.kennung if modul else None,
+        "komponente": komponente.strip(),
+        "auftrag": auftrag.nummer if auftrag else None,
+        "revision": auftrag_revision,
+        "arbeitsort": arbeitsort.kennung if arbeitsort else None,
+        "umsetzung": umsetzung,
+        "tests": tests or [],
+        "installation": installation,
+        "einschraenkungen": einschraenkungen.strip(),
+        "beobachtet_am": str(beobachtet_am) if beobachtet_am not in (None, "") else None,
+        "korrigiert": korrigiert.strip(),
+    }
+    fingerabdruck = _fingerabdruck(inhalt)
+    with transaction.atomic():
+        vorhanden = list(Nachweis.objects.filter(projekt=projekt, meldung=meldung_id))
+        vorhanden_inst = list(Installation.objects.filter(projekt=projekt, meldung=meldung_id))
+        if vorhanden or vorhanden_inst:
+            if any(x.meldung_hash != fingerabdruck for x in [*vorhanden, *vorhanden_inst]):
+                raise Konflikt(
+                    f"meldung_id „{meldung_id}“ wurde bereits mit anderem Inhalt gemeldet; "
+                    "eine Korrektur braucht eine neue meldung_id mit korrigiert."
+                )
+            return _meldung_antwort(meldung_id, vorhanden, vorhanden_inst, wiederholt=True)
+        alt: list[Nachweis] = []
+        alt_inst: list[Installation] = []
+        if korrigiert.strip():
+            alt = list(Nachweis.objects.filter(projekt=projekt, meldung=korrigiert.strip()))
+            alt_inst = list(
+                Installation.objects.filter(projekt=projekt, meldung=korrigiert.strip())
+            )
+            if not alt and not alt_inst:
+                raise DienstFehler(f"Die zu korrigierende Meldung „{korrigiert}“ gibt es nicht.")
+            if any(n.korrigiert_durch for n in alt) or any(i.korrigiert_durch for i in alt_inst):
+                raise Konflikt(f"Die Meldung „{korrigiert}“ ist bereits korrigiert.")
+            # Was Fred beurteilt hat (bestätigt oder fehlgeschlagen), korrigiert nur ein Mensch.
+            if not akteur.ist_mensch and (
+                any(n.bestaetigt_am for n in alt) or any(i.bestaetigt_von_id for i in alt_inst)
+            ):
+                raise KeinZugriff("Eine von Fred beurteilte Meldung korrigiert nur ein Mensch.")
+        gemeinsam = {
+            "projekt": projekt,
+            "version": version.strip()[:80],
+            "quelle": quelle.strip()[:300],
+            "beobachtet_am": beobachtet,
+            "akteur_name": akteur.name,
+            "benutzer": akteur.benutzer,
+            "bindung": akteur.bindung,
+            "modul": modul,
+            "auftrag": auftrag,
+            "auftrag_revision": rev,
+            "meldung": meldung_id,
+            "meldung_hash": fingerabdruck,
+            "einschraenkungen": einschraenkungen.strip(),
+            "komponente": komponente.strip()[:80],
+        }
+        neu: list[Nachweis] = []
+        if umsetzung is not None:
+            neu.append(
+                Nachweis.objects.create(
+                    art=Nachweis.UMSETZUNG,
+                    ergebnis="gemeldet",
+                    umfang=str(umsetzung.get("umfang", "")).strip(),
+                    **gemeinsam,
+                )
+            )
+        for t in tests or []:
+            ergebnis = str(t.get("ergebnis", ""))
+            if ergebnis not in ("bestanden", "teilweise", "fehlgeschlagen"):
+                raise DienstFehler("Testergebnis: bestanden, teilweise oder fehlgeschlagen.")
+            if not str(t.get("umfang", "")).strip():
+                raise DienstFehler("Je Test den geprüften Umfang angeben.")
+            umgebung = None
+            if t.get("umgebung"):
+                umgebung = Umgebung.objects.filter(projekt=projekt, kennung=t["umgebung"]).first()
+                if umgebung is None:
+                    raise DienstFehler(f"Umgebung „{t['umgebung']}“ gibt es nicht.")
+                _umgebung_nutzbar(umgebung)
+            neu.append(
+                Nachweis.objects.create(
+                    art=Nachweis.TEST,
+                    ergebnis=ergebnis,
+                    umfang=str(t["umfang"]).strip(),
+                    umgebung=umgebung,
+                    **gemeinsam,
+                )
+            )
+        if alt:
+            Nachweis.objects.filter(pk__in=[n.pk for n in alt]).update(korrigiert_durch=meldung_id)
+        for i in alt_inst:
+            # Nichts wird automatisch wieder aktuell; der Modulstand zeigt die Lücke.
+            Installation.objects.filter(pk=i.pk).update(
+                zustand=Installation.ERSETZT,
+                korrigiert_durch=meldung_id,
+                bemerkung=(i.bemerkung + " " if i.bemerkung else "")
+                + f"korrigiert durch {meldung_id}",
+            )
+            i.refresh_from_db()
+            _ereignis(
+                akteur,
+                projekt=projekt,
+                objekt_typ="Installation",
+                objekt_kennung=f"{i.umgebung.name}/{i.komponente}",
+                ereignis=f"Installation {i.version} korrigiert durch {meldung_id}",
+                anlass="Stand unbekannt, bis neu gemeldet",
+                version=_version(akteur, projekt, "Installation", i, _installation_daten(i)),
+            )
+        inst = []
+        if installation is not None:
+            umgebung = Umgebung.objects.filter(
+                projekt=projekt, kennung=installation.get("umgebung", "")
+            ).first()
+            if umgebung is None:
+                raise DienstFehler("Installation: umgebung (Kennung) fehlt oder gibt es nicht.")
+            i = installation_melden(
+                akteur,
+                projekt,
+                umgebung=umgebung,
+                komponente=str(installation.get("komponente") or komponente or "").strip(),
+                version=str(installation.get("version") or version),
+                installiert_am=installation.get("installiert_am") or beobachtet,
+                herkunft=str(installation.get("herkunft") or quelle),
+            )
+            Installation.objects.filter(pk=i.pk).update(
+                modul=modul, meldung=meldung_id, meldung_hash=fingerabdruck
+            )
+            i.refresh_from_db()
+            inst.append(i)
+        version_obj = _version(akteur, projekt, "Meldung", (neu or inst)[0], inhalt)
+        _ereignis(
+            akteur,
+            projekt=projekt,
+            objekt_typ="Meldung",
+            objekt_kennung=meldung_id,
+            ereignis="Stand gemeldet" + (f" (korrigiert {korrigiert})" if alt or alt_inst else ""),
+            anlass=f"{modul.name if modul else 'Gesamtes Projekt'}, Version {version.strip()}"
+            + (f", {auftrag.nummer} Rev {rev}" if auftrag else "")
+            + f", Quelle {quelle.strip()}",
+            beobachtet_am=beobachtet,
+            version=version_obj,
+        )
+    return _meldung_antwort(meldung_id, neu, inst, wiederholt=False)
+
+
+def _ersatzzeit(wert) -> datetime:
+    """Zeit des ersten Sendeversuchs eines Melders, wenn die Meldung selbst keine nennt. Gehört
+    nicht zum Inhalt; ungültig oder in der Zukunft (Uhrversatz) gilt die Serverzeit."""
+    jetzt = timezone.now()
+    try:
+        zeit = datetime.fromisoformat(str(wert).strip()) if wert else None
+    except ValueError:
+        return jetzt
+    if zeit is None:
+        return jetzt
+    if timezone.is_naive(zeit):
+        zeit = timezone.make_aware(zeit)
+    return min(zeit, jetzt)
+
+
+def _meldung_antwort(meldung_id, nachweise, installationen, *, wiederholt: bool) -> dict:
+    return {
+        "meldung_id": meldung_id,
+        "vertrag": MELDEVERTRAG,
+        "wiederholt": wiederholt,
+        "nachweise": [f"N-{n.pk}" for n in nachweise],
+        "installationen": [
+            {"umgebung": i.umgebung.name, "version": i.version, "zustand": i.zustand}
+            for i in installationen
+        ],
+        "hinweis": "Gemeldet, nicht bestätigt; bestätigen kann nur ein Mensch.",
+    }
+
+
+def nachweis_bestaetigen(akteur: Akteur, n: Nachweis) -> Nachweis:
+    """Mensch bestätigt eine gemeldete Umsetzung oder Prüfung; nie der Melder selbst."""
+    _mensch_erforderlich(akteur, "Meldungen bestätigen")
+    _projekt_sichtbar(akteur, n.projekt)
+    if n.benutzer_id is not None and n.benutzer_id == akteur.benutzer.pk:
+        raise KeinZugriff("Die eigene Meldung bestätigt ein anderer Mensch.")
+    with transaction.atomic():
+        if not Nachweis.objects.filter(pk=n.pk, bestaetigt_am__isnull=True).update(
+            bestaetigt_von=akteur.benutzer, bestaetigt_am=timezone.now()
+        ):
+            raise Konflikt("Diese Meldung ist bereits bestätigt.")
+        n.refresh_from_db()
+        _ereignis(
+            akteur,
+            projekt=n.projekt,
+            objekt_typ="Nachweis",
+            objekt_kennung=f"N-{n.pk}",
+            ereignis=f"{n.get_art_display()} bestätigt",
+            anlass=f"Version {n.version}" + (f", {n.umgebung.name}" if n.umgebung else ""),
+        )
+    return n
+
+
+def modulstaende(projekt: Projekt, jetzt=None) -> list[dict]:
+    """Aktueller Stand je Modul und für das Gesamte Projekt, abgeleitet aus Meldungen und
+    Nachweisen: Umsetzung, Tests je Umgebung, Installation, Bestätigung, Einschränkungen und
+    sichtbare Lücken (keine Meldung, veraltet, widersprüchlich, teilweise, älterer Stand)."""
+    from .dienst import modul_teilbaum, modulbaum
+
+    jetzt = jetzt or timezone.now()
+    baum = modulbaum(projekt)
+    knoten = [(None, "Gesamtes Projekt", 0)] + [
+        (k.modul, k.modul.name, k.tiefe) for k in baum["flach"]
+    ]
+    nachweise = list(
+        Nachweis.objects.filter(projekt=projekt, korrigiert_durch="")
+        .exclude(meldung="")
+        .select_related("umgebung", "auftrag", "bestaetigt_von", "modul")
+        .order_by("-beobachtet_am", "-id")
+    )
+    installationen = list(
+        Installation.objects.filter(projekt=projekt)
+        .exclude(zustand=Installation.ERSETZT)
+        .select_related("umgebung", "modul")
+    )
+    korrigierte = list(
+        Installation.objects.filter(projekt=projekt)
+        .exclude(korrigiert_durch="")
+        .select_related("umgebung")
+    )
+    # Aufträge mit eingereichtem Ergebnis, zu denen kein Stand gemeldet wurde.
+    ohne_meldung = list(
+        Auftrag.objects.filter(projekt=projekt, ergebnisse__isnull=False)
+        .exclude(zustand=Auftrag.ABGEBROCHEN)
+        .distinct()
+    )
+    zeilen = []
+    for modul, name, tiefe in knoten:
+        mid = modul.pk if modul else None
+        eigene = [n for n in nachweise if n.modul_id == mid]
+        umsetzung = next((n for n in eigene if n.art == Nachweis.UMSETZUNG), None)
+        luecken = []
+        unter = set(modul_teilbaum(modul)) - {mid} if modul else {n.modul_id for n in nachweise}
+        nur_unter = umsetzung is None and any(n.modul_id in unter for n in nachweise if n.modul_id)
+        if nur_unter:
+            luecken.append("keine eigene Meldung; Untermodule haben gemeldet")
+        elif umsetzung is None:
+            luecken.append("keine Meldung zur Umsetzung")
+        elif umsetzung.beobachtet_am < jetzt - timedelta(days=VERALTET_TAGE):
+            luecken.append(f"veraltet (älter als {VERALTET_TAGE} Tage)")
+        tests = []
+        # Je Umgebung und Testumfang der jüngste Test; verschiedene Umfänge widersprechen sich nicht.
+        gruppen = sorted(
+            {(n.umgebung, n.umfang) for n in eigene if n.art == Nachweis.TEST},
+            key=lambda g: (g[0] is not None, getattr(g[0], "name", ""), g[1]),
+        )
+        for umg, umfang in gruppen:
+            je = [
+                n
+                for n in eigene
+                if n.art == Nachweis.TEST and n.umgebung == umg and n.umfang == umfang
+            ]
+            ort = umg.name if umg else "ohne Umgebung"
+            letzte = je[0]
+            gleich = [n for n in je if n.version == letzte.version]
+            widerspruch = len({n.ergebnis for n in gleich}) > 1
+            fuer_aktuell = umsetzung is not None and letzte.version == umsetzung.version
+            tests.append(
+                {"n": letzte, "ort": ort, "fuer_aktuell": fuer_aktuell, "widerspruch": widerspruch}
+            )
+            if widerspruch:
+                luecken.append(f"widersprüchliche Tests in {ort} ({umfang})")
+            if letzte.ergebnis == "teilweise":
+                luecken.append(f"Test teilweise in {ort} ({umfang})")
+            if umsetzung is not None and not fuer_aktuell:
+                luecken.append(
+                    f"Test in {ort} ({umfang}) gilt für {letzte.version}, nicht für den "
+                    "gemeldeten Stand "
+                    f"{umsetzung.version}"
+                )
+        if umsetzung is not None and not tests:
+            luecken.append("kein Test gemeldet")
+        gemeldete_auftraege = {n.auftrag_id for n in eigene if n.auftrag_id}
+        for a in ohne_meldung:
+            if a.modul_id == mid and a.pk not in gemeldete_auftraege:
+                luecken.append(f"{a.nummer}: Ergebnis eingereicht, aber kein Stand gemeldet")
+        inst = [i for i in installationen if i.modul_id == mid]
+        for k in korrigierte:
+            if k.modul_id == mid and not any(
+                i.umgebung_id == k.umgebung_id
+                and i.komponente == k.komponente
+                and i.zustand != Installation.FEHLGESCHLAGEN
+                for i in installationen
+            ):
+                luecken.append(
+                    f"Installation {k.komponente} in {k.umgebung.name} korrigiert "
+                    f"({k.korrigiert_durch}); aktueller Stand unbekannt, bitte neu melden"
+                )
+        zeilen.append(
+            {
+                "modul": modul,
+                "name": name,
+                "tiefe": tiefe,
+                "umsetzung": umsetzung,
+                "tests": tests,
+                "installationen": inst,
+                "einschraenkungen": umsetzung.einschraenkungen if umsetzung else "",
+                "luecken": luecken,
+                "nur_unter": nur_unter,
+                "gemeldet": bool(eigene or inst),
+            }
+        )
+    return zeilen
+
+
+def unterlage_neue_textversion(
+    akteur: Akteur,
+    u: Unterlage,
+    *,
+    text: str,
+    erwartete_nr: int | None,
+    grund: str,
+) -> Unterlagenversion:
+    """Neue Version einer Textunterlage unter derselben Identität, mit Änderungsgrund. Von einer
+    KI immer als Entwurf; Grundlage und KI-Freigabe bleiben Freds Entscheidung. Auftragsrevisionen
+    behalten ihre gebundene ältere Version."""
+    if not grund.strip():
+        raise DienstFehler("Bitte den Grund der Änderung angeben.")
+    if erwartete_nr is None:
+        raise DienstFehler("Die zuletzt gelesene Versionsnummer (erwartete_version) ist nötig.")
+    v = text_neue_version(akteur, u, text=text, erwartete_nr=erwartete_nr)
+    Unterlagenversion.objects.filter(pk=v.pk).update(
+        herkunft=f"{v.herkunft}; Grund: {grund.strip()}"[:200]
+    )
+    v.refresh_from_db()
+    return v
+
+
+def _standzeile(z: dict, jetzt) -> str:
+    u = z["umsetzung"]
+    zeile = f"- {'  ' * max(z['tiefe'] - 1, 0)}{z['name']}: "
+    if u is None:
+        zeile += "keine Meldung zur Umsetzung"
+    else:
+        zeile += (
+            f"Umsetzung {u.version}"
+            + (f" ({u.auftrag.nummer} Rev {u.auftrag_revision})" if u.auftrag_id else "")
+            + f", gemeldet von {u.akteur_name} {_alter(u.beobachtet_am, jetzt)}, Quelle "
+            + _bereinigt(u.quelle)
+            + (", bestätigt" if u.bestaetigt_am else ", nicht bestätigt")
+        )
+    for te in z["tests"]:
+        n = te["n"]
+        zeile += (
+            f"; Test {te['ort']} ({n.umfang}): {n.get_ergebnis_display()} für {n.version}"
+            + ("" if te["fuer_aktuell"] else " (älterer Stand)")
+            + (", bestätigt" if n.bestaetigt_am else "")
+        )
+    for i in z["installationen"]:
+        zeile += f"; installiert {i.umgebung.name}: {i.version} ({i.get_zustand_display()})"
+    if z["einschraenkungen"]:
+        zeile += "; Einschränkung: " + _daten(z["einschraenkungen"], 300)
+    if z["luecken"]:
+        zeile += "; offen: " + ", ".join(z["luecken"])
+    return zeile

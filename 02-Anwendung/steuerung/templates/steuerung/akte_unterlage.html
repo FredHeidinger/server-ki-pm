@@ -20,7 +20,7 @@
 <section class="box">
   <h2>Zuordnungen</h2>
   {% if zuordnungen %}<ul class="liste-schlicht">{% for z in zuordnungen %}<li>Version {{ z.version.nummer }} →
-    {% if z.funktion %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=z.funktion.nummer %}">{{ z.funktion.kennung }} {{ z.funktion.titel }}</a>{% elif z.auftrag %}<a href="{% url 'auftrag_detail' auftrag_id=z.auftrag.pk %}">{{ z.auftrag.nummer }}</a> Revision {{ z.auftrag_revision }}{% elif z.entscheidung %}{{ z.entscheidung.nummer }} Stand {{ z.entscheidung_stand }}{% else %}Release {{ z.release.kennung }}{% endif %}{% if z.zweck %} · {{ z.zweck }}{% endif %}</li>{% endfor %}</ul>
+    {% if z.funktion %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=z.funktion.nummer %}">{{ z.funktion.kennung }} {{ z.funktion.titel }}</a>{% elif z.auftrag %}<a href="{% url 'auftrag_detail' auftrag_id=z.auftrag.pk %}">{{ z.auftrag.nummer }}</a> Revision {{ z.auftrag_revision }}{% elif z.entscheidung %}<a href="{% url 'entscheidung_detail' entscheidung_id=z.entscheidung.pk %}">{{ z.entscheidung.nummer }}</a> Stand {{ z.entscheidung_stand }}{% else %}Release {{ z.release.kennung }}{% endif %}{% if z.zweck %} · {{ z.zweck }}{% endif %}</li>{% endfor %}</ul>
   {% else %}<p class="gedaempft">Noch nicht zugeordnet.</p>{% endif %}
   {% if aktuell %}
   <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='zuordnen' %}" class="formular klein">{% csrf_token %}
@@ -29,6 +29,8 @@
     <select id="ziel" name="ziel" required><option value="">wählen …</option>
       {% if funktionen %}<optgroup label="Funktionen">{% for f in funktionen %}<option value="f:{{ f.pk }}">{{ f.kennung }} {{ f.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
       {% if auftraege %}<optgroup label="Aufträge (aktuelle Revision)">{% for a in auftraege %}<option value="a:{{ a.pk }}">{{ a.nummer }} {{ a.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
+      {% if entscheidungen %}<optgroup label="Entscheidungen (aktueller Stand)">{% for e in entscheidungen %}<option value="e:{{ e.pk }}">{{ e.nummer }} {{ e.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
+      {% if releases %}<optgroup label="Releases">{% for r in releases %}<option value="r:{{ r.pk }}">{{ r.kennung }}{% if r.titel %} {{ r.titel|truncatechars:50 }}{% endif %}</option>{% endfor %}</optgroup>{% endif %}
     </select>
     <label for="zweck">Zweck</label><input type="text" id="zweck" name="zweck" maxlength="200">
     <button type="submit" class="knopf zweit klein">Zuordnen</button>

@@ -25,9 +25,11 @@ from .models import (
     ChatBindung,
     Entscheidung,
     Ereignis,
+    Ergebnis,
     Funktion,
     Modul,
     Projekt,
+    Release,
     RepoVerbindung,
     Umgebung,
 )
@@ -218,7 +220,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                     }
                     for m in auftrag.meldungen.all()[:20]
                 ],
-                "letzte_pruefung": _letzte_pruefung(auftrag),
+                "ergebnis": _ergebnis_json(auftrag.ergebnisse.first()),
                 "fuer_freigabe_fehlt": [
                     p.text for p in dienst.freigabepruefung(auftrag) if not p.erfuellt
                 ],
@@ -227,21 +229,20 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
     return daten
 
 
-def _letzte_pruefung(auftrag: Auftrag) -> dict | None:
-    ergebnis = auftrag.ergebnisse.first()
+def _ergebnis_json(ergebnis: Ergebnis | None) -> dict | None:
+    """Neuestes Ergebnis; ``vermerk`` nennt sichtbar „ohne automatische Tests“."""
     if ergebnis is None:
         return None
-    pruefung = ergebnis.pruefungen.first()
-    if pruefung is None:
-        return {"ergebnis_revision": ergebnis.revision_nr, "entscheidung": None}
     return {
-        "ergebnis_revision": ergebnis.revision_nr,
-        "entscheidung": pruefung.entscheidung,
-        "begruendung": pruefung.begruendung,
-        "kriterien": [
-            {"kriterium": b.kriterium, "bewertung": b.bewertung, "anmerkung": b.anmerkung}
-            for b in pruefung.bewertungen.all()
-        ],
+        "revision": ergebnis.revision_nr,
+        "eingereicht": ergebnis.eingereicht_am.isoformat(timespec="minutes"),
+        "von": ergebnis.eingereicht_von_name,
+        "zusammenfassung": ergebnis.zusammenfassung,
+        "dateien": ergebnis.dateiliste,
+        "pruefungen": ergebnis.pruefungsliste,
+        "fehlgeschlagen": ergebnis.fehlgeschlagenliste,
+        "luecken": ergebnis.luecken,
+        "vermerk": "ohne automatische Tests" if ergebnis.ohne_tests else None,
     }
 
 
@@ -259,19 +260,8 @@ def projekt_lesen(request: HttpRequest) -> JsonResponse:
                 "kennung": p.kennung,
                 "name": p.name,
                 "beschreibung": p.beschreibung,
-                "module": [
-                    {"kennung": m.kennung, "name": m.name} for m in p.module.filter(aktiv=True)
-                ],
-                "arbeitsorte": [
-                    {
-                        "kennung": o.kennung,
-                        "name": o.name,
-                        "rechner": o.rechner,
-                        "pfad": o.pfad,
-                        "repository": o.repository,
-                    }
-                    for o in p.arbeitsorte.filter(aktiv=True)
-                ],
+                "module": [_modul_json(m) for m in p.module.filter(aktiv=True)],
+                "arbeitsorte": [_ort_json(o) for o in p.arbeitsorte.filter(aktiv=True)],
             },
             "bindung": request.bindung.name,
             "zugang": request.bindung.art,
@@ -312,7 +302,9 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
 @_mit_wiederholungsschutz
 @_behandeln
 def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
-    """Chat legt einen Wunsch als Entwurf an; Freigabe bleibt beim Owner.
+    """Chat legt einen Auftrag an, wahlweise gleich geplant (Ziel, Nicht-Ziele, Arbeitsort,
+    Schreibumfang, Quellen, Abnahmekriterien, Prüfer) und mit ``freigeben`` auf Freds Anweisung
+    freigegeben, alles in einem Aufruf: scheitert die Freigabeprüfung, wird nichts angelegt.
     Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``.
     ``art`` „issue“ legt ein Issue (Fehler oder Problem) an."""
     projekt = _projekt_noetig(request)
@@ -324,7 +316,13 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     prioritaet = str(daten.get("prioritaet") or "mittel")
     if prioritaet not in dict(Auftrag.PRIO):
         raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
-    auftrag = dienst.wunsch_erfassen(
+    planung = {feld: _liste(daten[feld]) for feld in PLANFELDER if feld in daten}
+    planung.pop("beschreibung", None)
+    if daten.get("arbeitsort"):
+        planung["arbeitsort"] = _nach_kennung(
+            Arbeitsort, projekt, daten["arbeitsort"], "Arbeitsort"
+        )
+    auftrag = dienst.auftrag_anlegen(
         request.akteur,
         projekt,
         titel=str(daten.get("titel", "")),
@@ -333,10 +331,22 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         prioritaet=prioritaet,
         erzwingen=bool(daten.get("erzwingen", False)),
         typ=str(daten.get("art") or Auftrag.TYP_AUFTRAG),
+        planung=planung,
+        pruefer=_pruefer(daten),
+        freigeben=bool(daten.get("freigeben", False)),
     )
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
     )
+
+
+def _pruefer(daten: dict):
+    if not daten.get("pruefer"):
+        return None
+    pruefer = get_user_model().objects.filter(username=str(daten["pruefer"])).first()
+    if pruefer is None:
+        raise dienst.DienstFehler(f"Benutzer „{daten['pruefer']}“ gibt es nicht.")
+    return pruefer
 
 
 @csrf_exempt
@@ -448,17 +458,22 @@ def _liste(wert) -> str:
 @_mit_wiederholungsschutz
 @_behandeln
 def ergebnis(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Bestandene Prüfungen → erledigt, eine fehlgeschlagene → blockiert, keine → erledigt mit
+    Vermerk „ohne automatische Tests“."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
-    dienst.ergebnis_einreichen(
+    e = dienst.ergebnis_einreichen(
         request.akteur,
         auftrag,
         _revision(daten),
         zusammenfassung=str(daten.get("zusammenfassung", "")),
         dateien=_liste(daten.get("dateien")),
         pruefungen=_liste(daten.get("pruefungen")),
+        fehlgeschlagen=_liste(daten.get("fehlgeschlagen")),
         luecken=str(daten.get("luecken", "")),
     )
-    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag)})
+    return JsonResponse(
+        {"ok": True, "auftrag": _auftrag_json(auftrag), "ergebnis": _ergebnis_json(e)}
+    )
 
 
 def _entscheidung_json(e: Entscheidung, sicht: Projekt | None = None) -> dict:
@@ -546,9 +561,9 @@ def _projekt_json(p: Projekt) -> dict:
         "kennung": p.kennung,
         "name": p.name,
         "beschreibung": p.beschreibung,
-        "module": [{"kennung": m.kennung, "name": m.name} for m in p.module.filter(aktiv=True)],
+        "module": [_modul_json(m) for m in p.module.filter(aktiv=True)],
         "arbeitsorte": [
-            {"kennung": o.kennung, "name": o.name, "pfad": o.pfad}
+            {"kennung": o.kennung, "name": o.name, "pfad": o.pfad, "bestaetigt": o.bestaetigt}
             for o in p.arbeitsorte.filter(aktiv=True)
         ],
         "offene_auftraege": p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count(),
@@ -591,12 +606,138 @@ def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
 @_mit_wiederholungsschutz
 @_behandeln
 def modul_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Modul anlegen; mit ``eltern`` (Modulkennung) als Untermodul, beliebig tief."""
     projekt = _projekt_noetig(request)
     name = str(daten.get("name", ""))
     dienst.modul_anlegen(
-        request.akteur, projekt, kennung=str(daten.get("kennung") or slugify(name)), name=name
+        request.akteur,
+        projekt,
+        kennung=str(daten.get("kennung") or slugify(name)),
+        name=name,
+        eltern=_nach_kennung(Modul, projekt, daten.get("eltern"), "Modul"),
     )
     return JsonResponse({"ok": True, "projekt": _projekt_json(projekt)}, status=201)
+
+
+def _modul_json(m: Modul) -> dict:
+    return {
+        "kennung": m.kennung,
+        "name": m.name,
+        "eltern": m.eltern.kennung if m.eltern_id else None,
+        "revision": m.revision,
+    }
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def modul_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Modul umbenennen, umhängen (eltern: Modulkennung, leer = direkt unters Projekt) oder
+    archivieren (aktiv=false); erwartete Revision nötig."""
+    projekt = _projekt_noetig(request)
+    modul = _nach_kennung(Modul, projekt, daten.get("modul"), "Modul")
+    if modul is None:
+        raise dienst.DienstFehler("modul (Kennung) ist erforderlich.")
+    if "revision" not in daten:
+        raise dienst.DienstFehler("revision (aktuelle Revision des Moduls) ist erforderlich.")
+    revision = _revision(daten)
+    felder: dict = {}
+    if daten.get("name") is not None:
+        felder["name"] = str(daten["name"])
+    if "eltern" in daten:
+        felder["eltern"] = _nach_kennung(Modul, projekt, daten["eltern"], "Modul")
+    if felder:
+        modul = dienst.modul_aendern(
+            request.akteur,
+            modul,
+            erwartete_revision=revision,
+            grund=str(daten.get("grund", "")),
+            **felder,
+        )
+        revision = modul.revision
+    if daten.get("aktiv") is not None:
+        modul = dienst.modul_archivieren(
+            request.akteur, modul, aktiv=bool(daten["aktiv"]), erwartete_revision=revision
+        )
+    modul.refresh_from_db()
+    return JsonResponse({"ok": True, "modul": _modul_json(modul) | {"aktiv": modul.aktiv}})
+
+
+def _ort_json(o: Arbeitsort) -> dict:
+    return {
+        "kennung": o.kennung,
+        "name": o.name,
+        "rechner": o.rechner,
+        "pfad": o.pfad,
+        "repository": o.repository,
+        "aktiv": o.aktiv,
+        "bestaetigt": o.bestaetigt,
+        "vorgeschlagen_von": o.vorgeschlagen_von or None,
+        "revision": o.revision,
+    }
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def arbeitsort_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Arbeitsort (Ordner, Repository) vorschlagen, wahlweise gleich für einen Auftrag. Bleibt
+    ein Vorschlag, bis Fred ihn mit einem Häkchen übernimmt; ordnet bis dahin keinen Ordner zu."""
+    projekt = _projekt_noetig(request)
+    auftrag = None
+    if daten.get("auftrag"):
+        nr = str(daten["auftrag"]).upper().removeprefix("A-")
+        if not nr.isdigit():
+            raise dienst.DienstFehler("auftrag muss eine Nummer wie A-12 sein.")
+        auftrag = dienst.auftrag_holen(request.akteur, int(nr))
+        if auftrag.projekt_id != projekt.pk:
+            raise dienst.KeinZugriff("Nicht gefunden.")
+    name = str(daten.get("name", "")).strip()
+    ort = dienst.arbeitsort_anlegen(
+        request.akteur,
+        projekt,
+        kennung=dienst.freie_kennung(Arbeitsort, projekt, name, "ort"),
+        name=name,
+        rechner=str(daten.get("rechner", "")),
+        pfad=str(daten.get("pfad", "")),
+        repository=str(daten.get("repository", "")),
+    )
+    antwort: dict = {"ok": True, "arbeitsort": _ort_json(ort)}
+    if auftrag is not None:
+        dienst.arbeitsort_setzen(request.akteur, auftrag, ort)
+        auftrag.refresh_from_db()
+        antwort["auftrag"] = _auftrag_json(auftrag, mit_details=True)
+    if not ort.bestaetigt:
+        antwort["hinweis"] = "Vorschlag; Fred übernimmt ihn mit einem Häkchen in der Oberfläche."
+    return JsonResponse(antwort, status=201)
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def arbeitsort_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Arbeitsort umbenennen, verschieben oder archivieren (aktiv=false); erwartete Revision
+    nötig. Ändert die KI Ordner oder Repository, wird der Ort wieder ein Vorschlag."""
+    projekt = _projekt_noetig(request)
+    ort = _nach_kennung(Arbeitsort, projekt, daten.get("arbeitsort"), "Arbeitsort")
+    if ort is None:
+        raise dienst.DienstFehler("arbeitsort (Kennung) ist erforderlich.")
+    if "revision" not in daten:
+        raise dienst.DienstFehler("revision (aktuelle Revision des Arbeitsorts) ist erforderlich.")
+    ort = dienst.arbeitsort_aendern(
+        request.akteur,
+        ort,
+        erwartete_revision=_revision(daten),
+        grund=str(daten.get("grund", "")),
+        **{k: daten.get(k) for k in ("name", "rechner", "pfad", "repository", "aktiv")},
+    )
+    return JsonResponse({"ok": True, "arbeitsort": _ort_json(ort)})
 
 
 PLANFELDER = ("beschreibung", "ziel", "nicht_ziele", "schreibumfang", "quellen", "abnahmekriterien")
@@ -617,8 +758,9 @@ def _nach_kennung(modell, projekt: Projekt, wert, was: str):
 @_mit_wiederholungsschutz
 @_behandeln
 def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
-    """Auftrag zum Arbeitspaket planen oder ändern; nur angegebene Felder ändern sich. Eine
-    bestehende Freigabe erlischt dabei. Freigeben und Abnehmen gehen nur in der Oberfläche."""
+    """Auftrag planen oder ändern; nur angegebene Felder ändern sich. Eine bestehende Freigabe
+    erlischt dabei. Mit ``freigeben`` gibt der Assistent danach auf Freds Anweisung im Chat frei;
+    scheitert die Freigabeprüfung, bleibt auch die Planung unverändert."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     rev = auftrag.aktuelle_revision
     werte = {feld: getattr(rev, feld) for feld in PLANFELDER}
@@ -634,23 +776,24 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     prioritaet = str(daten.get("prioritaet") or auftrag.prioritaet)
     if prioritaet not in dict(Auftrag.PRIO):
         raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
-    if set(daten) - {"pruefer", "anfrage_kennung"}:
-        dienst.auftrag_bearbeiten(
-            request.akteur,
-            auftrag,
-            titel=str(daten.get("titel") or auftrag.titel),
-            arbeitsort=arbeitsort,
-            prioritaet=prioritaet,
-            modul=modul,
-            anlass=str(daten.get("anlass") or "Geplant durch KI-Assistent"),
-            typ=str(daten["art"]) if daten.get("art") else None,
-            **werte,
-        )
-    if daten.get("pruefer"):
-        pruefer = get_user_model().objects.filter(username=str(daten["pruefer"])).first()
-        if pruefer is None:
-            raise dienst.DienstFehler(f"Benutzer „{daten['pruefer']}“ gibt es nicht.")
-        dienst.pruefer_festlegen(request.akteur, auftrag, pruefer)
+    with transaction.atomic():
+        if set(daten) - {"pruefer", "freigeben", "anfrage_kennung"}:
+            dienst.auftrag_bearbeiten(
+                request.akteur,
+                auftrag,
+                titel=str(daten.get("titel") or auftrag.titel),
+                arbeitsort=arbeitsort,
+                prioritaet=prioritaet,
+                modul=modul,
+                anlass=str(daten.get("anlass") or "Geplant durch KI-Assistent"),
+                typ=str(daten["art"]) if daten.get("art") else None,
+                **werte,
+            )
+        pruefer = _pruefer(daten)
+        if pruefer is not None:
+            dienst.pruefer_festlegen(request.akteur, auftrag, pruefer)
+        if daten.get("freigeben"):
+            dienst.auftrag_freigeben(request.akteur, auftrag)
     auftrag.refresh_from_db()
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
 
@@ -741,6 +884,16 @@ def projektakte(request: HttpRequest) -> JsonResponse:
                 "entwicklungsstufe": p.entwicklungsstufe or None,
                 "inhalt_revision": p.inhalt_revision,
                 "profil_revision": p.profil_revision,
+                "phase": p.phase or None,
+                "profilentwurf": (
+                    {
+                        "felder": p.profil_entwurf,
+                        "von": p.profil_entwurf_von,
+                        "basis_revision": p.profil_entwurf_basis,
+                    }
+                    if p.profil_entwurf
+                    else None
+                ),
             },
             "funktionen": funktionen,
             "unterlagen": unterlagen,
@@ -755,9 +908,10 @@ def projektakte(request: HttpRequest) -> JsonResponse:
                 }
                 for z in akte.installationen_aktuell(p)
             ],
-            "umgebungen": [
-                {"kennung": u.kennung, "name": u.name, "art": u.art}
-                for u in p.umgebungen.filter(aktiv=True)
+            "umgebungen": [_umgebung_json(u) for u in p.umgebungen.filter(aktiv=True)],
+            "releases": [
+                _release_json(r)
+                for r in p.releases.filter(archiviert=False).prefetch_related("komponenten")
             ],
         }
     )
@@ -784,7 +938,8 @@ def projektkontext(request: HttpRequest) -> JsonResponse:
             if not nr.isdigit():
                 raise dienst.DienstFehler("auftrag muss eine Nummer wie A-12 sein.")
             auftrag = dienst.auftrag_holen(request.akteur, int(nr))
-        k = akte.kontext_erzeugen(request.akteur, p, auftrag=auftrag)
+        modul = _nach_kennung(Modul, p, request.GET.get("modul"), "Modul")
+        k = akte.kontext_erzeugen(request.akteur, p, auftrag=auftrag, modul=modul)
         text = k.teile[0]
         teil = 1
     return JsonResponse(
@@ -981,6 +1136,312 @@ def github_vorschlag(request: HttpRequest, daten: dict) -> JsonResponse:
                 "id": a.aktions_id,
                 "zustand": a.zustand,
                 "hinweis": "Wartet auf Freds Bestätigung in der Oberfläche.",
+            },
+        },
+        status=201,
+    )
+
+
+# --- Pflege durch den Assistenten: Profil, Umgebungen, Releases ---------------------------------
+
+
+def _erwartete_revision(daten: dict) -> int:
+    if "revision" not in daten:
+        raise dienst.DienstFehler("revision (zuletzt gelesene Revision) ist erforderlich.")
+    return _revision(daten)
+
+
+def _umgebung_json(u: Umgebung) -> dict:
+    return {
+        "kennung": u.kennung,
+        "name": u.name,
+        "art": u.art,
+        "beschreibung": u.beschreibung,
+        "url": u.url,
+        "aktiv": u.aktiv,
+        "bestaetigt": u.bestaetigt,
+        "vorgeschlagen_von": u.vorgeschlagen_von or None,
+        "revision": u.revision,
+    }
+
+
+def _release_json(r: Release) -> dict:
+    return {
+        "kennung": r.kennung,
+        "titel": r.titel,
+        "zustand": r.zustand,
+        "archiviert": r.archiviert,
+        "revision": r.revision,
+        "komponenten": [
+            {
+                "komponente": k.komponente,
+                "repository": k.repository,
+                "commit": k.commit,
+                "artefakt_hash": k.artefakt_hash,
+            }
+            for k in r.komponenten.all()
+        ],
+    }
+
+
+def _komponenten(daten: dict) -> list[dict]:
+    werte = daten.get("komponenten")
+    if not isinstance(werte, list) or not all(isinstance(k, dict) for k in werte):
+        raise dienst.DienstFehler(
+            "komponenten ist eine Liste von Objekten mit komponente, repository, commit oder "
+            "artefakt_hash."
+        )
+    return werte
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def profil_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Profilentwurf (Zweck, Zielgruppe, Nicht-Ziele, Entwicklungsstufe, Phase); Fred übernimmt."""
+    p = _akte_projekt(request)
+    p = akte.profil_vorschlagen(
+        request.akteur,
+        p,
+        erwartete_revision=_erwartete_revision(daten),
+        grund=str(daten.get("grund", "")),
+        **{f: daten.get(f) for f in ("beschreibung", *akte.PROFILFELDER)},
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "profil_revision": p.profil_revision,
+            "entwurf": p.profil_entwurf,
+            "hinweis": "Entwurf; das geltende Profil ändert sich erst mit Freds Übernahme.",
+        },
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def umgebung_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
+    p = _akte_projekt(request)
+    u = akte.umgebung_anlegen(
+        request.akteur,
+        p,
+        name=str(daten.get("name", "")),
+        art=str(daten.get("art", "")),
+        beschreibung=str(daten.get("beschreibung", "")),
+        url=str(daten.get("url", "")),
+    )
+    return JsonResponse({"ok": True, "umgebung": _umgebung_json(u)}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def umgebung_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
+    p = _akte_projekt(request)
+    u = _nach_kennung(Umgebung, p, daten.get("umgebung"), "Umgebung")
+    if u is None:
+        raise dienst.DienstFehler("umgebung (Kennung) ist erforderlich.")
+    u = akte.umgebung_aendern(
+        request.akteur,
+        u,
+        erwartete_revision=_erwartete_revision(daten),
+        grund=str(daten.get("grund", "")),
+        **{k: daten.get(k) for k in ("name", "art", "beschreibung", "url", "aktiv")},
+    )
+    return JsonResponse({"ok": True, "umgebung": _umgebung_json(u)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def release_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Release als Entwurf mit Komponenten; veröffentlichen oder ersetzen setzt nur Fred."""
+    p = _akte_projekt(request)
+    r = akte.release_anlegen(
+        request.akteur,
+        p,
+        kennung=str(daten.get("kennung", "")),
+        titel=str(daten.get("titel", "")),
+        beschreibung=str(daten.get("beschreibung", "")),
+        komponenten=_komponenten(daten),
+    )
+    return JsonResponse({"ok": True, "release": _release_json(r)}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def release_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
+    p = _akte_projekt(request)
+    r = Release.objects.filter(projekt=p, kennung=str(daten.get("release", ""))).first()
+    if r is None:
+        raise dienst.DienstFehler(
+            f"Release „{daten.get('release')}“ gibt es in diesem Projekt nicht."
+        )
+    r = akte.release_aendern(
+        request.akteur,
+        r,
+        erwartete_revision=_erwartete_revision(daten),
+        grund=str(daten.get("grund", "")),
+        titel=daten.get("titel"),
+        beschreibung=daten.get("beschreibung"),
+        komponenten=_komponenten(daten) if "komponenten" in daten else None,
+        archiviert=daten.get("archiviert"),
+    )
+    return JsonResponse({"ok": True, "release": _release_json(r)})
+
+
+# --- Meldevertrag, Modulstand, neue Unterlagenversion (A-2) -------------------------------------
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def stand_melden(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Meldevertrag ``kipm-stand/1``: Stand nach Arbeitsabschluss melden (Umsetzung, Tests je
+    Umgebung, Installation). Für Chats und für den Melder ``03-Server/skripte/kipm_melden.py``."""
+    p = _akte_projekt(request)
+    auftrag = None
+    if daten.get("auftrag"):
+        nr = str(daten["auftrag"]).upper().removeprefix("A-")
+        if not nr.isdigit():
+            raise dienst.DienstFehler("auftrag muss eine Nummer wie A-12 sein.")
+        auftrag = dienst.auftrag_holen(request.akteur, int(nr))
+        if auftrag.projekt_id != p.pk:
+            raise dienst.KeinZugriff("Nicht gefunden.")
+    tests = daten.get("tests") or []
+    if not isinstance(tests, list) or not all(isinstance(t, dict) for t in tests):
+        raise dienst.DienstFehler("tests ist eine Liste von Objekten (umfang, ergebnis, umgebung).")
+    for feld in ("umsetzung", "installation"):
+        if daten.get(feld) is not None and not isinstance(daten[feld], dict):
+            raise dienst.DienstFehler(f"{feld} ist ein Objekt.")
+    ergebnis = akte.stand_melden(
+        request.akteur,
+        p,
+        meldung_id=str(daten.get("meldung_id", "")),
+        version=str(daten.get("version", "")),
+        quelle=str(daten.get("quelle", "")),
+        modul=_nach_kennung(Modul, p, daten.get("modul"), "Modul"),
+        komponente=str(daten.get("komponente", "")),
+        auftrag=auftrag,
+        auftrag_revision=daten.get("revision"),
+        arbeitsort=_nach_kennung(Arbeitsort, p, daten.get("arbeitsort"), "Arbeitsort"),
+        umsetzung=daten.get("umsetzung"),
+        tests=tests,
+        installation=daten.get("installation"),
+        einschraenkungen=str(daten.get("einschraenkungen", "")),
+        beobachtet_am=daten.get("beobachtet_am"),
+        korrigiert=str(daten.get("korrigiert", "")),
+        # Zeit des ersten Sendeversuchs eines Melders; außerhalb des Rumpfs, damit
+        # Wiederholungen denselben Inhalt haben.
+        beobachtet_ersatz=request.headers.get("X-KIPM-Beobachtet"),
+    )
+    return JsonResponse({"ok": True, **ergebnis}, status=200 if ergebnis["wiederholt"] else 201)
+
+
+def _stand_json(z: dict) -> dict:
+    u = z["umsetzung"]
+    return {
+        "modul": z["modul"].kennung if z["modul"] else None,
+        "name": z["name"],
+        "umsetzung": {
+            "version": u.version,
+            "auftrag": u.auftrag.nummer if u.auftrag_id else None,
+            "revision": u.auftrag_revision or None,
+            "quelle": u.quelle,
+            "beobachtet": _zeit(u.beobachtet_am),
+            "erfasst": _zeit(u.erfasst_am),
+            "gemeldet_von": u.akteur_name,
+            "meldung_id": u.meldung or None,
+            "bestaetigt": u.bestaetigt_von.get_username() if u.bestaetigt_von_id else None,
+        }
+        if u
+        else None,
+        "tests": [
+            {
+                "umgebung": t["ort"],
+                "ergebnis": t["n"].ergebnis,
+                "version": t["n"].version,
+                "fuer_gemeldeten_stand": t["fuer_aktuell"],
+                "widerspruch": t["widerspruch"],
+                "beobachtet": _zeit(t["n"].beobachtet_am),
+                "quelle": t["n"].quelle,
+                "bestaetigt": t["n"].bestaetigt_von.get_username()
+                if t["n"].bestaetigt_von_id
+                else None,
+            }
+            for t in z["tests"]
+        ],
+        "installationen": [
+            {
+                "umgebung": i.umgebung.name,
+                "komponente": i.komponente,
+                "version": i.version,
+                "zustand": i.zustand,
+                "installiert": _zeit(i.installiert_am),
+            }
+            for i in z["installationen"]
+        ],
+        "einschraenkungen": z["einschraenkungen"] or None,
+        "luecken": z["luecken"],
+    }
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
+def modulstand(request: HttpRequest) -> JsonResponse:
+    """Aktueller Stand je Modul und Projekt; gemeldet und bestätigt getrennt, Lücken sichtbar."""
+    p = _akte_projekt(request)
+    return JsonResponse({"ok": True, "staende": [_stand_json(z) for z in akte.modulstaende(p)]})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def unterlage_version(request: HttpRequest, daten: dict, nummer: int) -> JsonResponse:
+    """Neue Version einer Textunterlage unter derselben Identität (Entwurf), mit erwarteter
+    Version und Grund; Grundlage und KI-Freigabe setzt nur Fred."""
+    p = _akte_projekt(request)
+    u = akte.unterlage_holen(request.akteur, p, nummer)
+    if "erwartete_version" not in daten:
+        raise dienst.DienstFehler("erwartete_version (zuletzt gelesene Versionsnummer) fehlt.")
+    try:
+        erwartet = int(daten["erwartete_version"])
+    except (TypeError, ValueError) as fehler:
+        raise dienst.DienstFehler("erwartete_version ist keine Zahl.") from fehler
+    v = akte.unterlage_neue_textversion(
+        request.akteur,
+        u,
+        text=str(daten.get("text", "")),
+        erwartete_nr=erwartet,
+        grund=str(daten.get("grund", "")),
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "unterlage": {
+                "kennung": u.kennung,
+                "version": v.nummer,
+                "rolle": v.rolle,
+                "sha256": v.sha256,
+                "herkunft": v.herkunft,
             },
         },
         status=201,

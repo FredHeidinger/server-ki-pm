@@ -11,6 +11,18 @@
   <p class="quelle">Quelle: Projektprofil Revision {{ projekt.profil_revision }}{% if profil_alt %}, zuletzt geändert {{ profil_alt.zeitpunkt|date:"d.m.Y H:i" }} von {{ profil_alt.akteur_name }}{% else %}, noch nie bestätigt{% endif %}</p>
 </section>
 
+{% if profilentwurf %}
+<section class="box warn" aria-labelledby="h-profilentwurf">
+  <h2 id="h-profilentwurf">Profilentwurf von <span class="ki">KI</span> {{ projekt.profil_entwurf_von }}</h2>
+  <p class="gedaempft">Vorgeschlagen {{ projekt.profil_entwurf_am|date:"d.m.Y H:i" }} auf Grundlage von Revision {{ projekt.profil_entwurf_basis }}. Gilt erst, wenn du ihn übernimmst.</p>
+  <dl class="felder">{% for z in profilentwurf %}<dt>{{ z.feld }}</dt><dd><span class="gedaempft">bisher:</span> {{ z.alt|default:"–" }}<br><strong>neu:</strong> {{ z.neu|linebreaksbr }}</dd>{% endfor %}</dl>
+  <form method="post" action="{% url 'profil_entwurf' kennung=projekt.kennung wahl='uebernehmen' %}" class="inline">{% csrf_token %}<input type="hidden" name="entwurf" value="{{ entwurf_hash }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>
+  <form method="post" action="{% url 'profil_entwurf' kennung=projekt.kennung wahl='verwerfen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein">Verwerfen</button></form>
+</section>
+{% endif %}
+
+{% if modulstand_zeigen %}{% include "steuerung/modulstand.html" %}{% endif %}
+
 {% if widersprueche or pruefbeduerftig %}
 <section class="box warn" aria-labelledby="h-widerspruch">
   <h2 id="h-widerspruch">Widersprüchlich oder prüfbedürftig</h2>
@@ -44,7 +56,7 @@
       </li>{% endfor %}
     </ul>
     {% else %}<p class="gedaempft">Keine Funktion mit laufendem Auftrag.</p>{% endif %}
-    <p class="kleinmeta"><a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}">Offen: {{ kennzahlen.auftraege }} Aufträge · {{ kennzahlen.issues }} Issues · {{ kennzahlen.pruefung }} warten auf Prüfung{% if kennzahlen.blockiert %} · {{ kennzahlen.blockiert }} blockiert oder unklar{% endif %}</a></p>
+    <p class="kleinmeta"><a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}">Offen: {{ kennzahlen.auftraege }} Aufträge · {{ kennzahlen.issues }} Issues{% if kennzahlen.blockiert %} · {{ kennzahlen.blockiert }} blockiert{% endif %}</a></p>
   </section>
 </div>
 

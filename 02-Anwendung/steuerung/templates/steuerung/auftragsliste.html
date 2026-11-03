@@ -7,14 +7,6 @@
   <a class="umschalter {% if art == 'auftrag' %}aktiv{% endif %}" href="{% filterlink art='auftrag' %}">Aufträge</a>
   <a class="umschalter {% if art == 'issue' %}aktiv{% endif %}" href="{% filterlink art='issue' %}">Issues</a>
 </div>
-{% if module_filter %}
-<div class="werkzeuge umschalter-zeile modulfilter" aria-label="Nach Modul filtern">
-  <span class="gedaempft">Modul:</span>
-  <a class="umschalter {% if not modul %}aktiv{% endif %}" href="{% filterlink modul='' %}">Alle</a>
-  {% for m in module_filter %}<a class="umschalter {% if modul == m.kennung %}aktiv{% endif %}" href="{% filterlink modul=m.kennung %}">{{ m.name }}</a>{% endfor %}
-  <a class="umschalter {% if modul == 'ohne' %}aktiv{% endif %}" href="{% filterlink modul='ohne' %}">ohne Modul</a>
-</div>
-{% endif %}
 {% if ansicht == 'board' %}
   {% include "steuerung/board.html" with spalten=spalten zeige_projekt=zeige_projekt %}
   {% if abgebrochen %}<p class="gedaempft">{{ abgebrochen }} abgebrochene Aufträge, sichtbar in der Listenansicht.</p>{% endif %}

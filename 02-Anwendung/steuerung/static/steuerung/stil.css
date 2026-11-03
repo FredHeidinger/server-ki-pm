@@ -117,7 +117,7 @@ a.kachel:hover { border-color: var(--akzent); }
 .spalte { background: var(--weich); border-radius: 12px; padding: 10px; min-height: 180px; border-top: 4px solid var(--linie); }
 .spalte h3 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: var(--gedaempft); margin: 2px 4px 10px; }
 .spalte .anzahl { background: var(--flaeche); border-radius: 10px; padding: 0 8px; font-size: 12px; }
-.spalte-entwurf { border-top-color: var(--c-entwurf); } .spalte-freigegeben { border-top-color: var(--c-freigegeben); } .spalte-arbeit { border-top-color: var(--c-arbeit); } .spalte-pruefung { border-top-color: var(--c-pruefung); } .spalte-abgenommen { border-top-color: var(--c-abgenommen); }
+.spalte-entwurf { border-top-color: var(--c-entwurf); } .spalte-freigegeben { border-top-color: var(--c-freigegeben); } .spalte-arbeit { border-top-color: var(--c-arbeit); } .spalte-pruefung { border-top-color: var(--c-pruefung); } .spalte-abgenommen { border-top-color: var(--c-abgenommen); } .spalte-blockiert { border-top-color: var(--fehler-linie); } .spalte-erledigt { border-top-color: var(--c-abgenommen); }
 .karte { background: var(--flaeche); border: 1px solid var(--linie); border-left-width: 4px; border-radius: 9px; padding: 11px 12px; margin-bottom: 9px; box-shadow: var(--schatten); }
 .karte.prio-hoch { border-left-color: var(--fehler-linie); } .karte.prio-mittel { border-left-color: var(--c-arbeit); } .karte.prio-niedrig { border-left-color: var(--c-entwurf); }
 .karte:hover { border-color: var(--akzent); border-left-width: 4px; }
@@ -345,3 +345,87 @@ code { overflow-wrap: break-word; }
   .reiter { overflow-x: auto; }
   main { padding-left: 12px; padding-right: 12px; }
 }
+
+/* Arbeitsort direkt am Auftrag (Freigabeprüfung) */
+.ortwahl { margin: 8px 0 4px 18px; display: flex; flex-direction: column; gap: 8px; }
+.ortwahl .knopf, .seite .ortwahl .knopf { display: inline-block; width: auto; margin-top: 0; }
+.ortwahl .vorschlag { background: var(--weich); border-radius: 8px; padding: 8px 10px; }
+.ortwahl .vorschlag p { margin: 0 0 6px; }
+.ortwahl .knopfzeile { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ortauswahl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ortauswahl label { width: 100%; }
+.ortauswahl select { flex: 1; min-width: 0; max-width: 100%; }
+.ortformular .formular { margin-top: 6px; }
+.ortformular input[type="text"], .ortformular input[type="url"] { width: 100%; }
+
+/* Projektauswahl: gleich große Karten mit festen Plätzen für Name, Phase, Kürzel, Zweck */
+.projektwahl { grid-auto-rows: 1fr; }
+.projektwahl > li { display: flex; min-width: 0; }
+.projektwahl-karte { flex: 1; min-width: 0; height: 100%; min-height: 138px; display: grid; grid-template-rows: auto auto 1fr; gap: 6px; }
+.projektwahl-kopf { display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: center; gap: 10px; min-width: 0; }
+.projektwahl-name { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.projektwahl-phase { flex-shrink: 0; white-space: nowrap; }
+.projektwahl-kuerzel { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projektwahl-zweck { color: var(--gedaempft); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.projektwahl-zweck.leer-text { font-style: italic; }
+
+/* Bereiche nur einmal: auf breiten Bildschirmen führt die Seitenleiste, die Reiterzeile nur schmal */
+@media (min-width: 901px) { .reiter { display: none; } }
+
+/* Modulbaum: Gesamtes Projekt als Wurzel, Module und Untermodule beliebig tief */
+.mit-baum { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; align-items: start; }
+.baumspalte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 8px; box-shadow: var(--schatten); position: sticky; top: 12px; }
+.baumrechts { min-width: 0; }
+.baum, .baum-unter { list-style: none; margin: 0; padding: 0; }
+.baum-unter { padding-left: 14px; border-left: 1px solid var(--linie); margin-left: 10px; }
+.baumknoten { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 5px 8px; border-radius: 7px; text-decoration: none; color: var(--text); font-size: 14px; min-width: 0; }
+.baumknoten:hover { background: var(--weich); }
+.baumknoten[aria-current="true"] { background: var(--akzent-weich); color: var(--akzent); font-weight: 600; }
+.baumname { display: flex; align-items: flex-start; gap: 6px; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+.baumname svg { width: 16px; height: 16px; margin-top: 1px; }
+.baumzahlen { padding-top: 2px; }
+.baumzahlen { font-size: 11px; color: var(--gedaempft); white-space: nowrap; flex-shrink: 0; }
+.baumzahlen abbr { text-decoration: none; }
+.baumzweig > summary { list-style: none; cursor: pointer; display: flex; align-items: center; }
+.baumzweig > summary::-webkit-details-marker { display: none; }
+.baumzweig > summary::before { content: "▸"; color: var(--gedaempft); width: 12px; flex-shrink: 0; font-size: 12px; }
+.baumzweig[open] > summary::before { content: "▾"; }
+.baumzweig > summary .baumknoten { flex: 1; }
+.baumknoten.blatt { margin-left: 12px; }
+.baum-schmal { display: none; margin-bottom: 12px; }
+.baum-schmal > summary { list-style: none; }
+.baum-schmal > summary::-webkit-details-marker { display: none; }
+.baum-schmal[open] > .baum { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 8px; margin-top: 8px; }
+@media (max-width: 900px) {
+  .mit-baum { grid-template-columns: 1fr; }
+  .baumspalte { display: none; }
+  .baum-schmal { display: block; }
+}
+.modulpflege-liste { list-style: none; padding: 0; margin: 8px 0 12px; }
+.modulpflege-liste > li { padding: 6px 0 6px calc((var(--tiefe, 1) - 1) * 22px); border-bottom: 1px solid var(--linie); }
+.modulzeile { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.modulzeile svg { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* Auftragsansicht: eine Spalte, oben der nächste Schritt, darunter Reiter; Seite und Panel gleich */
+.auftrag { max-width: 1000px; }
+.auftragsfakten { margin: -4px 0 14px; }
+.schritt-kopf { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.schritt-text { margin: 0; font-size: 16px; }
+.schritt-kopf p { margin: 2px 0 0; }
+.schritt-knoepfe { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.schritt details { margin-top: 10px; }
+.schritt details > summary { cursor: pointer; color: var(--gedaempft); font-size: 14px; }
+.weitere-liste { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.weitere-liste .aktion textarea { max-width: 520px; }
+.auftragsreiter { display: flex; gap: 2px; border-bottom: 1px solid var(--linie); margin: 4px 0 14px; flex-wrap: wrap; }
+.auftragsreiter a { padding: 8px 14px; text-decoration: none; color: var(--gedaempft); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; font-size: 14px; }
+.auftragsreiter a[aria-current="true"] { color: var(--akzent); border-bottom-color: var(--akzent); }
+.auftragsreiter .zahl { background: var(--akzent-weich); color: var(--akzent); border-radius: 6px; font-size: 12px; padding: 0 7px; }
+.reiterteil { scroll-margin-top: 16px; }
+.reiterteil[hidden] { display: none; }
+.knopfzeile { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 600px) { .felder { grid-template-columns: 105px minmax(0, 1fr); gap: 6px 10px; } }
+
+/* Stand je Modul */
+.modulstand td div + div { margin-top: 6px; }
+.modulstand-name { padding-left: calc(11px + var(--tiefe, 0) * 16px); white-space: nowrap; }

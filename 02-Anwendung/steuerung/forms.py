@@ -235,8 +235,23 @@ class EigenesErgebnisForm(forms.Form):
         "z. B. src/auth/login.py@9c2e7b1",
     )
     pruefungen = _liste(
-        forms.CharField(label="Ausgeführte Prüfungen", widget=forms.HiddenInput),
+        forms.CharField(
+            label="Bestandene Prüfungen",
+            required=False,
+            widget=forms.HiddenInput,
+            help_text="Leer lassen, wenn es keine automatischen Tests gibt; der Auftrag wird dann "
+            "„ohne automatische Tests“ erledigt.",
+        ),
         "z. B. pytest tests/auth: 12 bestanden",
+    )
+    fehlgeschlagen = _liste(
+        forms.CharField(
+            label="Fehlgeschlagene Prüfungen",
+            required=False,
+            widget=forms.HiddenInput,
+            help_text="Eine fehlgeschlagene Prüfung blockiert den Auftrag mit diesem Grund.",
+        ),
+        "z. B. pytest tests/auth: 2 fehlgeschlagen",
     )
     luecken = forms.CharField(
         label="Bekannte Lücken", required=False, widget=forms.Textarea(attrs={"rows": 2})
@@ -393,7 +408,9 @@ class NachweisForm(forms.Form):
 
     def __init__(self, *args, projekt: Projekt, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["umgebung"].queryset = Umgebung.objects.filter(projekt=projekt, aktiv=True)
+        self.fields["umgebung"].queryset = Umgebung.objects.filter(
+            projekt=projekt, aktiv=True, bestaetigt=True
+        )
         self.fields["funktion"].queryset = Funktion.objects.filter(projekt=projekt)
         self.fields["funktion"].label_from_instance = lambda f: f"{f.kennung} {f.titel}"
         _stufen(self)
@@ -489,7 +506,9 @@ class InstallationForm(forms.Form):
 
     def __init__(self, *args, projekt: Projekt, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["umgebung"].queryset = Umgebung.objects.filter(projekt=projekt, aktiv=True)
+        self.fields["umgebung"].queryset = Umgebung.objects.filter(
+            projekt=projekt, aktiv=True, bestaetigt=True
+        )
         self.fields["release"].queryset = Release.objects.filter(projekt=projekt)
         _stufen(self)
 
@@ -520,16 +539,41 @@ class UnterlageLinkForm(forms.Form):
         _stufen(self)
 
 
-class UnterlageDateiForm(forms.Form):
-    titel = forms.CharField(
-        label="Titel", max_length=200, required=False, help_text="Leer = Dateiname"
-    )
-    beschreibung = forms.CharField(label="Kurzer Zweck", max_length=300, required=False)
-    datei = forms.FileField(label="Datei")
-    upload_schluessel = forms.CharField(widget=forms.HiddenInput)
+class MehrfachDateiAuswahl(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MehrereDateien(forms.FileField):
+    """Eine oder mehrere Dateien in einem Feld; ``clean`` liefert immer eine Liste."""
 
     def __init__(self, *args, **kwargs):
+        kwargs.setdefault("widget", MehrfachDateiAuswahl())
         super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        einzel = super().clean
+        if isinstance(data, (list, tuple)):
+            return [einzel(d, initial) for d in data]
+        return [einzel(data, initial)]
+
+
+class UnterlageDateiForm(forms.Form):
+    titel = forms.CharField(
+        label="Titel",
+        max_length=200,
+        required=False,
+        help_text="Leer = Dateiname; bei mehreren Dateien gilt je Datei ihr Name",
+    )
+    beschreibung = forms.CharField(label="Kurzer Zweck", max_length=300, required=False)
+    datei = MehrereDateien(label="Dateien")
+    upload_schluessel = forms.CharField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, mehrere: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not mehrere:
+            self.fields["datei"].label = "Datei"
+            self.fields["datei"].widget = forms.ClearableFileInput()
+            self.fields["titel"].help_text = "Leer = bisheriger Titel"
         _stufen(self)
 
 

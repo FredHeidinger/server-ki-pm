@@ -6,8 +6,8 @@ Codex, Claude- und ChatGPT-Connectors gleich annehmen; alternativ ``/mcp/`` mit 
 
 Jeder Werkzeugaufruf wird intern an die HTTP-Schnittstelle (``api.py``) weitergereicht, damit
 Befugnis, Wiederholungsschutz und Projektwahl genau dieselben Regeln haben. Das Projekt ergibt
-sich aus ``projekt`` (Kennung) oder ``ordner`` (Arbeitsverzeichnis). Freigeben und Abnehmen
-gibt es hier nicht; das macht der Mensch in der Oberfläche.
+sich aus ``projekt`` (Kennung) oder ``ordner`` (Arbeitsverzeichnis). Freigeben darf der
+Assistent nur auf Freds Anweisung im Chat; eine Nutzerabnahme gibt es nicht.
 """
 
 import json
@@ -23,16 +23,29 @@ from . import dienst
 PROTOKOLLE = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 ANWEISUNGEN = (
-    "Server-KI-PM ist Freds zentrale Projektsteuerung. Du arbeitest als sein Assistent: "
-    "Projekte und Module anlegen, Aufträge und Issues (art=issue) anlegen, Aufträge mit "
-    "kipm_planen ausplanen (Ziel, Nicht-Ziele, Arbeitsort, Schreibumfang, "
-    "Abnahmekriterien, Prüfer), bis „fuer_freigabe_fehlt“ leer ist, Rückfragen mit "
-    "kipm_antworten beantworten und alles lesen. Freigeben und Abnehmen macht Fred selbst in "
-    "der Oberfläche. Das Projekt nennst du mit „projekt“ (Kennung aus kipm_projekte) oder "
-    "„ordner“ (dein Arbeitsverzeichnis). Vor dem Anlegen kipm_auftraege prüfen, nichts doppelt. "
-    "Arbeitest du selbst an einem Auftrag: erst kipm_uebernehmen, dann kipm_fortschritt und "
-    "zum Schluss kipm_ergebnis; Ziel, Schreibumfang und Abnahmekriterien aus kipm_lesen sind "
-    "bindend. Für einen neuen Chat zuerst kipm_projektkontext lesen (alle Teile). Funktionen, "
+    "Server-KI-PM ist Freds zentrale Projektsteuerung. Du arbeitest als sein Assistent. "
+    "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
+    "Nachweis); nur Offenes, Größeres oder für einen anderen Chat legst du in KI-PM an. "
+    "Ablauf eines Auftrags: Entwurf → Freigegeben → In Arbeit → Erledigt oder Blockiert "
+    "(Abbrechen jederzeit); eine Nutzerabnahme gibt es nicht. Anlegen: kipm_auftrag_anlegen "
+    "mit der ganzen Planung in einem Aufruf (Ziel, Nicht-Ziele, Arbeitsort, Schreibumfang, "
+    "Abnahmekriterien, Prüfer); vorher kipm_auftraege prüfen, nichts doppelt. Freds Anweisung "
+    "im Chat ist die Freigabe: dann freigeben=true (auch bei kipm_planen), sonst bleibt es "
+    "Entwurf; ohne seine Anweisung gibst du nie frei. Scheitert die Freigabeprüfung (fehlende "
+    "Planung, unbestätigter Arbeitsort, überschneidender Schreibumfang), wird nichts angelegt; "
+    "fehlt ein Arbeitsort, schlägst du ihn mit kipm_arbeitsort_vorschlagen vor und Fred "
+    "bestätigt ihn. Rückfragen beantwortet Fred im Chat, kipm_antworten hält sie fest. Das "
+    "Projekt nennst du mit „projekt“ (Kennung aus kipm_projekte) oder „ordner“ (dein "
+    "Arbeitsverzeichnis). Arbeitest du an einem Auftrag: erst kipm_uebernehmen, dann "
+    "kipm_fortschritt und zum Schluss kipm_ergebnis mit dateien (pfad@commit) und den "
+    "Prüfungen des Projekts; Ziel, Schreibumfang und Abnahmekriterien aus kipm_lesen sind "
+    "bindend. Alle Prüfungen bestanden → erledigt; eine fehlgeschlagen (in fehlgeschlagen) → "
+    "blockiert mit Grund; hat das Projekt keine automatischen Tests, pruefungen leer lassen → "
+    "erledigt mit Vermerk „ohne automatische Tests“. Passt später etwas nicht, legst du ein "
+    "neues Issue an. Am Ende einer Sitzung trägst du Offenes als Issue oder Auftrag ein. "
+    "Für einen neuen Chat zuerst kipm_projektkontext lesen (alle Teile). Nach "
+    "Arbeitsabschluss den Stand mit kipm_stand_melden melden (stabile meldung_id, Commit, Tests "
+    "je Umgebung). Funktionen, "
     "Nachweise und Installationen meldest du nur; bestätigen, Grundlagen setzen und "
     "GitHub-Änderungen ausführen macht Fred."
 )
@@ -43,10 +56,28 @@ _ORDNER = {
     "description": "Dein Arbeitsverzeichnis; bestimmt das Projekt, wenn „projekt“ fehlt",
 }
 _AUFTRAG = {"type": "string", "description": "Auftragsnummer, z. B. A-12"}
+_KENNUNG = {
+    "type": "string",
+    "description": "Optional, bei Änderungen: eigene eindeutige Kennung; dieselbe Kennung bei "
+    "einer Wiederholung (z. B. nach Zeitüberschreitung) wirkt nur einmal",
+}
 _REVISION = {"type": "integer", "description": "Aktuelle Revision aus kipm_lesen"}
 _TEXT = {"type": "string"}
 _LISTE = {"type": "array", "items": {"type": "string"}}
 _MELDUNG = {"auftrag": _AUFTRAG, "revision": _REVISION, "text": _TEXT}
+_KOMPONENTEN = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "komponente": _TEXT,
+            "repository": _TEXT,
+            "commit": _TEXT,
+            "artefakt_hash": _TEXT,
+        },
+        "required": ["komponente"],
+    },
+}
 
 WERKZEUGE = [
     ("kipm_projekte", "Alle Projekte mit Modulen, Arbeitsorten und Zahl offener Aufträge", {}, []),
@@ -57,7 +88,195 @@ WERKZEUGE = [
         {"name": _TEXT, "kennung": _TEXT, "beschreibung": _TEXT, "module": _LISTE},
         ["name"],
     ),
-    ("kipm_modul_anlegen", "Modul im Projekt anlegen", {"name": _TEXT, "kennung": _TEXT}, ["name"]),
+    (
+        "kipm_modul_anlegen",
+        "Modul im Projekt anlegen; mit eltern (Modulkennung) als Untermodul, beliebig tief",
+        {
+            "name": _TEXT,
+            "kennung": _TEXT,
+            "eltern": {"type": "string", "description": "Modulkennung"},
+        },
+        ["name"],
+    ),
+    (
+        "kipm_modul_aendern",
+        "Modul umbenennen (name), umhängen (eltern: Modulkennung, leer = direkt unter das Projekt) "
+        "oder archivieren (aktiv=false); revision aus kipm_projekt. Aufträge, Funktionen und "
+        "Unterlagen behalten ihr Modul",
+        {
+            "modul": {"type": "string", "description": "Modulkennung"},
+            "revision": {"type": "integer", "description": "Revision aus kipm_projekt"},
+            "name": _TEXT,
+            "eltern": {"type": "string", "description": "Modulkennung oder leer"},
+            "aktiv": {"type": "boolean"},
+            "grund": _TEXT,
+        },
+        ["modul", "revision"],
+    ),
+    (
+        "kipm_arbeitsort_vorschlagen",
+        "Arbeitsort (Ordner und Repository) für das Projekt vorschlagen, mit auftrag gleich für "
+        "diesen Auftrag. Bleibt ein Vorschlag, bis Fred ihn mit einem Häkchen übernimmt",
+        {
+            "name": _TEXT,
+            "pfad": {"type": "string", "description": "Ordner, z. B. W:/Projekte/Nexus"},
+            "repository": {"type": "string", "description": "Adresse, z. B. https://github.com/…"},
+            "rechner": _TEXT,
+            "auftrag": _AUFTRAG,
+        },
+        ["name"],
+    ),
+    (
+        "kipm_arbeitsort_aendern",
+        "Arbeitsort umbenennen, Ordner oder Repository ändern oder archivieren (aktiv=false); "
+        "revision aus kipm_projekt. Neuer Ordner oder neues Repository gilt erst nach Freds "
+        "Häkchen",
+        {
+            "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
+            "revision": {"type": "integer", "description": "Revision aus kipm_projekt"},
+            "name": _TEXT,
+            "pfad": _TEXT,
+            "repository": _TEXT,
+            "rechner": _TEXT,
+            "aktiv": {"type": "boolean"},
+            "grund": _TEXT,
+        },
+        ["arbeitsort", "revision"],
+    ),
+    (
+        "kipm_profil_vorschlagen",
+        "Projektprofil als Entwurf vorschlagen (zweck, zielgruppe, nicht_ziele, "
+        "entwicklungsstufe, phase, beschreibung); revision = profil_revision aus kipm_projektakte. "
+        "Fred übernimmt oder verwirft; das geltende Profil bleibt bis dahin",
+        {
+            "revision": {"type": "integer", "description": "profil_revision aus kipm_projektakte"},
+            "zweck": _TEXT,
+            "zielgruppe": _TEXT,
+            "nicht_ziele": _TEXT,
+            "entwicklungsstufe": _TEXT,
+            "phase": _TEXT,
+            "beschreibung": _TEXT,
+            "grund": _TEXT,
+        },
+        ["revision"],
+    ),
+    (
+        "kipm_umgebung_vorschlagen",
+        "Umgebung (lokal, test, produktion) als Entwurf vorschlagen; zählt für Meldungen erst nach "
+        "Freds Übernahme",
+        {
+            "name": _TEXT,
+            "art": {"type": "string", "enum": ["lokal", "test", "produktion"]},
+            "beschreibung": _TEXT,
+            "url": {"type": "string", "description": "Dienstadresse ohne Zugangsdaten"},
+        },
+        ["name", "art"],
+    ),
+    (
+        "kipm_umgebung_aendern",
+        "Umgebung ändern oder archivieren (aktiv=false); revision aus kipm_projektakte. Neue Art "
+        "oder Adresse gilt erst nach Freds Übernahme",
+        {
+            "umgebung": {"type": "string", "description": "Umgebungskennung"},
+            "revision": {"type": "integer"},
+            "name": _TEXT,
+            "art": {"type": "string", "enum": ["lokal", "test", "produktion"]},
+            "beschreibung": _TEXT,
+            "url": _TEXT,
+            "aktiv": {"type": "boolean"},
+            "grund": _TEXT,
+        },
+        ["umgebung", "revision"],
+    ),
+    (
+        "kipm_release_vorschlagen",
+        "Release als Entwurf mit Komponenten anlegen (je Komponente commit oder artefakt_hash); "
+        "veröffentlichen setzt Fred",
+        {"kennung": _TEXT, "titel": _TEXT, "beschreibung": _TEXT, "komponenten": _KOMPONENTEN},
+        ["kennung", "komponenten"],
+    ),
+    (
+        "kipm_release_aendern",
+        "Release ändern: titel, beschreibung, im Entwurf auch komponenten; archivieren mit "
+        "archiviert=true; revision aus kipm_projektakte",
+        {
+            "release": {"type": "string", "description": "Version, z. B. 1.2.0"},
+            "revision": {"type": "integer"},
+            "titel": _TEXT,
+            "beschreibung": _TEXT,
+            "komponenten": _KOMPONENTEN,
+            "archiviert": {"type": "boolean"},
+            "grund": _TEXT,
+        },
+        ["release", "revision"],
+    ),
+    (
+        "kipm_stand_melden",
+        "Stand nach Arbeitsabschluss melden (Meldevertrag kipm-stand/1): meldung_id (stabil, "
+        "Wiederholung wirkt einmal), version (Commit oder Hash), quelle, modul, auftrag und "
+        "revision, umsetzung {umfang}, tests [{umfang, ergebnis, umgebung}], installation "
+        "{umgebung, komponente, version, installiert_am}, einschraenkungen, beobachtet_am; "
+        "korrigiert = meldung_id einer falschen früheren Meldung. Bleibt eine Meldung, keine "
+        "Bestätigung. Eine abgewiesene meldung_id bleibt abgewiesen; nach Behebung neue ID",
+        {
+            "meldung_id": _TEXT,
+            "version": _TEXT,
+            "quelle": _TEXT,
+            "modul": {"type": "string", "description": "Modulkennung; leer = Gesamtes Projekt"},
+            "komponente": _TEXT,
+            "auftrag": _AUFTRAG,
+            "revision": {"type": "integer"},
+            "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
+            "umsetzung": {"type": "object", "properties": {"umfang": _TEXT}},
+            "tests": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "umfang": _TEXT,
+                        "ergebnis": {
+                            "type": "string",
+                            "enum": ["bestanden", "teilweise", "fehlgeschlagen"],
+                        },
+                        "umgebung": {"type": "string", "description": "Umgebungskennung"},
+                    },
+                    "required": ["umfang", "ergebnis"],
+                },
+            },
+            "installation": {
+                "type": "object",
+                "properties": {
+                    "umgebung": _TEXT,
+                    "komponente": _TEXT,
+                    "version": _TEXT,
+                    "installiert_am": _TEXT,
+                },
+            },
+            "einschraenkungen": _TEXT,
+            "beobachtet_am": {"type": "string", "description": "ISO-Zeit"},
+            "korrigiert": _TEXT,
+        },
+        ["meldung_id", "version", "quelle"],
+    ),
+    (
+        "kipm_modulstand",
+        "Aktueller Stand je Modul und Projekt: Umsetzung, Tests je Umgebung (für welchen "
+        "Stand), Installationen, Bestätigung durch Fred, Einschränkungen und offene Lücken",
+        {},
+        [],
+    ),
+    (
+        "kipm_unterlage_version",
+        "Neue Version einer Textunterlage unter derselben Kennung (Entwurf); erwartete_version = "
+        "zuletzt gelesene Versionsnummer, grund = Änderungsgrund. Grundlage setzt nur Fred",
+        {
+            "unterlage": {"type": "string", "description": "z. B. U-3"},
+            "erwartete_version": {"type": "integer"},
+            "text": _TEXT,
+            "grund": _TEXT,
+        },
+        ["unterlage", "erwartete_version", "text", "grund"],
+    ),
     (
         "kipm_auftraege",
         "Offene Aufträge und Issues; ohne projekt und ordner aus allen Projekten. alle=true auch "
@@ -71,14 +290,28 @@ WERKZEUGE = [
     ),
     (
         "kipm_auftrag_anlegen",
-        "Auftrag (art=auftrag) oder Issue (art=issue, Fehler oder Problem) als Entwurf anlegen; "
-        "gleicher Titel wie ein offener Auftrag wird abgewiesen, außer erzwingen=true",
+        "Auftrag (art=auftrag) oder Issue (art=issue, Fehler oder Problem) in einem Aufruf "
+        "anlegen und planen (ziel, nicht_ziele, arbeitsort, schreibumfang, abnahmekriterien, "
+        "pruefer); freigeben=true nur auf Freds Anweisung im Chat, scheitert die "
+        "Freigabeprüfung, wird nichts angelegt. Gleicher Titel wie ein offener Auftrag wird "
+        "abgewiesen, außer erzwingen=true",
         {
             "titel": _TEXT,
-            "text": _TEXT,
+            "text": {"type": "string", "description": "Beschreibung in Alltagssprache"},
             "art": {"type": "string", "enum": ["auftrag", "issue"]},
             "modul": {"type": "string", "description": "Modulkennung"},
             "prioritaet": {"type": "string", "enum": ["hoch", "mittel", "niedrig"]},
+            "ziel": _TEXT,
+            "nicht_ziele": _TEXT,
+            "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
+            "schreibumfang": _LISTE,
+            "quellen": _TEXT,
+            "abnahmekriterien": _LISTE,
+            "pruefer": {"type": "string", "description": "Benutzername, z. B. fred"},
+            "freigeben": {
+                "type": "boolean",
+                "description": "Nur auf Freds Anweisung im Chat; vermerkt das im Verlauf",
+            },
             "erzwingen": {"type": "boolean"},
         },
         ["titel", "text"],
@@ -93,7 +326,8 @@ WERKZEUGE = [
     (
         "kipm_planen",
         "Auftrag oder Issue planen oder ändern; nur angegebene Felder ändern sich, eine "
-        "Freigabe erlischt. Listenfelder je Eintrag eine Zeile. pruefer ist ein Benutzername.",
+        "Freigabe erlischt. Listenfelder je Eintrag eine Zeile. pruefer ist ein Benutzername. "
+        "freigeben=true gibt danach frei, nur auf Freds Anweisung im Chat.",
         {
             "auftrag": _AUFTRAG,
             "titel": _TEXT,
@@ -109,6 +343,7 @@ WERKZEUGE = [
             "art": {"type": "string", "enum": ["auftrag", "issue"]},
             "pruefer": _TEXT,
             "anlass": _TEXT,
+            "freigeben": {"type": "boolean"},
         },
         ["auftrag"],
     ),
@@ -152,23 +387,27 @@ WERKZEUGE = [
     ),
     (
         "kipm_pruefbericht",
-        "Prüfbericht zu einem fremden Auftrag; ersetzt keine Abnahme",
+        "Prüfbericht zu einem fremden Auftrag; ein Hinweis, ändert den Zustand nicht",
         _MELDUNG,
         ["auftrag", "revision", "text"],
     ),
     (
         "kipm_ergebnis",
-        "Ergebnis mit Nachweisen einreichen (dateien: pfad@commit, pruefungen: befehl: "
-        "ergebnis); der Auftrag geht zur Prüfung",
+        "Ergebnis einreichen; schließt den Auftrag ohne Nutzerabnahme ab. dateien: pfad@commit; "
+        "pruefungen: bestandene Prüfungen „befehl: ergebnis“; fehlgeschlagen: gescheiterte "
+        "Prüfungen. Alle bestanden → erledigt; eine fehlgeschlagen → blockiert mit Grund; "
+        "keine Prüfungen (Projekt ohne automatische Tests) → erledigt mit Vermerk „ohne "
+        "automatische Tests“",
         {
             "auftrag": _AUFTRAG,
             "revision": _REVISION,
             "zusammenfassung": _TEXT,
             "dateien": _LISTE,
             "pruefungen": _LISTE,
+            "fehlgeschlagen": _LISTE,
             "luecken": _TEXT,
         },
-        ["auftrag", "revision", "zusammenfassung", "dateien", "pruefungen"],
+        ["auftrag", "revision", "zusammenfassung", "dateien"],
     ),
     (
         "kipm_projektkontext",
@@ -180,6 +419,7 @@ WERKZEUGE = [
             "auftrag": _AUFTRAG,
             "kontext_id": _TEXT,
             "teil": {"type": "integer", "description": "Teilnummer ab 1"},
+            "modul": {"type": "string", "description": "Modulkennung: Kontext dieses Moduls"},
         },
         [],
     ),
@@ -288,7 +528,42 @@ _AUFTRAGSWERKZEUGE = {
     "kipm_fehler": ("api_fehler", ("text",)),
     "kipm_vorschlag": ("api_vorschlag", ("text",)),
     "kipm_pruefbericht": ("api_pruefbericht", ("text",)),
-    "kipm_ergebnis": ("api_ergebnis", ("zusammenfassung", "dateien", "pruefungen", "luecken")),
+    "kipm_ergebnis": (
+        "api_ergebnis",
+        ("zusammenfassung", "dateien", "pruefungen", "fehlgeschlagen", "luecken"),
+    ),
+}
+
+
+# Pflegewerkzeuge ohne Auftragsbezug -> (URL-Name, Felder für den Rumpf)
+_PFLEGEWERKZEUGE = {
+    "kipm_stand_melden": (
+        "api_stand_melden",
+        ("meldung_id", "version", "quelle", "modul", "komponente", "auftrag", "revision")
+        + ("arbeitsort", "umsetzung", "tests", "installation", "einschraenkungen")
+        + ("beobachtet_am", "korrigiert"),
+    ),
+    "kipm_profil_vorschlagen": (
+        "api_profil_vorschlagen",
+        ("revision", "zweck", "zielgruppe", "nicht_ziele", "entwicklungsstufe", "phase")
+        + ("beschreibung", "grund"),
+    ),
+    "kipm_umgebung_vorschlagen": (
+        "api_umgebung_vorschlagen",
+        ("name", "art", "beschreibung", "url"),
+    ),
+    "kipm_umgebung_aendern": (
+        "api_umgebung_aendern",
+        ("umgebung", "revision", "name", "art", "beschreibung", "url", "aktiv", "grund"),
+    ),
+    "kipm_release_vorschlagen": (
+        "api_release_vorschlagen",
+        ("kennung", "titel", "beschreibung", "komponenten"),
+    ),
+    "kipm_release_aendern": (
+        "api_release_aendern",
+        ("release", "revision", "titel", "beschreibung", "komponenten", "archiviert", "grund"),
+    ),
 }
 
 
@@ -303,7 +578,12 @@ def werkzeugliste() -> list[dict]:
             "description": beschreibung,
             "inputSchema": {
                 "type": "object",
-                "properties": {"projekt": _PROJEKT, "ordner": _ORDNER, **eigenschaften},
+                "properties": {
+                    "projekt": _PROJEKT,
+                    "ordner": _ORDNER,
+                    "anfrage_kennung": _KENNUNG,
+                    **eigenschaften,
+                },
                 "required": pflicht,
             },
         }
@@ -342,7 +622,11 @@ def _intern(schluessel: str, aussen: HttpRequest, a: dict, pfad: str, daten=None
         "CONTENT_TYPE": "application/json",
     }
     if daten is not None:
-        daten = daten | {"anfrage_kennung": uuid.uuid4().hex}
+        # Eigene Kennung des Aufrufers macht Wiederholungen nach Zeitüberschreitung wirkungslos;
+        # ohne sie gilt jeder Aufruf als neu.
+        kennung = str(a.get("anfrage_kennung") or "").strip() or uuid.uuid4().hex
+        daten = {k: v for k, v in daten.items() if k != "anfrage_kennung"}
+        daten["anfrage_kennung"] = kennung
     innen._body = json.dumps(daten).encode("utf-8") if daten is not None else b""
     treffer = resolve(pfad)
     antwort = treffer.func(innen, *treffer.args, **treffer.kwargs)
@@ -367,18 +651,42 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
             _felder(a, ("name", "kennung", "beschreibung", "module")),
         )
     if name == "kipm_modul_anlegen":
-        return rufe(reverse("api_modul_anlegen"), _felder(a, ("name", "kennung")))
+        return rufe(reverse("api_modul_anlegen"), _felder(a, ("name", "kennung", "eltern")))
+    if name == "kipm_modul_aendern":
+        felder = ("modul", "revision", "name", "aktiv", "grund")
+        daten = _felder(a, felder) | ({"eltern": a["eltern"] or ""} if "eltern" in a else {})
+        return rufe(reverse("api_modul_aendern"), daten)
+    if name == "kipm_arbeitsort_vorschlagen":
+        felder = ("name", "pfad", "repository", "rechner", "auftrag")
+        return rufe(reverse("api_arbeitsort_vorschlagen"), _felder(a, felder))
+    if name == "kipm_arbeitsort_aendern":
+        felder = ("arbeitsort", "revision", "name", "pfad", "repository", "rechner", "aktiv")
+        felder = (*felder, "grund")
+        return rufe(reverse("api_arbeitsort_aendern"), _felder(a, felder))
+    if name == "kipm_modulstand":
+        return rufe(reverse("api_modulstand"))
+    if name == "kipm_unterlage_version":
+        nr = str(a.get("unterlage", "")).upper().removeprefix("U-")
+        if not nr.isdigit():
+            raise _Ungueltig(f"Ungültige Unterlage: {a.get('unterlage')}")
+        felder = _felder(a, ("erwartete_version", "text", "grund"))
+        return rufe(reverse("api_unterlage_version", kwargs={"nummer": int(nr)}), felder)
+    if name in _PFLEGEWERKZEUGE:
+        url_name, felder = _PFLEGEWERKZEUGE[name]
+        return rufe(reverse(url_name), _felder(a, felder))
     if name == "kipm_auftraege":
         abfrage = "&".join(f"{k}=1" for k in ("alle", "nur_meine") if a.get(k)) + (
             f"&art={a['art']}" if a.get("art") else ""
         )
         return rufe(reverse("api_auftraege") + "?" + abfrage.lstrip("&"))
     if name == "kipm_auftrag_anlegen":
-        daten = _felder(a, ("titel", "modul", "prioritaet", "art", "erzwingen"))
+        felder = ("titel", "modul", "prioritaet", "art", "erzwingen", "ziel", "nicht_ziele")
+        felder += ("arbeitsort", "schreibumfang", "quellen", "abnahmekriterien", "pruefer")
+        daten = _felder(a, (*felder, "freigeben"))
         daten["beschreibung"] = a.get("text", "")
         return rufe(reverse("api_auftrag_anlegen"), daten)
     if name == "kipm_projektkontext":
-        teile = [f"{k}={a[k]}" for k in ("kontext_id", "teil") if a.get(k)]
+        teile = [f"{k}={a[k]}" for k in ("kontext_id", "teil", "modul") if a.get(k)]
         if a.get("auftrag"):
             teile.append(f"auftrag=A-{_nummer(a['auftrag'])}")
         return rufe(reverse("api_projektkontext") + "?" + "&".join(teile))

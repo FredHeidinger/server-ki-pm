@@ -108,45 +108,39 @@ def test_vorgaenger_knopf_bei_ueberschneidung(owner_client, akteur, projekt, fre
     assert zweiter.abhaengigkeiten.count() == 1
 
 
-def test_pruefung_ueber_oberflaeche(owner_client, akteur, projekt, freigegeben, bindung):
+def test_ergebnis_erledigt_ohne_abnahme_in_oberflaeche(
+    owner_client, akteur, projekt, freigegeben, bindung
+):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
-    e = dienst.ergebnis_einreichen(
-        chat, freigegeben, 2, zusammenfassung="fertig", dateien="a@1", pruefungen="p ok"
+    dienst.ergebnis_einreichen(
+        chat, freigegeben, 2, zusammenfassung="fertig", dateien="a@1", pruefungen="pytest: grün"
     )
-    liste = owner_client.get(
-        reverse("projekt_pruefung", kwargs={"kennung": projekt.kennung})
-    ).content.decode()
-    assert freigegeben.nummer in liste
-    assert e.pk  # Ergebnis existiert; geprüft wird auf der Auftragsseite
+    freigegeben.refresh_from_db()
+    assert freigegeben.zustand == Auftrag.ERLEDIGT
     seite = owner_client.get(
         reverse("auftrag_detail", kwargs={"auftrag_id": freigegeben.pk})
     ).content.decode()
-    assert "Hinweis nennt nächsten Schritt" in seite and "Prüfen und abnehmen" in seite
-    antwort = owner_client.post(
-        reverse("auftrag_aktion", kwargs={"auftrag_id": freigegeben.pk, "aktion": "pruefen"}),
-        {
-            "k0": "ERFUELLT",
-            "a0": "",
-            "k1": "NICHT_ERFUELLT",
-            "a1": "noch Code",
-            "entscheidung": "ABGENOMMEN",
-        },
-        follow=True,
-    )
-    assert "nicht erfüllt" in antwort.content.decode()
-    freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.ZUR_PRUEFUNG
+    assert "Erledigt" in seite and "erledigt mit Revision 2" in seite
+    # Abnahme-Knöpfe sind ausgeblendet; die frühere Prüfaktion greift nicht mehr.
+    assert "Prüfen und abnehmen" not in seite and "Abnehmen" not in seite
+    assert "ohne automatische Tests" not in seite
     antwort = owner_client.post(
         reverse("auftrag_aktion", kwargs={"auftrag_id": freigegeben.pk, "aktion": "pruefen"}),
         {"k0": "ERFUELLT", "a0": "", "k1": "ERFUELLT", "a1": "", "entscheidung": "ABGENOMMEN"},
+        follow=True,
     )
-    assert antwort.status_code == 302
+    assert "wartet nicht auf Prüfung" in antwort.content.decode()
     freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.ABGENOMMEN and Pruefung.objects.count() == 1
+    assert freigegeben.zustand == Auftrag.ERLEDIGT and Pruefung.objects.count() == 0
+    board = owner_client.get(
+        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    ).content.decode()
+    assert 'id="spalte-erledigt"' in board and 'id="spalte-blockiert"' in board
+    assert "Zur Prüfung" not in board and ">Prüfung<" not in board
 
 
-def test_selbstabnahme_in_oberflaeche_gesperrt(
+def test_eigenes_ergebnis_ohne_tests_und_mit_fehlschlag(
     owner_client, owner, akteur, projekt, zweiter_mensch
 ):
     auftrag = arbeitspaket(akteur, projekt, pruefer=zweiter_mensch)
@@ -158,21 +152,38 @@ def test_selbstabnahme_in_oberflaeche_gesperrt(
     assert auftrag.bearbeiter_benutzer == owner
     antwort = owner_client.post(
         reverse("eigenes_ergebnis", kwargs={"auftrag_id": auftrag.pk}),
-        {"zusammenfassung": "fertig", "dateien": "a@1", "pruefungen": "p", "luecken": ""},
-    )
-    assert antwort.status_code == 302
-    seite = owner_client.get(
-        reverse("auftrag_detail", kwargs={"auftrag_id": auftrag.pk})
-    ).content.decode()
-    assert "wartet auf Prüfung durch einen anderen Menschen" in seite
-    assert "Prüfen und abnehmen" not in seite
-    antwort = owner_client.post(
-        reverse("auftrag_aktion", kwargs={"auftrag_id": auftrag.pk, "aktion": "pruefen"}),
-        {"k0": "ERFUELLT", "a0": "", "k1": "ERFUELLT", "a1": "", "entscheidung": "ABGENOMMEN"},
+        {
+            "zusammenfassung": "fertig",
+            "dateien": "a@1",
+            "pruefungen": "pytest: 3 bestanden",
+            "fehlgeschlagen": "ruff: 2 Befunde",
+            "luecken": "",
+        },
     )
     assert antwort.status_code == 302
     auftrag.refresh_from_db()
-    assert auftrag.zustand == Auftrag.ZUR_PRUEFUNG
+    assert auftrag.zustand == Auftrag.BLOCKIERT and auftrag.bearbeiter_benutzer == owner
+    seite = owner_client.get(
+        reverse("auftrag_detail", kwargs={"auftrag_id": auftrag.pk})
+    ).content.decode()
+    assert "Prüfung fehlgeschlagen: ruff: 2 Befunde" in seite
+    assert "Antworten und Blockade aufheben" in seite and "Fehlgeschlagene Prüfungen" in seite
+    wartet = owner_client.get(
+        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    ).content.decode()
+    assert "Wartet auf dich" in wartet and "Prüfung fehlgeschlagen" in wartet
+    # Nachgebessert ohne automatische Tests: erledigt mit sichtbarem Vermerk.
+    antwort = owner_client.post(
+        reverse("eigenes_ergebnis", kwargs={"auftrag_id": auftrag.pk}),
+        {"zusammenfassung": "behoben", "dateien": "a@2", "luecken": ""},
+    )
+    assert antwort.status_code == 302
+    auftrag.refresh_from_db()
+    assert auftrag.zustand == Auftrag.ERLEDIGT and not auftrag.hat_bearbeiter
+    seite = owner_client.get(
+        reverse("auftrag_detail", kwargs={"auftrag_id": auftrag.pk})
+    ).content.decode()
+    assert "ohne automatische Tests" in seite and "Prüfen und abnehmen" not in seite
 
 
 def test_link_wird_einmal_angezeigt_und_ist_widerrufbar(owner_client):
