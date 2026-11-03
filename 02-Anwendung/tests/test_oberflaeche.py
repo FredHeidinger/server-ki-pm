@@ -13,37 +13,36 @@ pytestmark = pytest.mark.django_db
 
 
 def test_alle_bereiche_rendern(owner_client, projekt, freigegeben):
-    for name in (
-        "posteingang",
-        "meine",
-        "auftraege",
-        "pruefung",
-        "entscheidungen",
-        "verlauf",
-        "projekte",
-        "wunsch_neu",
-        "entscheidung_neu",
-        "verbindungen",
-    ):
+    for name in ("start", "projekte", "wunsch_neu", "entscheidung_neu", "verbindungen"):
         assert owner_client.get(reverse(name)).status_code == 200, name
-    assert (
-        owner_client.get(
-            reverse("projekt_einstellungen", kwargs={"kennung": "synth-a"})
-        ).status_code
-        == 200
-    )
-    assert (
-        owner_client.get(
-            reverse("auftrag_detail", kwargs={"auftrag_id": freigegeben.pk})
-        ).status_code
-        == 200
-    )
-    assert (
-        owner_client.get(
-            reverse("auftrag_bearbeiten", kwargs={"auftrag_id": freigegeben.pk})
-        ).status_code
-        == 200
-    )
+    # Frühere projektübergreifende Listen führen verständlich zur Projektauswahl (P03).
+    for name in ("meine", "auftraege", "pruefung", "entscheidungen", "verlauf"):
+        antwort = owner_client.get(reverse(name))
+        assert antwort.status_code == 302 and antwort["Location"] == reverse("projekte"), name
+    for name in (
+        "projekt_detail",
+        "akte_funktionen",
+        "projekt_auftraege",
+        "projekt_pruefung",
+        "akte_betrieb",
+        "akte_wissen",
+        "projekt_verlauf",
+        "projekt_einstellungen",
+        "akte_profil",
+        "akte_suche",
+        "akte_kontext",
+        "funktion_neu",
+        "unterlage_neu",
+        "release_neu",
+        "hochladen",
+    ):
+        seite = owner_client.get(reverse(name, kwargs={"kennung": "synth-a"}))
+        assert seite.status_code == 200, name
+    for name in ("auftrag_detail", "auftrag_bearbeiten"):
+        assert (
+            owner_client.get(reverse(name, kwargs={"auftrag_id": freigegeben.pk})).status_code
+            == 200
+        )
 
 
 def test_wunsch_formular_und_auftragsseite(owner_client, projekt):
@@ -115,7 +114,9 @@ def test_pruefung_ueber_oberflaeche(owner_client, akteur, projekt, freigegeben, 
     e = dienst.ergebnis_einreichen(
         chat, freigegeben, 2, zusammenfassung="fertig", dateien="a@1", pruefungen="p ok"
     )
-    liste = owner_client.get(reverse("pruefung")).content.decode()
+    liste = owner_client.get(
+        reverse("projekt_pruefung", kwargs={"kennung": projekt.kennung})
+    ).content.decode()
     assert freigegeben.nummer in liste
     assert e.pk  # Ergebnis existiert; geprüft wird auf der Auftragsseite
     seite = owner_client.get(
@@ -208,8 +209,13 @@ def test_entscheidung_ueber_oberflaeche(owner_client, projekt, projekt_b):
         reverse("entscheidung_aktion", kwargs={"entscheidung_id": e.pk, "aktion": "bestaetigen"}),
         {"projekt": projekt.pk},
     )
-    liste = owner_client.get(reverse("entscheidungen")).content.decode()
-    assert "synth-a: ✔" in liste and "synth-b: offen" in liste
+    wissen_a = owner_client.get(
+        reverse("akte_wissen", kwargs={"kennung": "synth-a"})
+    ).content.decode()
+    wissen_b = owner_client.get(
+        reverse("akte_wissen", kwargs={"kennung": "synth-b"})
+    ).content.decode()
+    assert "für dieses Projekt übernommen" in wissen_a and "Übernahme offen" in wissen_b
     antwort = owner_client.post(
         reverse(
             "entscheidung_aktion", kwargs={"entscheidung_id": e.pk, "aktion": "umsetzungsauftrag"}
@@ -264,22 +270,22 @@ def test_anmeldung_wird_nach_fehlversuchen_begrenzt(client, owner):
 
 def test_verlauf_filter(owner_client, projekt, freigegeben):
     seite = owner_client.get(
-        reverse("verlauf") + "?objekt=Auftrag&kennung=" + freigegeben.nummer
+        reverse("projekt_verlauf", kwargs={"kennung": projekt.kennung})
+        + "?objekt=Auftrag&kennung="
+        + freigegeben.nummer
     ).content.decode()
     assert "Freigegeben" in seite and "Projekt registriert" not in seite
 
 
 def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
-    board = owner_client.get(reverse("auftraege")).content.decode()
+    url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    board = owner_client.get(url).content.decode()
     assert 'class="board"' in board and freigegeben.nummer in board and "Freigegeben" in board
-    liste = owner_client.get(reverse("auftraege") + "?ansicht=liste").content.decode()
+    assert 'class="reiter"' in board
+    liste = owner_client.get(url + "?ansicht=liste").content.decode()
     assert "<table" in liste and freigegeben.nummer in liste
-    uebersicht = owner_client.get(reverse("projekte")).content.decode()
-    assert "projektkarte" in uebersicht and "1 freigegeben" in uebersicht
-    detail = owner_client.get(
-        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
-    ).content.decode()
-    assert 'class="board"' in detail and 'class="reiter"' in detail
+    auswahl = owner_client.get(reverse("projekte")).content.decode()
+    assert "projektwahl" in auswahl and projekt.name in auswahl and "Dringlichkeit" in auswahl
 
 
 def test_plus_listen_und_kuerzel_automatisch(owner_client):
@@ -293,7 +299,9 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
         },
     )
     assert antwort.status_code == 302 and antwort["Location"].endswith("/projekt/nexus-projekt/")
-    seite = owner_client.get(antwort["Location"]).content.decode()
+    seite = owner_client.get(
+        reverse("projekt_einstellungen", kwargs={"kennung": "nexus-projekt"})
+    ).content.decode()
     assert "Core" in seite and "Standards" in seite
     owner_client.post(
         reverse("modul_neu", kwargs={"kennung": "nexus-projekt"}), {"modul-name": "Web Oberfläche"}
@@ -343,27 +351,36 @@ def test_eine_seite_ki_verbinden(owner_client, settings):
     assert "https://kipm.example.net/mcp/kipm_" in seite and "certutil" not in seite
 
 
-def test_posteingang_zeigt_konkrete_eintraege(owner_client, akteur, projekt, freigegeben, bindung):
+def test_wartet_auf_dich_im_projekt(owner_client, akteur, projekt, projekt_b, freigegeben, bindung):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.wunsch_erfassen(chat, projekt, titel="Idee vom Chat", beschreibung="bitte prüfen")
+    dienst.wunsch_erfassen(
+        dienst.Akteur.aus_bindung(dienst.bindung_anlegen(akteur, projekt_b, name="Chat B")[0]),
+        projekt_b,
+        titel="Fremdes Thema",
+        beschreibung="B",
+    )
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
     dienst.rueckfrage_melden(chat, freigegeben, 2, "Welche Sprache für den Hinweis?")
-    seite = owner_client.get(reverse("posteingang")).content.decode()
-    assert (
-        "Neuer Auftrag" in seite
-        and "Idee vom Chat" in seite
-        and "Rückfrage" in seite
-        and "Welche Sprache" in seite
-    )
+    url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    seite = owner_client.get(url).content.decode()
+    teil = seite.split("Wartet auf dich")[1].split("</section>")[0]
+    assert "Neuer Auftrag" in teil and "Idee vom Chat" in teil
+    assert "Rückfrage" in teil and "Welche Sprache" in teil and "Fremdes Thema" not in seite
     antwort = owner_client.post(
         reverse("antwort", kwargs={"auftrag_id": freigegeben.pk}),
-        {"text": "Deutsch", "zurueck": "/"},
+        {"text": "Deutsch", "zurueck": url},
     )
-    assert antwort.status_code == 302 and antwort["Location"] == "/"
+    assert antwort.status_code == 302 and antwort["Location"] == url
     freigegeben.refresh_from_db()
     assert freigegeben.zustand == Auftrag.IN_ARBEIT
-    seite = owner_client.get(reverse("posteingang")).content.decode()
-    assert "Welche Sprache" not in seite
+    assert (
+        "Welche Sprache"
+        not in owner_client.get(url)
+        .content.decode()
+        .split("Wartet auf dich")[-1]
+        .split("</section>")[0]
+    )
 
 
 def test_panel_und_projektreiter(owner_client, projekt, freigegeben):
@@ -373,8 +390,11 @@ def test_panel_und_projektreiter(owner_client, projekt, freigegeben):
     assert "<html" not in panel and freigegeben.titel in panel and "Aktionen" in panel
     for name in (
         "projekt_detail",
+        "akte_funktionen",
+        "projekt_auftraege",
         "projekt_pruefung",
-        "projekt_entscheidungen",
+        "akte_betrieb",
+        "akte_wissen",
         "projekt_verlauf",
         "projekt_einstellungen",
     ):
@@ -396,13 +416,14 @@ def test_datei_link_mit_repository(akteur, projekt):
 
 
 def test_neu_menue_issues_und_filter(owner_client, akteur, projekt):
-    seite = owner_client.get(reverse("posteingang")).content.decode()
-    assert "+ Neu" in seite and "+ Wunsch" not in seite
-    for wort in ("Auftrag", "Issue", "Projekt", "Entscheidung"):
-        assert f"<strong>{wort}</strong>" in seite
+    auswahl = owner_client.get(reverse("projekte")).content.decode()
+    assert "+ Neu" in auswahl and "<strong>Projekt</strong>" in auswahl
+    assert "<strong>Funktion</strong>" not in auswahl
     projektseite = owner_client.get(
         reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
     ).content.decode()
+    for wort in ("Auftrag", "Issue", "Funktion", "Unterlage", "Entscheidung", "Release"):
+        assert f"<strong>{wort}</strong>" in projektseite
     assert f"art=issue&amp;projekt={projekt.kennung}" in projektseite
 
     formular = owner_client.get(reverse("wunsch_neu") + "?art=issue").content.decode()
@@ -421,26 +442,28 @@ def test_neu_menue_issues_und_filter(owner_client, akteur, projekt):
     assert Auftrag.objects.get(titel="Absturz beim Speichern").typ == "issue"
     dienst.wunsch_erfassen(akteur, projekt, titel="Export nach CSV", beschreibung="B")
 
-    board = owner_client.get(reverse("auftraege")).content.decode()
+    url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    board = owner_client.get(url).content.decode()
     assert '<span class="issue">Issue</span>' in board
-    issues = owner_client.get(reverse("auftraege") + "?ansicht=liste&art=issue").content.decode()
+    issues = owner_client.get(url + "?ansicht=liste&art=issue").content.decode()
     assert "Absturz beim Speichern" in issues and "Export nach CSV" not in issues
-    auftraege = owner_client.get(reverse("auftraege") + "?art=auftrag").content.decode()
-    assert "Export nach CSV" in auftraege and "Absturz beim Speichern" not in auftraege
+    auftraege = owner_client.get(url + "?art=auftrag").content.decode()
+    assert "Export nach CSV" in auftraege.split('class="board"')[1]
+    assert "Absturz beim Speichern" not in auftraege.split('class="board"')[1]
 
 
-def test_projekt_uebersicht_mit_modulen(owner_client, akteur, projekt):
+def test_module_in_einstellungen_und_filter(owner_client, akteur, projekt):
     kern = projekt.module.get(kennung="kern")
     dienst.wunsch_erfassen(
         akteur, projekt, titel="Absturz", beschreibung="B", modul=kern, typ="issue"
     )
     dienst.wunsch_erfassen(akteur, projekt, titel="Export", beschreibung="B", modul=kern)
     dienst.wunsch_erfassen(akteur, projekt, titel="Ohne Modul", beschreibung="B")
-    url = reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
+    url = reverse("projekt_einstellungen", kwargs={"kennung": projekt.kennung})
     seite = owner_client.get(url).content.decode()
-    assert "Übersicht" in seite and 'id="module"' in seite and "Kern" in seite
-    assert "1 Auftrag</a> · <a" in seite and "1 Issue</a>" in seite
-    assert "1 offene ohne Modul" in seite and "Offene Issues" in seite
+    assert 'id="module"' in seite and "Kern" in seite
+    ueberblick = owner_client.get(reverse("projekt_detail", kwargs={"kennung": projekt.kennung}))
+    assert "Offen: 2 Aufträge · 1 Issues" in ueberblick.content.decode()
 
     owner_client.post(
         reverse("modul_aendern", kwargs={"kennung": projekt.kennung, "modul": "kern"}),

@@ -1,8 +1,8 @@
 {% extends "steuerung/grund.html" %}
-{% block titel %}KI verbinden{% endblock %}
-{% block brotkrumen %}KI verbinden{% endblock %}
+{% block titel %}Konto & KI verbinden{% endblock %}
+{% block brotkrumen %}Konto &amp; KI verbinden{% endblock %}
 {% block inhalt %}
-<h1>KI verbinden</h1>
+<h1>Konto &amp; KI verbinden</h1>
 <p class="gedaempft">Verbindet ein KI-Programm auf diesem PC mit Server-KI-PM. Die KI kann dann Projekte, Aufträge, Issues und Arbeitspakete anlegen, planen und lesen. Freigeben und Abnehmen bleiben bei dir.</p>
 
 {% if neuer %}
@@ -44,6 +44,18 @@
   <p class="gedaempft">ChatGPT und Claude im Browser verbinden sich aus der Cloud des Anbieters; das geht erst, wenn der Server aus dem Internet erreichbar ist.</p>
 </section>
 {% endif %}
+
+<section id="ordner" class="box{% if ordneranfragen %} warn{% endif %}">
+  <h2>Neue Arbeitsordner</h2>
+  {% if ordneranfragen %}
+  <p class="gedaempft">Eine KI hat aus einem Ordner gearbeitet, der noch keinem Projekt gehört. Ordne ihn zu; danach weiß die KI das Projekt.</p>
+  <ul class="eingang">{% for o in ordneranfragen %}
+    <li class="eintrag"><p class="eintragtitel"><code>{{ o.ordner }}</code></p><p class="eintragtext">von {{ o.bindung.name }} · {{ o.angelegt_am|date:"d.m. H:i" }}</p>
+      <div class="eintragaktionen">{% if projekte %}<form method="post" action="{% url 'ordner_zuordnen' anfrage_id=o.pk %}" class="antwortzeile">{% csrf_token %}<select name="projekt" required aria-label="Projekt für diesen Ordner"><option value="">Projekt wählen …</option>{% for p in projekte %}<option value="{{ p.pk }}">{{ p.name }}</option>{% endfor %}</select><button type="submit" class="knopf klein">Zuordnen</button><button type="submit" class="knopf zweit klein" formaction="{% url 'ordner_verwerfen' anfrage_id=o.pk %}" formnovalidate>Verwerfen</button></form>
+      {% else %}<a class="knopf klein" href="{% url 'projekt_neu' %}">Erst ein Projekt anlegen</a> <form method="post" action="{% url 'ordner_verwerfen' anfrage_id=o.pk %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein">Verwerfen</button></form>{% endif %}</div>
+    </li>{% endfor %}</ul>
+  {% else %}<p class="gedaempft">Keine offenen Ordner. Arbeitet eine KI aus einem unbekannten Ordner, erscheint er hier.</p>{% endif %}
+</section>
 
 <h2>Verbundene Programme</h2>
 {% include "steuerung/zugangstabelle.html" %}

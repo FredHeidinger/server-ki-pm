@@ -1,14 +1,13 @@
 from django.urls import path
 
-from . import api, mcp, views
+from . import api, mcp, views, views_akte
 
 urlpatterns = [
     path("anmelden/", views.Anmelden.as_view(), name="anmelden"),
     path("abmelden/", views.Abmelden.as_view(), name="abmelden"),
-    # Persönliche Ebene
-    path("", views.posteingang, name="posteingang"),
+    # Einstieg: Projekt wählen. Frühere projektübergreifende Listen leiten zur Auswahl.
+    path("", views.projekte, name="start"),
     path("meine/", views.meine, name="meine"),
-    # Projektübergreifend
     path("auftraege/", views.auftraege, name="auftraege"),
     path("auftraege/wunsch/", views.wunsch_neu, name="wunsch_neu"),
     path("auftraege/<int:auftrag_id>/", views.auftrag_detail, name="auftrag_detail"),
@@ -49,7 +48,101 @@ urlpatterns = [
     # Projekte als Arbeitsbereich
     path("projekte/", views.projekte, name="projekte"),
     path("projekt/neu/", views.projekt_neu, name="projekt_neu"),
-    path("projekt/<slug:kennung>/", views.projekt_uebersicht, name="projekt_detail"),
+    path("projekt/<slug:kennung>/", views_akte.ueberblick, name="projekt_detail"),
+    path("projekt/<slug:kennung>/gesehen/", views_akte.gesehen, name="akte_gesehen"),
+    path("projekt/<slug:kennung>/profil/", views_akte.profil, name="akte_profil"),
+    path("projekt/<slug:kennung>/suche/", views_akte.projekt_suche, name="akte_suche"),
+    path("projekt/<slug:kennung>/kontext/", views_akte.ki_kontext, name="akte_kontext"),
+    path("projekt/<slug:kennung>/funktionen/", views_akte.funktionen, name="akte_funktionen"),
+    path("projekt/<slug:kennung>/funktionen/neu/", views_akte.funktion_neu, name="funktion_neu"),
+    path(
+        "projekt/<slug:kennung>/funktionen/<int:nummer>/",
+        views_akte.funktion_detail,
+        name="funktion_detail",
+    ),
+    path(
+        "projekt/<slug:kennung>/funktionen/<int:nummer>/<slug:aktion>/",
+        views_akte.funktion_aktion,
+        name="funktion_aktion",
+    ),
+    path(
+        "projekt/<slug:kennung>/meilensteine/neu/",
+        views_akte.meilenstein_neu,
+        name="meilenstein_neu",
+    ),
+    path(
+        "projekt/<slug:kennung>/meilensteine/<int:pk>/",
+        views_akte.meilenstein_zustand,
+        name="meilenstein_zustand",
+    ),
+    path("projekt/<slug:kennung>/betrieb/", views_akte.betrieb, name="akte_betrieb"),
+    path("projekt/<slug:kennung>/betrieb/release/neu/", views_akte.release_neu, name="release_neu"),
+    path(
+        "projekt/<slug:kennung>/betrieb/release/<int:pk>/",
+        views_akte.release_zustand,
+        name="release_zustand",
+    ),
+    path(
+        "projekt/<slug:kennung>/betrieb/installation/",
+        views_akte.installation_melden,
+        name="installation_melden",
+    ),
+    path(
+        "projekt/<slug:kennung>/betrieb/installation/<int:pk>/<slug:wahl>/",
+        views_akte.installation_bewerten,
+        name="installation_bewerten",
+    ),
+    path("projekt/<slug:kennung>/betrieb/nachweis/", views_akte.nachweis_neu, name="nachweis_neu"),
+    path("projekt/<slug:kennung>/wissen/", views_akte.wissen, name="akte_wissen"),
+    path("projekt/<slug:kennung>/wissen/neu/", views_akte.unterlage_neu, name="unterlage_neu"),
+    path("projekt/<slug:kennung>/wissen/hochladen/", views_akte.hochladen, name="hochladen"),
+    path(
+        "projekt/<slug:kennung>/wissen/<int:nummer>/",
+        views_akte.unterlage_detail,
+        name="unterlage_detail",
+    ),
+    path(
+        "projekt/<slug:kennung>/wissen/<int:nummer>/hochladen/",
+        views_akte.hochladen,
+        name="hochladen_version",
+    ),
+    path(
+        "projekt/<slug:kennung>/wissen/<int:nummer>/v/<int:vnr>/datei/",
+        views_akte.unterlage_datei,
+        name="unterlage_datei",
+    ),
+    path(
+        "projekt/<slug:kennung>/wissen/<int:nummer>/<slug:aktion>/",
+        views_akte.unterlage_aktion,
+        name="unterlage_aktion",
+    ),
+    path(
+        "projekt/<slug:kennung>/verlauf/<int:ereignis_id>/",
+        views_akte.verlauf_stand,
+        name="verlauf_stand",
+    ),
+    path("projekt/<slug:kennung>/umgebung/", views_akte.umgebung_neu, name="umgebung_neu"),
+    path("projekt/<slug:kennung>/github/", views_akte.repo_verbinden, name="repo_verbinden"),
+    path(
+        "projekt/<slug:kennung>/github/<int:pk>/neu/",
+        views_akte.github_aktion_neu,
+        name="github_aktion_neu",
+    ),
+    path(
+        "projekt/<slug:kennung>/github/<int:pk>/<slug:aktion>/",
+        views_akte.repo_aktion,
+        name="repo_aktion",
+    ),
+    path(
+        "projekt/<slug:kennung>/github/aktion/<str:aktions_id>/",
+        views_akte.github_aktion,
+        name="github_aktion",
+    ),
+    path(
+        "projekt/<slug:kennung>/github/aktion/<str:aktions_id>/<slug:schritt>/",
+        views_akte.github_aktion_schritt,
+        name="github_aktion_schritt",
+    ),
     path("projekt/<slug:kennung>/auftraege/", views.projekt_auftraege, name="projekt_auftraege"),
     path("projekt/<slug:kennung>/pruefung/", views.projekt_pruefung, name="projekt_pruefung"),
     path(
@@ -60,7 +153,7 @@ urlpatterns = [
     path("projekt/<slug:kennung>/verlauf/", views.projekt_verlauf, name="projekt_verlauf"),
     path(
         "projekt/<slug:kennung>/einstellungen/",
-        views.projekt_einstellungen,
+        views_akte.einstellungen,
         name="projekt_einstellungen",
     ),
     path("projekt/<slug:kennung>/modul/", views.modul_neu, name="modul_neu"),
@@ -109,6 +202,23 @@ urlpatterns = [
     path("mcp/<str:schluessel>/", mcp.endpunkt, name="mcp_link"),
     path("api/projekt/", api.projekt_lesen, name="api_projekt"),
     path("api/projekte/", api.projekte, name="api_projekte"),
+    path("api/projekt/akte/", api.projektakte, name="api_projektakte"),
+    path("api/projekt/kontext/", api.projektkontext, name="api_projektkontext"),
+    path("api/projekt/verlauf/", api.verlauf, name="api_verlauf"),
+    path("api/unterlagen/<int:nummer>/", api.unterlage_lesen, name="api_unterlage"),
+    path("api/unterlagen/entwurf/", api.unterlage_entwurf, name="api_unterlage_entwurf"),
+    path(
+        "api/funktionen/vorschlagen/",
+        api.funktion_vorschlagen,
+        name="api_funktion_vorschlagen",
+    ),
+    path("api/nachweise/melden/", api.nachweis_melden, name="api_nachweis_melden"),
+    path(
+        "api/installationen/melden/",
+        api.installation_melden,
+        name="api_installation_melden",
+    ),
+    path("api/github/vorschlag/", api.github_vorschlag, name="api_github_vorschlag"),
     path("api/projekte/anlegen/", api.projekt_anlegen, name="api_projekt_anlegen"),
     path("api/module/anlegen/", api.modul_anlegen, name="api_modul_anlegen"),
     path("api/auftraege/<int:auftrag_id>/planen/", api.planen, name="api_planen"),

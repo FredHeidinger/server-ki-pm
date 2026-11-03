@@ -1,18 +1,28 @@
 {% extends "steuerung/grund.html" %}
-{% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › {{ projekt.name }}{% endblock %}
+{% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › <a href="{% url 'projekt_detail' kennung=projekt.kennung %}">{{ projekt.name }}</a>{% endblock %}
 {% block inhalt %}
-<p class="oberzeile">Projekt · {{ projekt.kennung }}</p>
-<div class="seitenkopf">
-  <h1>{{ projekt.name }}</h1>
+<div class="projektkopf-akte">
+  <div>
+    <p class="oberzeile">Projekt · {{ projekt.kennung }}{% if projekt.phase %} · {{ projekt.phase }}{% endif %}</p>
+    <h1>{{ projekt.name }}</h1>
+  </div>
+  <div class="kopfaktionen">
+    <form method="get" action="{% url 'akte_suche' kennung=projekt.kennung %}" class="projektsuche" role="search">
+      <label for="projektsuche" class="unsichtbar">Im Projekt suchen</label>
+      <input type="search" id="projektsuche" name="q" value="{{ treffer.begriff|default:'' }}" placeholder="In {{ projekt.name }} suchen" maxlength="100">
+      <button type="submit" class="knopf zweit klein">Suchen</button>
+    </form>
+    <a class="knopf zweit klein" href="{% url 'akte_kontext' kennung=projekt.kennung %}">Projektkontext für KI</a>
+    <a class="knopf zweit klein" href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}" {% if reiter == "einstellungen" %}aria-current="page"{% endif %}>Projekteinstellungen</a>
+  </div>
 </div>
-{% if projekt.beschreibung %}<p class="gedaempft unterzeile">{{ projekt.beschreibung }}</p>{% endif %}
 <nav class="reiter" aria-label="Bereiche des Projekts">
-  <a href="{% url 'projekt_detail' kennung=projekt.kennung %}" {% if reiter == "uebersicht" %}aria-current="page"{% endif %}>Übersicht</a>
-  <a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}" {% if reiter == "auftraege" %}aria-current="page"{% endif %}>Aufträge</a>
-  <a href="{% url 'projekt_pruefung' kennung=projekt.kennung %}" {% if reiter == "pruefung" %}aria-current="page"{% endif %}>Prüfung</a>
-  <a href="{% url 'projekt_entscheidungen' kennung=projekt.kennung %}" {% if reiter == "entscheidungen" %}aria-current="page"{% endif %}>Entscheidungen</a>
+  <a href="{% url 'projekt_detail' kennung=projekt.kennung %}" {% if reiter == "ueberblick" %}aria-current="page"{% endif %}>Überblick</a>
+  <a href="{% url 'akte_funktionen' kennung=projekt.kennung %}" {% if reiter == "funktionen" %}aria-current="page"{% endif %}>Funktionen &amp; Planung</a>
+  <a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}" {% if reiter == "auftraege" or reiter == "pruefung" %}aria-current="page"{% endif %}>Arbeitsaufträge</a>
+  <a href="{% url 'akte_betrieb' kennung=projekt.kennung %}" {% if reiter == "betrieb" %}aria-current="page"{% endif %}>Versionen &amp; Betrieb</a>
+  <a href="{% url 'akte_wissen' kennung=projekt.kennung %}" {% if reiter == "wissen" %}aria-current="page"{% endif %}>Wissen &amp; Entscheidungen</a>
   <a href="{% url 'projekt_verlauf' kennung=projekt.kennung %}" {% if reiter == "verlauf" %}aria-current="page"{% endif %}>Verlauf</a>
-  <a href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}" {% if reiter == "einstellungen" %}aria-current="page"{% endif %}>Einstellungen</a>
 </nav>
 {% block projektinhalt %}{% endblock %}
 {% endblock %}

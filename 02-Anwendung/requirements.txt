@@ -2,9 +2,19 @@
 #    uv export --no-dev --extra server --format requirements-txt --no-hashes -o requirements.txt
 asgiref==3.13.0
     # via django
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
+cryptography==50.0.2
+    # via pyjwt
 django==5.2.18
     # via kipm
 gunicorn==26.2.0
+    # via kipm
+pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
+pyjwt==2.15.1
+    # via kipm
+pypdf==6.21.4
     # via kipm
 sqlparse==0.6.1
     # via django

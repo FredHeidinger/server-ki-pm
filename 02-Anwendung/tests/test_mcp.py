@@ -71,16 +71,18 @@ def test_initialize_werkzeugliste_und_benachrichtigung(client, pc_zugang):
     assert fehler["error"]["code"] == -32601
 
 
-def test_unbekannter_ordner_landet_im_posteingang(client, owner_client, projekt, pc_zugang):
+def test_unbekannter_ordner_landet_bei_ki_verbinden(client, owner_client, projekt, pc_zugang):
     ordner = r"C:\Projekte\Neu\src"
     fehler, daten = _werkzeug(client, pc_zugang.klartext, "kipm_projekt", ordner=ordner)
-    assert fehler and "Posteingang" in daten["fehler"]
+    assert fehler and "KI verbinden" in daten["fehler"]
     # Wiederholte Versuche erzeugen keinen zweiten Eintrag.
     _werkzeug(client, pc_zugang.klartext, "kipm_auftraege", ordner=ordner + "\\")
     anfrage = OrdnerAnfrage.objects.get()
 
-    seite = owner_client.get(reverse("posteingang")).content.decode()
-    assert "Neuer Arbeitsordner" in seite and "Projekt wählen" in seite
+    seite = owner_client.get(reverse("verbindungen")).content.decode()
+    assert "Neue Arbeitsordner" in seite and "Projekt wählen" in seite
+    # Auch nach dem Navigationsumbau auffindbar: Hinweis auf der Projektauswahl (P03).
+    assert "Zuordnung" in owner_client.get(reverse("projekte")).content.decode()
 
     owner_client.post(
         reverse("ordner_zuordnen", kwargs={"anfrage_id": anfrage.pk}), {"projekt": projekt.pk}

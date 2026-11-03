@@ -15,7 +15,7 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -110,10 +110,18 @@ def _ereignis(
     ereignis: str,
     anlass: str = "",
     revision: str = "",
+    beobachtet_am=None,
+    version=None,
 ) -> Ereignis:
+    """Verlaufseintrag im selben Commit; jedes Ereignis eines Projekts erhöht dessen
+    Inhaltsrevision (Lesen, Besuchsmarken und unveränderte Abrufe schreiben keines)."""
     if akteur.ordner:
         anlass = (anlass + " · " if anlass else "") + f"Ordner {akteur.ordner}"
+    if projekt is not None:
+        Projekt.objects.filter(pk=projekt.pk).update(inhalt_revision=F("inhalt_revision") + 1)
     return Ereignis.objects.create(
+        beobachtet_am=beobachtet_am,
+        version=version,
         akteur=akteur.benutzer if akteur.benutzer is not None and akteur.benutzer.pk else None,
         akteur_name=akteur.name,
         projekt=projekt,

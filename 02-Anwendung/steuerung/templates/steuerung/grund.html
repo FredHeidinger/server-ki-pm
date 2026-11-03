@@ -10,20 +10,24 @@
 <a class="sprung" href="#inhalt">Zum Inhalt springen</a>
 <div class="app">
 <nav class="seitenleiste" aria-label="Bereiche">
-  <a class="marke" href="{% url 'posteingang' %}"><span class="marke-zeichen">{% include "steuerung/symbol.html" with name="puls" %}</span><span><strong>Server-KI-PM</strong><small>Projektsteuerung mit KI</small></span></a>
-  <p class="navtitel">Arbeitsbereich</p>
-  {% url 'posteingang' as u_post %}{% url 'meine' as u_meine %}{% url 'auftraege' as u_auf %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}{% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
-  <a href="{{ u_post }}" {% if request.path == u_post %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="eingang" %} Posteingang{% if posteingang_anzahl %} <span class="zaehler">{{ posteingang_anzahl }}</span>{% endif %}</a>
-  <a href="{{ u_meine }}" {% if request.path == u_meine %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ich" %} Meine Aufträge</a>
-  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
-  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="waage" %} Entscheidungen</a>
-  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
-  <a href="{{ u_proj }}" {% if request.path == u_proj %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ordner" %} Projekte</a>
-  {% if seitenleiste_projekte %}<p class="navtitel">Projekte im Blick</p>{% endif %}
-  {% for p in seitenleiste_projekte %}
-  <a class="projektlink" href="{% url 'projekt_detail' kennung=p.kennung %}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}aria-current="page"{% endif %}><span class="punkt" aria-hidden="true"></span> {{ p.name }}</a>
-  {% endfor %}
-  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %} KI verbinden</a></p>
+  <a class="marke" href="{% url 'projekte' %}"><span class="marke-zeichen">{% include "steuerung/symbol.html" with name="puls" %}</span><span><strong>Server-KI-PM</strong><small>Projektsteuerung mit KI</small></span></a>
+  {% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
+  {% if aktives_projekt %}
+  <a href="{{ u_proj }}" class="wechseln">{% include "steuerung/symbol.html" with name="ordner" %} Projekt wechseln</a>
+  <p class="navtitel bereichslink">Projekt</p>
+  <p class="projektname-nav bereichslink">{{ aktives_projekt.name }}</p>
+  {% with k=aktives_projekt.kennung %}
+  <a class="bereichslink" href="{% url 'projekt_detail' kennung=k %}" {% if bereich == "ueberblick" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="puls" %} Überblick</a>
+  <a class="bereichslink" href="{% url 'akte_funktionen' kennung=k %}" {% if bereich == "funktionen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ziel" %} Funktionen &amp; Planung</a>
+  <a class="bereichslink" href="{% url 'projekt_auftraege' kennung=k %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Arbeitsaufträge</a>
+  <a class="bereichslink" href="{% url 'akte_betrieb' kennung=k %}" {% if bereich == "betrieb" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="server" %} Versionen &amp; Betrieb</a>
+  <a class="bereichslink" href="{% url 'akte_wissen' kennung=k %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="buch" %} Wissen &amp; Entscheidungen</a>
+  <a class="bereichslink" href="{% url 'projekt_verlauf' kennung=k %}" {% if bereich == "verlauf" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
+  {% endwith %}
+  {% else %}
+  <a href="{{ u_proj }}" {% if request.path == u_proj or request.path == "/" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ordner" %} Projekte</a>
+  {% endif %}
+  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %} Konto &amp; KI verbinden{% if ordneranfragen_anzahl %} <span class="zaehler" title="Neue Arbeitsordner zuordnen">{{ ordneranfragen_anzahl }}</span>{% endif %}</a></p>
 </nav>
 <main id="inhalt">
 <header class="kopfzeile">
@@ -32,13 +36,16 @@
     <details class="neu-menue">
       <summary class="knopf">+ Neu</summary>
       <div class="menue" role="menu">
-        {% with p=aktives_projekt.kennung|default:"" %}
-        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag{% if p %}&amp;projekt={{ p }}{% endif %}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
-        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue{% if p %}&amp;projekt={{ p }}{% endif %}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
-        <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt mit Modulen</span></a>
-        <a role="menuitem" href="{% if p %}{% url 'projekt_detail' kennung=p %}#module{% else %}{% url 'modul_neu_seite' %}{% endif %}"><strong>Modul</strong><span>Teilbereich eines Projekts</span></a>
-        <a role="menuitem" href="{% url 'entscheidung_neu' %}"><strong>Entscheidung</strong><span>Festlegung für ein oder mehrere Projekte</span></a>
-        {% endwith %}
+        {% if aktives_projekt %}{% with p=aktives_projekt.kennung %}
+        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag&amp;projekt={{ p }}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
+        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue&amp;projekt={{ p }}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
+        <a role="menuitem" href="{% url 'funktion_neu' kennung=p %}"><strong>Funktion</strong><span>Eine Fähigkeit des Produkts</span></a>
+        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}"><strong>Unterlage</strong><span>Text, Datei oder Link</span></a>
+        <a role="menuitem" href="{% url 'entscheidung_neu' %}?projekt={{ p }}"><strong>Entscheidung</strong><span>Festlegung mit Begründung</span></a>
+        <a role="menuitem" href="{% url 'release_neu' kennung=p %}"><strong>Release</strong><span>Version mit Komponenten</span></a>
+        {% endwith %}{% else %}
+        <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt; Module sind optional</span></a>
+        {% endif %}
       </div>
     </details>
     <form method="post" action="{% url 'abmelden' %}" class="benutzer">

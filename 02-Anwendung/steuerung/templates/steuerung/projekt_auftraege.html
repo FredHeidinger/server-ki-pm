@@ -1,5 +1,15 @@
 {% extends "steuerung/projekt_grund.html" %}
-{% block titel %}{{ projekt.name }} – Aufträge{% endblock %}
+{% block titel %}{{ projekt.name }} – Arbeitsaufträge{% endblock %}
 {% block projektinhalt %}
+<nav class="umschalter-zeile" aria-label="Ansicht der Arbeitsaufträge">
+  <a class="umschalter aktiv" href="{% url 'projekt_auftraege' kennung=projekt.kennung %}" aria-current="page">Aufträge und Issues</a>
+  <a class="umschalter" href="{% url 'projekt_pruefung' kennung=projekt.kennung %}">Prüfung{% if pruefung_anzahl %} ({{ pruefung_anzahl }}){% endif %}</a>
+</nav>
+{% if eintraege %}
+<section class="box warn" aria-labelledby="h-wartet">
+  <h2 id="h-wartet">Wartet auf dich <span class="zahl">{{ eintraege|length }}</span></h2>
+  {% include "steuerung/eingangsliste.html" %}
+</section>
+{% endif %}
 {% include "steuerung/auftragsliste.html" %}
 {% endblock %}

@@ -2,7 +2,7 @@
 {% load steuerung_extras %}
 {% block titel %}{{ e.nummer }} {{ e.titel }}{% endblock %}
 {% block inhalt %}
-<p><a href="{% url 'entscheidungen' %}">← Entscheidungen</a></p>
+<p><a href="{% url 'projekte' %}">← Projekte</a></p>
 <div class="kopf"><span class="id">{{ e.nummer }}</span>{{ e.zustand|zustand }}<span>Stand {{ e.stand }}</span><span>vorgeschlagen von {{ e.vorgeschlagen_von_name }} am {{ e.vorgeschlagen_am|date:"d.m.Y" }}</span>{% if e.entschieden_am %}<span>entschieden am {{ e.entschieden_am|date:"d.m.Y H:i" }} von {{ e.entschieden_von.get_username }}</span>{% endif %}</div>
 <h1>{{ e.titel }}</h1>
 

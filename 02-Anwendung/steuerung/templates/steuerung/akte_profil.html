@@ -1,0 +1,14 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Profil{% endblock %}
+{% block projektinhalt %}
+<section class="box">
+  <h2>Projektprofil bearbeiten</h2>
+  <p class="gedaempft">Das bestätigte Profil ist die führende Projektbeschreibung. Ändert jemand anderes es gleichzeitig, erhältst du einen Konflikt statt einer stillen Überschreibung.</p>
+  <form method="post" class="formular">
+    {% csrf_token %}
+    {% include "steuerung/formular_felder.html" with form=form %}
+    <button type="submit" class="knopf">Profil speichern</button>
+    <a href="{% url 'projekt_detail' kennung=projekt.kennung %}">Abbrechen</a>
+  </form>
+</section>
+{% endblock %}

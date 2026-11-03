@@ -1,0 +1,84 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Überblick{% endblock %}
+{% block projektinhalt %}
+<section class="box profil">
+  <div class="abschnittkopf"><h2>Worum es geht</h2><a class="knopf zweit klein" href="{% url 'akte_profil' kennung=projekt.kennung %}">Profil bearbeiten</a></div>
+  {% if projekt.zweck %}<p class="zweck">{{ projekt.zweck|linebreaksbr }}</p>{% else %}<p class="gedaempft">Zweck noch nicht erfasst.{% if projekt.beschreibung %} Kurzbeschreibung: {{ projekt.beschreibung }}{% endif %}</p>{% endif %}
+  <dl class="felder eng">
+    <dt>Zielgruppe</dt><dd>{{ projekt.zielgruppe|default:"noch nicht erfasst" }}</dd>
+    <dt>Nicht-Ziele</dt><dd>{{ projekt.nicht_ziele|default:"noch nicht erfasst" }}</dd>
+  </dl>
+  <p class="quelle">Quelle: Projektprofil Revision {{ projekt.profil_revision }}{% if profil_alt %}, zuletzt geändert {{ profil_alt.zeitpunkt|date:"d.m.Y H:i" }} von {{ profil_alt.akteur_name }}{% else %}, noch nie bestätigt{% endif %}</p>
+</section>
+
+{% if widersprueche or pruefbeduerftig %}
+<section class="box warn" aria-labelledby="h-widerspruch">
+  <h2 id="h-widerspruch">Widersprüchlich oder prüfbedürftig</h2>
+  <ul class="liste-schlicht">
+    {% for f, s in widersprueche %}<li><a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}">{{ f.kennung }} {{ f.titel }}</a>: {{ s.satz }}</li>{% endfor %}
+    {% for p in pruefbeduerftig %}<li><a href="{% url 'auftrag_detail' auftrag_id=p.auftrag.pk %}">{{ p.auftrag.nummer }} {{ p.auftrag.titel }}</a> ist an {{ p.unterlage.kennung }} Version {{ p.gebunden }} gebunden; die Grundlage ist jetzt Version {{ p.neu }}. Prüfbedürftig; die Revision bleibt unverändert.</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div class="zwei">
+  <section class="box" aria-labelledby="h-nutzbar">
+    <h2 id="h-nutzbar">1 · Bereits nutzbar</h2>
+    {% if nutzbar %}
+    <ul class="standliste">{% for f, s in nutzbar %}
+      <li><a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}"><strong>{{ f.kennung }}</strong> {{ f.titel }}</a>
+        <span class="satz">{{ s.satz }}</span>
+        {% if s.beleg %}<span class="quelle">Beleg: {{ s.beleg.get_art_display }} {{ s.beleg.get_ergebnis_display }} · {{ s.beleg.quelle }}{% if s.beleg.umgebung %} · {{ s.beleg.umgebung.name }}{% endif %} · {{ s.beleg.beobachtet_am|date:"d.m.Y" }} · {{ s.beleg.akteur_name }}</span>{% endif %}
+      </li>{% endfor %}
+    </ul>
+    {% elif funktionen_anzahl %}<p class="gedaempft">Noch keine Funktion mit Prüfnachweis für ihre gemeldete Version. Ohne Nachweis gilt nichts als nutzbar.</p>
+    {% else %}<p class="gedaempft">Noch keine Funktionen erfasst. Hier steht später, was nachweislich funktioniert. <a href="{% url 'funktion_neu' kennung=projekt.kennung %}">Funktion erfassen</a></p>{% endif %}
+  </section>
+  <section class="box" aria-labelledby="h-entwicklung">
+    <h2 id="h-entwicklung">2 · In Entwicklung</h2>
+    {% if entwicklung %}
+    <ul class="standliste">{% for f, s in entwicklung %}
+      <li><a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}"><strong>{{ f.kennung }}</strong> {{ f.titel }}</a>
+        <span class="satz">{{ s.satz }}</span>
+        <span class="quelle">{% for a in s.aktive_auftraege %}<a href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}">{{ a.nummer }}</a> {{ a.get_zustand_display }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+      </li>{% endfor %}
+    </ul>
+    {% else %}<p class="gedaempft">Keine Funktion mit laufendem Auftrag.</p>{% endif %}
+    <p class="kleinmeta"><a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}">Offen: {{ kennzahlen.auftraege }} Aufträge · {{ kennzahlen.issues }} Issues · {{ kennzahlen.pruefung }} warten auf Prüfung{% if kennzahlen.blockiert %} · {{ kennzahlen.blockiert }} blockiert oder unklar{% endif %}</a></p>
+  </section>
+</div>
+
+<div class="zwei">
+  <section class="box" aria-labelledby="h-installiert">
+    <h2 id="h-installiert">3 · Installiert</h2>
+    {% if installationen %}
+    <ul class="standliste">{% for z in installationen %}
+      <li><span><strong>{{ z.i.umgebung.name }}</strong> · {{ z.i.komponente }}: <code>{{ z.i.version }}</code>{% if z.i.release %} (Release {{ z.i.release.kennung }}){% endif %}
+        <span class="status {% if z.i.zustand == 'bestaetigt' %}ok{% elif z.i.zustand == 'fehlgeschlagen' %}aus{% else %}warn{% endif %}">{{ z.i.get_zustand_display }}</span></span>
+        <span class="quelle">gemeldet {{ z.i.installiert_am|date:"d.m.Y H:i" }} von {{ z.i.melder_name }} · Herkunft: {{ z.i.herkunft }} · {% if z.pruefung %}letzte Prüfung {{ z.pruefung.get_ergebnis_display }} am {{ z.pruefung.beobachtet_am|date:"d.m.Y" }}{% else %}keine Funktionsprüfung zu dieser Version{% endif %}</span>
+      </li>{% endfor %}
+    </ul>
+    {% else %}<p class="gedaempft">Keine Installation bekannt. Ein GitHub-Release allein gilt nicht als installiert. <a href="{% url 'akte_betrieb' kennung=projekt.kennung %}#installiert">Installation melden</a></p>{% endif %}
+  </section>
+  <section class="box" aria-labelledby="h-stufe">
+    <h2 id="h-stufe">4 · Nächste Entwicklungsstufe</h2>
+    {% if projekt.entwicklungsstufe %}<p>{{ projekt.entwicklungsstufe|linebreaksbr }}</p>{% else %}<p class="gedaempft">Noch nicht festgelegt. Das nächste Ziel legst du im Profil fest; es wird nicht aus Dringlichkeit berechnet.</p>{% endif %}
+    {% if meilensteine %}<ul class="liste-schlicht">{% for m in meilensteine %}<li><strong>{{ m.name }}</strong> <span class="status">{{ m.get_zustand_display }}</span>{% if m.zielversion %} · Ziel {{ m.zielversion }}{% endif %}{% if m.funktionen.all %}: {% for f in m.funktionen.all %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}">{{ f.kennung }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  </section>
+</div>
+
+<section class="box" aria-labelledby="h-neu">
+  <div class="abschnittkopf">
+    <h2 id="h-neu">5 · Änderungen seit deinem letzten Besuch{% if aenderungen.anzahl %} <span class="zahl">{{ aenderungen.anzahl }}</span>{% endif %}</h2>
+    {% if aenderungen.anzahl %}
+    <form method="post" action="{% url 'akte_gesehen' kennung=projekt.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="grenze" value="{{ grenze }}"><button type="submit" class="knopf zweit klein">Als gesehen markieren</button></form>
+    {% endif %}
+  </div>
+  {% if aenderungen.ereignisse %}
+  <ul class="letzte">{% for e in aenderungen.ereignisse %}<li><span class="zeit">{{ e.zeitpunkt|date:"d.m. H:i" }}</span> <strong>{{ e.akteur_name }}</strong> {{ e.ereignis }} <span class="gedaempft">{{ e.objekt_kennung }}</span>{% if e.beobachtet_am %} <span class="gedaempft">(geschehen {{ e.beobachtet_am|date:"d.m. H:i" }})</span>{% endif %}</li>{% endfor %}</ul>
+  {% if aenderungen.anzahl > aenderungen.ereignisse|length %}<p class="gedaempft">… und {{ aenderungen.anzahl|add:"-6" }} weitere.</p>{% endif %}
+  {% elif aenderungen.erstbesuch %}<p class="gedaempft">Erster Besuch: noch keine Besuchsmarke gesetzt.</p>
+  {% else %}<p class="gedaempft">Nichts Neues seit deinem letzten Besuch.</p>{% endif %}
+  <p><a href="{% url 'projekt_verlauf' kennung=projekt.kennung %}">Ganzer Verlauf</a></p>
+</section>
+{% endblock %}

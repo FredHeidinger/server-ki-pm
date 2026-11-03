@@ -5,6 +5,8 @@ description = "Server-KI-PM: zentrale Auftragssteuerung für Softwareprojekte mi
 requires-python = ">=3.13"
 dependencies = [
     "django>=5.2,<5.3",
+    "pyjwt[crypto]>=2.9",
+    "pypdf>=5",
 ]
 
 [project.optional-dependencies]
@@ -35,5 +37,11 @@ select = ["E", "F", "I", "B", "UP", "DJ"]
 "steuerung/models.py" = ["DJ008"]
 "steuerung/views.py" = ["E501"]
 "steuerung/dienst.py" = ["E501"]
+"steuerung/akte.py" = ["E501"]
+"steuerung/abgleich.py" = ["E501"]
+"steuerung/views_akte.py" = ["E501"]
+"steuerung/extrakt.py" = ["E501"]
+"steuerung/github.py" = ["E501"]
+"steuerung/ablage.py" = ["E501"]
 "kipm/settings.py" = ["E501"]
 "tests/*" = ["E501"]

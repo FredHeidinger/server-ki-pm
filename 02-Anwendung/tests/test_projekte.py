@@ -64,10 +64,16 @@ def test_formular_registriert_und_zeigt_projekt(owner_client):
     )
     assert antwort.status_code == 302
     seite = owner_client.get(reverse("projekte")).content.decode()
-    assert "Synthetisches A" in seite and "Kern" in seite and "Doku" in seite
+    assert "Synthetisches A" in seite and "Testprojekt" in seite
     detail = owner_client.get(antwort["Location"]).content.decode()
-    assert "synth-a" in detail and "Einstellungen" in detail
-    verlauf = owner_client.get(reverse("verlauf")).content.decode()
+    assert "synth-a" in detail and "Projekteinstellungen" in detail
+    einstellungen = owner_client.get(
+        reverse("projekt_einstellungen", kwargs={"kennung": "synth-a"})
+    )
+    assert "Kern" in einstellungen.content.decode() and "Doku" in einstellungen.content.decode()
+    verlauf = owner_client.get(
+        reverse("projekt_verlauf", kwargs={"kennung": "synth-a"})
+    ).content.decode()
     assert "Projekt registriert" in verlauf
 
 
@@ -87,10 +93,11 @@ def test_projektseiten_grenzen_auf_das_projekt_ein(owner_client, owner):
         reverse("projekt_verlauf", kwargs={"kennung": "synth-b"})
     ).content.decode()
     assert "<code>synth-b</code>" in verlauf_b and "<code>synth-a</code>" not in verlauf_b
-    alle = owner_client.get(reverse("verlauf")).content.decode()
-    assert "<code>synth-a</code>" in alle and "<code>synth-b</code>" in alle
-    seitenleiste = owner_client.get(reverse("posteingang")).content.decode()
-    assert "Synthetisches A" in seitenleiste and "Synthetisches B" in seitenleiste
+    # Der frühere projektübergreifende Verlauf führt verständlich zur Projektauswahl.
+    alle = owner_client.get(reverse("verlauf"), follow=True).content.decode()
+    assert "im jeweiligen Projekt" in alle
+    auswahl = owner_client.get(reverse("projekte")).content.decode()
+    assert "Synthetisches A" in auswahl and "Synthetisches B" in auswahl
 
 
 def test_nutzertext_wird_nicht_als_html_ausgefuehrt(owner_client):

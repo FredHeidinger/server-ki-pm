@@ -1,0 +1,13 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ titel }}{% endblock %}
+{% block projektinhalt %}
+<section class="box">
+  <h2>{{ titel }}</h2>
+  {% if erklaerung %}<p class="gedaempft">{{ erklaerung }}</p>{% endif %}
+  <form method="post" class="formular">
+    {% csrf_token %}
+    {% include "steuerung/formular_felder.html" with form=form %}
+    <button type="submit" class="knopf">Speichern</button>
+  </form>
+</section>
+{% endblock %}

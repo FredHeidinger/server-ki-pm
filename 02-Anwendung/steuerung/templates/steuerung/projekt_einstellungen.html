@@ -1,10 +1,67 @@
 {% extends "steuerung/projekt_grund.html" %}
-{% block titel %}{{ projekt.name }} – Einstellungen{% endblock %}
+{% block titel %}{{ projekt.name }} – Projekteinstellungen{% endblock %}
 {% block projektinhalt %}
-{% if projekt.beschreibung %}<p class="gedaempft">{{ projekt.beschreibung }}</p>{% endif %}
+<h2>Projekteinstellungen</h2>
+<p class="gedaempft">Technische Zuordnungen dieses Projekts. Die Inhalte stehen in den sechs Bereichen.</p>
+
+<section id="module" class="box" aria-labelledby="h-module">
+  <h2 id="h-module">Module <span class="zahl">{{ modulkarten|length }}</span> <span class="stufe optional">optional</span></h2>
+  <p class="gedaempft">Ein Projekt funktioniert vollständig ohne Module. Sobald es Module gibt, lassen sich Aufträge und Funktionen danach filtern; „Gesamtes Projekt“ gilt modulübergreifend.</p>
+  {% if modulkarten %}
+  <ul class="liste-schlicht">{% for m in modulkarten %}<li><strong>{{ m.name }}</strong> <span class="kuerzel">{{ m.kennung }}</span>
+    <details class="modulpflege"><summary>Ändern</summary>
+      <form method="post" action="{% url 'modul_aendern' kennung=projekt.kennung modul=m.kennung %}" class="zeile">{% csrf_token %}<label>Name <input type="text" name="name" value="{{ m.name }}" required maxlength="120"></label><button type="submit" class="knopf zweit klein">Speichern</button></form>
+      <form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=m.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="0"><button type="submit" class="knopf zweit klein gefahr">Archivieren</button></form>
+    </details></li>{% endfor %}</ul>
+  {% endif %}
+  <form method="post" action="{% url 'modul_neu' kennung=projekt.kennung %}" class="zeile">
+    {% csrf_token %}
+    <label for="modul-neu-name">Neues Modul</label><input type="text" id="modul-neu-name" name="modul-name" maxlength="120" required placeholder="Name, z. B. Export">
+    <button type="submit" class="knopf zweit klein">Anlegen</button>
+  </form>
+  {% if modularchiv %}
+  <details class="archiv"><summary>Archiv: {{ modularchiv|length }} Module</summary>
+    <ul class="liste-schlicht">{% for m in modularchiv %}<li>{{ m.name }} <span class="kuerzel">{{ m.kennung }}</span> <form method="post" action="{% url 'modul_archivieren' kennung=projekt.kennung modul=m.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="1"><button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>
+
+<section id="umgebungen" class="box" aria-labelledby="h-umg">
+  <h2 id="h-umg">Umgebungen</h2>
+  <p class="gedaempft">Wo das Projekt läuft, z. B. lokal, Testserver, Betrieb. Adressen werden nicht automatisch abgefragt.</p>
+  {% if umgebungen %}<ul class="liste-schlicht">{% for u in umgebungen %}<li><strong>{{ u.name }}</strong> · {{ u.get_art_display }}{% if u.beschreibung %} · {{ u.beschreibung }}{% endif %}{% if u.url %} · {{ u.url }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="gedaempft">Noch keine Umgebung.</p>{% endif %}
+  <details{% if not umgebungen %} open{% endif %}>
+    <summary class="knopf zweit klein">+ Umgebung</summary>
+    <form method="post" action="{% url 'umgebung_neu' kennung=projekt.kennung %}" class="formular klein">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=umgebung_form %}
+      <button type="submit" class="knopf zweit">Umgebung speichern</button>
+    </form>
+  </details>
+</section>
+
+<section id="github" class="box" aria-labelledby="h-gh">
+  <h2 id="h-gh">GitHub-Repositorys</h2>
+  <p class="gedaempft">Zuordnung über die stabile GitHub-ID. Lesend dürfen mehrere Projekte dasselbe Repository nutzen, schreibend genau eines. Schreiben bleibt auf Issues, Kommentare und Dokument-Pull-Requests in erlaubten Pfaden begrenzt; jede Aktion bestätigst du einzeln.</p>
+  {% if not github_eingerichtet %}<p class="box warn">Die GitHub App ist auf diesem Server nicht eingerichtet (KIPM_GITHUB_APP_ID und Schlüsseldatei fehlen). Verbinden ist erst danach möglich.</p>{% endif %}
+  {% if repos %}<ul class="liste-schlicht">{% for v in repos %}<li><strong>{{ v.name }}</strong> · ID {{ v.github_id }} · {% if not v.aktiv %}<span class="status aus">widerrufen {{ v.widerrufen_am|date:"d.m.Y" }}</span>{% elif v.schreibend %}schreibend: {{ v.aktionsliste|join:", "|default:"keine Aktion" }} · Pfade {{ v.pfadmuster|join:", " }}{% else %}nur lesen{% endif %}
+    {% if v.aktiv %}<form method="post" action="{% url 'repo_aktion' kennung=projekt.kennung pk=v.pk aktion='widerrufen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}
+    {% if v.workflow_hinweis %}<br><span class="gedaempft">{{ v.workflow_hinweis }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+  {% if github_eingerichtet %}
+  <details>
+    <summary class="knopf zweit klein">+ Repository verbinden</summary>
+    <form method="post" action="{% url 'repo_verbinden' kennung=projekt.kennung %}" class="formular klein">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=repo_form %}
+      <button type="submit" class="knopf zweit">Verbinden</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+
 <section class="box">
-  <h2>Arbeitsorte <span class="stufe freigabe">für Freigabe nötig</span></h2>
-  <p class="gedaempft">Wo der Code dieses Projekts liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu; mit Repository-Adresse werden Dateien in Ergebnissen anklickbar. Server-KI-PM selbst öffnet nichts.</p>
+  <h2>Arbeitsorte</h2>
+  <p class="gedaempft">Wo der Code liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu. Ein Pfad ist ein Hinweis auf einen Arbeitsplatz; der Server liest dort nichts.</p>
   {% if arbeitsorte %}
   <ul class="liste-schlicht">{% for o in arbeitsorte %}<li><strong>{{ o.name }}</strong>{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}</li>{% endfor %}</ul>
   {% else %}<p class="gedaempft">Noch kein Arbeitsort.</p>{% endif %}
@@ -19,17 +76,10 @@
 </section>
 
 <section class="box">
-  <h2>Zugänge dieses Projekts</h2>
-  {% if bindungen %}
-  <ul class="liste-schlicht">
-  {% for b in bindungen %}
-  <li><strong>{{ b.name }}</strong> · {{ b.get_art_display }} ·
-    {% if b.widerrufen_am %}<span class="status aus">widerrufen</span>{% elif b.gueltig_bis < jetzt %}<span class="status aus">abgelaufen</span>{% else %}<span class="status ok">aktiv</span> bis {{ b.gueltig_bis|date:"d.m.Y" }}{% endif %}
-    · zuletzt {% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m. H:i" }}{% else %}nie{% endif %}
-  </li>
-  {% endfor %}
-  </ul>
-  {% else %}<p class="gedaempft">Kein projektgebundener Zugang. PC-Zugänge gelten für alle Projekte.</p>{% endif %}
-  <p>KI-Programme verbindest du unter <a href="{% url 'verbindungen' %}">KI verbinden</a>.</p>
+  <h2>Verbundene KI</h2>
+  {% if ki %}<ul class="liste-schlicht">{% for b in ki %}<li><strong>{{ b.name }}</strong> · zuletzt {{ b.zuletzt_aktiv|date:"d.m. H:i" }}</li>{% endfor %}</ul>
+  {% else %}<p class="gedaempft">Noch keine KI hat in diesem Projekt gearbeitet.</p>{% endif %}
+  {% if bindungen %}<p>Projektgebundene Zugänge: {% for b in bindungen %}{{ b.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  <p>KI-Programme verbindest du unter <a href="{% url 'verbindungen' %}">Konto &amp; KI verbinden</a>.</p>
 </section>
 {% endblock %}

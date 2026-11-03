@@ -1,0 +1,57 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}{{ projekt.name }} – Funktionen &amp; Planung{% endblock %}
+{% block projektinhalt %}
+<div class="abschnittkopf"><h2>Funktionen <span class="zahl">{{ zeilen|length }}</span></h2><a class="knopf klein" href="{% url 'funktion_neu' kennung=projekt.kennung %}">+ Funktion</a></div>
+<p class="gedaempft">Was das Produkt können soll. Jede Zeile zeigt getrennt: Planung, Umsetzung, Prüfung je Umgebung und Abnahme. Ein abgenommener Auftrag macht keine Funktion fertig.</p>
+{% if module_filter %}
+<div class="werkzeuge umschalter-zeile modulfilter" aria-label="Nach Modul filtern">
+  <span class="gedaempft">Modul:</span>
+  <a class="umschalter {% if not modul %}aktiv{% endif %}" href="{% filterlink modul='' %}">Alle</a>
+  {% for m in module_filter %}<a class="umschalter {% if modul == m.kennung %}aktiv{% endif %}" href="{% filterlink modul=m.kennung %}">{{ m.name }}</a>{% endfor %}
+  <a class="umschalter {% if modul == 'ohne' %}aktiv{% endif %}" href="{% filterlink modul='ohne' %}">Gesamtes Projekt</a>
+</div>
+{% endif %}
+{% if zeilen %}
+<div class="tabellenrahmen">
+<table>
+  <thead><tr><th scope="col">Funktion</th><th scope="col">Planung</th><th scope="col">Stand</th><th scope="col">Aufträge</th></tr></thead>
+  <tbody>
+  {% for f, s in zeilen %}
+    <tr>
+      <th scope="row"><a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}">{{ f.kennung }} {{ f.titel }}</a>{% if f.modul %} <span class="chip">{{ f.modul.name }}</span>{% endif %}</th>
+      <td><span class="status">{{ s.planung }}</span></td>
+      <td>{{ s.satz }}{% if s.widerspruch %} <span class="status aus">widersprüchlich</span>{% endif %}</td>
+      <td>{% for a in f.auftraege.all %}<a href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}">{{ a.nummer }}</a>{% if not forloop.last %}, {% endif %}{% empty %}<span class="gedaempft">–</span>{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="leer">Noch keine Funktionen. Eine Funktion ist eine Fähigkeit des Produkts, z. B. „Unterlagen einem Auftrag zuordnen“. <a href="{% url 'funktion_neu' kennung=projekt.kennung %}">Erste Funktion erfassen</a></div>
+{% endif %}
+<p class="kleinmeta">{% if zeigen_verworfen %}<a href="{% filterlink verworfen='' %}">Verworfene ausblenden</a>{% else %}<a href="{% filterlink verworfen='1' %}">Verworfene zeigen</a>{% endif %}</p>
+
+<section id="meilensteine" class="abschnitt">
+  <div class="abschnittkopf"><h2>Meilensteine <span class="zahl">{{ meilensteine|length }}</span></h2></div>
+  <p class="gedaempft">Einfache Entwicklungsziele mit zugehörigen Funktionen. „Erreicht“ setzt du selbst, nachdem du die offenen Kriterien gesehen hast; es gibt keine Prozentzahl.</p>
+  {% if meilensteine %}
+  <ul class="liste-schlicht">{% for m in meilensteine %}
+    <li><strong>{{ m.name }}</strong>{% if m.zielversion %} · Ziel {{ m.zielversion }}{% endif %}{% if m.termin %} · {{ m.termin|date:"d.m.Y" }}{% endif %} · <span class="status">{{ m.get_zustand_display }}</span>
+      {% if m.ziel %}<br><span class="gedaempft">{{ m.ziel }}</span>{% endif %}
+      {% if m.funktionen.all %}<br>{% for f in m.funktionen.all %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=f.nummer %}">{{ f.kennung }} {{ f.titel }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
+      <form method="post" action="{% url 'meilenstein_zustand' kennung=projekt.kennung pk=m.pk %}" class="zeile">{% csrf_token %}<input type="hidden" name="revision" value="{{ m.revision }}"><label>Zustand <select name="zustand">{% for wert, text in zustaende %}<option value="{{ wert }}" {% if wert == m.zustand %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></label><button type="submit" class="knopf zweit klein">Ändern</button></form>
+    </li>{% endfor %}
+  </ul>
+  {% endif %}
+  <details>
+    <summary class="knopf zweit klein">+ Meilenstein</summary>
+    <form method="post" action="{% url 'meilenstein_neu' kennung=projekt.kennung %}" class="formular klein">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=meilenstein_form %}
+      <button type="submit" class="knopf zweit">Meilenstein anlegen</button>
+    </form>
+  </details>
+</section>
+{% endblock %}

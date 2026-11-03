@@ -311,3 +311,37 @@ td.aktionen { white-space: nowrap; }
 .seitenleiste .gruppe.unten a[aria-current="page"] { background: var(--akzent-weich); color: var(--akzent); }
 .unsichtbar { position: absolute; left: -9999px; }
 .modulfilter { flex-wrap: wrap; }
+
+/* Projektakte: Projektauswahl, Projektkopf, Bereiche */
+.projektwahl { list-style: none; padding: 0; margin: 18px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.projektwahl-karte { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; text-decoration: none; color: var(--text); box-shadow: var(--schatten); }
+.projektwahl-karte:hover, .projektwahl-karte:focus-visible { border-color: var(--akzent); }
+.projektwahl-kopf { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.projektwahl-kopf strong { font-size: 17px; }
+.projektkopf-akte { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 6px; }
+.projektkopf-akte h1 { margin: 0; }
+.kopfaktionen { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.projektsuche { display: flex; gap: 6px; }
+.projektsuche input { min-width: 0; width: 220px; max-width: 100%; }
+.seitenleiste .wechseln { font-size: 13px; }
+.projektname-nav { margin: 0 12px 6px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.standliste { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.standliste li { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--linie); }
+.standliste li:last-child { border-bottom: 0; }
+.satz { font-size: 14px; }
+.quelle { font-size: 12px; color: var(--gedaempft); }
+.zweck { font-size: 15px; margin-top: 0; }
+.tabellenrahmen { overflow-x: auto; max-width: 100%; }
+.textansicht, .diff { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; background: var(--weich); padding: 12px; border-radius: 8px; font-size: 13px; }
+.kontexttext { width: 100%; font: 13px/1.45 ui-monospace, Consolas, monospace; }
+.repo { border-top: 1px solid var(--linie); padding-top: 10px; margin-top: 10px; }
+.abschnittkopf { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+td, th { overflow-wrap: break-word; }
+code { overflow-wrap: break-word; }
+@media (max-width: 900px) { .seitenleiste .bereichslink { display: none; } }
+@media (max-width: 600px) {
+  .projektkopf-akte { align-items: stretch; }
+  .projektsuche input { width: 100%; }
+  .reiter { overflow-x: auto; }
+  main { padding-left: 12px; padding-right: 12px; }
+}

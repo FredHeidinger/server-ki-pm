@@ -3,42 +3,30 @@
 {% block brotkrumen %}Projekte{% endblock %}
 {% block inhalt %}
 <div class="seitenkopf">
-  <h1>Projekte</h1>
+  <h1>Projekt wählen</h1>
 </div>
-{% if projektkarten %}
-<div class="projektkarten">
-{% for p in projektkarten %}
-  <article class="projektkarte">
-    <div class="projektkopf">
-      <h3><a href="{% url 'projekt_detail' kennung=p.kennung %}">{{ p.name }}</a></h3>
-      <span class="kuerzel">{{ p.kennung }}</span>
-    </div>
-    {% if p.beschreibung %}<p class="gedaempft">{{ p.beschreibung }}</p>{% endif %}
-    {% if p.offen or p.abgenommen %}
-    <div class="balken" role="img" aria-label="{{ p.entwurf }} Entwurf, {{ p.freigegeben }} freigegeben, {{ p.in_arbeit }} in Arbeit, {{ p.zur_pruefung }} zur Prüfung, {{ p.abgenommen }} abgenommen">
-      {% if p.entwurf %}<span class="b-entwurf" style="flex:{{ p.entwurf }}"></span>{% endif %}
-      {% if p.freigegeben %}<span class="b-freigegeben" style="flex:{{ p.freigegeben }}"></span>{% endif %}
-      {% if p.in_arbeit %}<span class="b-arbeit" style="flex:{{ p.in_arbeit }}"></span>{% endif %}
-      {% if p.zur_pruefung %}<span class="b-pruefung" style="flex:{{ p.zur_pruefung }}"></span>{% endif %}
-      {% if p.abgenommen %}<span class="b-abgenommen" style="flex:{{ p.abgenommen }}"></span>{% endif %}
-    </div>
-    <ul class="legende">
-      <li><i class="b-entwurf"></i>{{ p.entwurf }} Entwurf</li>
-      <li><i class="b-freigegeben"></i>{{ p.freigegeben }} freigegeben</li>
-      <li><i class="b-arbeit"></i>{{ p.in_arbeit }} in Arbeit</li>
-      <li><i class="b-pruefung"></i>{{ p.zur_pruefung }} zur Prüfung</li>
-      <li><i class="b-abgenommen"></i>{{ p.abgenommen }} abgenommen</li>
-    </ul>
-    {% else %}<p class="gedaempft">Noch keine Aufträge.</p>{% endif %}
-    {% if p.module %}<p class="chips">{% for m in p.module %}<span class="chip">{{ m }}</span>{% endfor %}</p>{% endif %}
-    <p class="kleinmeta">
-      Zuletzt gemeldet: {% if p.gemeldet_am %}{{ p.gemeldet_am|date:"d.m. H:i" }} · {{ p.gemeldet_von }}{% if p.gemeldet_alt %} <span class="alt">(älter als 7 Tage)</span>{% endif %}{% else %}nie{% endif %}<br>
-      Zuletzt geprüft: {% if p.geprueft_am %}{{ p.geprueft_am|date:"d.m. H:i" }} · {{ p.geprueft_von }}{% else %}nie{% endif %}
-    </p>
-  </article>
+<p class="gedaempft unterzeile">Wähle ein Projekt; danach bleibst du in dessen Bereichen. Eine Übersicht über alle Projekte nach Dringlichkeit gibt es bewusst nicht.</p>
+<form method="get" class="filterzeile" role="search">
+  <label for="projektsuche-alle">Suchen</label>
+  <input type="search" id="projektsuche-alle" name="q" value="{{ suche }}" placeholder="Name oder Zweck" maxlength="100">
+  <button type="submit" class="knopf zweit klein">Suchen</button>
+  {% if suche %}<a href="{% url 'projekte' %}">Zurücksetzen</a>{% endif %}
+</form>
+{% if ordneranfragen %}<p class="box warn">{{ ordneranfragen }} neue{{ ordneranfragen|pluralize:"r,"}} Arbeitsordner warte{{ ordneranfragen|pluralize:"t,n" }} auf Zuordnung: <a href="{% url 'verbindungen' %}#ordner">unter „Konto &amp; KI verbinden“ zuordnen</a>.</p>{% endif %}
+{% if projekte %}
+<ul class="projektwahl">
+{% for p in projekte %}
+  <li>
+    <a class="projektwahl-karte" href="{% url 'projekt_detail' kennung=p.kennung %}">
+      <span class="projektwahl-kopf"><strong>{{ p.name }}</strong><span class="kuerzel">{{ p.kennung }}</span>{% if p.phase %}<span class="chip">{{ p.phase }}</span>{% endif %}</span>
+      <span class="gedaempft">{% if p.zweck %}{{ p.zweck|truncatechars:180 }}{% elif p.beschreibung %}{{ p.beschreibung|truncatechars:180 }}{% else %}Zweck noch nicht erfasst.{% endif %}</span>
+    </a>
+  </li>
 {% endfor %}
-</div>
+</ul>
+{% elif suche %}
+<div class="leer">Kein Projekt passt zu „{{ suche }}“.</div>
 {% else %}
-<div class="leer">Noch kein Projekt registriert. Mit „+ Projekt“ beginnen; Module und Arbeitsorte kommen danach unter Einstellungen des Projekts dazu.</div>
+<div class="leer">Noch kein Projekt. Über „+ Neu“ → Projekt legst du eines an; Module sind optional.</div>
 {% endif %}
 {% endblock %}

@@ -1,0 +1,22 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}Projektkontext für KI{% endblock %}
+{% block projektinhalt %}
+<section class="box">
+  <h2>Projektkontext für einen neuen KI-Chat</h2>
+  <p class="gedaempft">Aufbereitet aus dem gespeicherten Stand, ohne Zusammenfassung durch ein Modell. Enthält nur für KI freigegebene Unterlagen, keine Zugangsschlüssel. Vor Übernahme oder Schreiben gelten immer die aktuellen Regeln des Servers.</p>
+  <form method="get" class="filterzeile">
+    <label for="auftrag">Arbeitsauftrag einbinden</label>
+    <select id="auftrag" name="auftrag"><option value="">kein bestimmter Auftrag</option>{% for a in auftraege %}<option value="{{ a.pk }}" {% if auftrag and auftrag.pk == a.pk %}selected{% endif %}>{{ a.nummer }} {{ a.titel|truncatechars:60 }}</option>{% endfor %}</select>
+    <button type="submit" class="knopf zweit klein">Neu erzeugen</button>
+    <a href="?format=json{% if auftrag %}&amp;auftrag={{ auftrag.pk }}{% endif %}">als JSON</a>
+  </form>
+  <p class="kleinmeta">Kontext-ID {{ k.kontext_id }} · Inhaltsrevision {{ k.inhalt_revision }} · {{ k.teile|length }} Teil{{ k.teile|length|pluralize:"e" }} · Manifest-Hash {{ k.hash|slice:":16" }}{% if k.manifest.ausgelassen %} · ausgelassen: {{ k.manifest.ausgelassen|join:", " }}{% endif %}</p>
+  <p class="hilfe">Über MCP liefert <code>kipm_projektkontext</code> denselben Inhalt; weitere Teile mit Kontext-ID und Teilnummer.</p>
+</section>
+{% for teil in k.teile %}
+<section class="box">
+  <div class="abschnittkopf"><h3>Teil {{ forloop.counter }} von {{ k.teile|length }}</h3><button type="button" class="knopf zweit klein" data-kopieren="kontext-{{ forloop.counter }}">Kopieren</button></div>
+  <textarea id="kontext-{{ forloop.counter }}" class="kontexttext" rows="18" readonly aria-label="Kontext Teil {{ forloop.counter }}">{{ teil }}</textarea>
+</section>
+{% endfor %}
+{% endblock %}

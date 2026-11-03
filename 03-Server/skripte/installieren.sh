@@ -25,6 +25,7 @@ id kipm >/dev/null 2>&1 || useradd --system --home-dir /opt/kipm --shell /usr/sb
 # Datenordner nur durchquerbar (Caddy liest static), Datenbank bleibt 0640 kipm:kipm
 install -d -o kipm -g kipm -m 0751 "$DATEN"
 install -d -o kipm -g kipm -m 0755 "$DATEN/static"
+install -d -o kipm -g kipm -m 0700 "$DATEN/ablage"
 install -d -o root -g kipm -m 0750 /etc/kipm "$SICHERUNG"
 install -d -o root -g root -m 0755 /opt/kipm "$APP"
 chown root:kipm /etc/kipm/kipm.env; chmod 0640 /etc/kipm/kipm.env
@@ -38,6 +39,35 @@ echo "== Python-Umgebung"
 [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$APP/requirements.txt"
+
+if [ -f "$DATEN/kipm.sqlite3" ]; then
+  echo "== Sicherung vor der Migration"
+  if [ -x /usr/local/sbin/kipm-sichern ]; then /usr/local/sbin/kipm-sichern; else
+    echo "kipm-sichern fehlt; ohne Sicherung wird nicht migriert."; exit 3; fi
+  echo "== Migration zuerst auf einer Kopie, Bestand vorher/nachher vergleichen"
+  PROBE=$(mktemp -d); chown kipm:kipm "$PROBE"
+  "$VENV/bin/python" - "$DATEN/kipm.sqlite3" "$PROBE/kipm.sqlite3" <<'EOF'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as q, sqlite3.connect(sys.argv[2]) as z:
+    q.backup(z)
+EOF
+  chown kipm:kipm "$PROBE/kipm.sqlite3"
+  zaehlen() {
+    "$VENV/bin/python" - "$1" <<'EOF'
+import sqlite3, sys
+z = sqlite3.connect(sys.argv[1])
+assert z.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "Datenbank nicht integer"
+tabellen = ("projekt", "auftrag", "revision", "ergebnis", "pruefung", "ereignis", "chatbindung")
+print(" ".join(str(z.execute(f"select count(*) from steuerung_{t}").fetchone()[0]) for t in tabellen))
+EOF
+  }
+  VORHER=$(zaehlen "$PROBE/kipm.sqlite3")
+  runuser -u kipm --preserve-environment -- env KIPM_DATEN_DIR="$PROBE" "$VENV/bin/python" "$APP/manage.py" migrate --noinput
+  NACHHER=$(zaehlen "$PROBE/kipm.sqlite3")
+  rm -rf "$PROBE"
+  [ "$VORHER" = "$NACHHER" ] || { echo "Probemigration verändert den Bestand ($VORHER → $NACHHER); Abbruch."; exit 4; }
+  echo "Probemigration ohne Bestandsänderung: $NACHHER"
+fi
 
 echo "== Datenbank migrieren und statische Dateien sammeln"
 runuser -u kipm --preserve-environment -- "$VENV/bin/python" "$APP/manage.py" migrate --noinput

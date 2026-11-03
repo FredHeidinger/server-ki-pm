@@ -1,0 +1,32 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ projekt.name }} – Wissen &amp; Entscheidungen{% endblock %}
+{% block projektinhalt %}
+{% if pruefbeduerftig %}
+<section class="box warn"><h2>Prüfbedürftige Aufträge</h2><ul class="liste-schlicht">{% for p in pruefbeduerftig %}<li><a href="{% url 'auftrag_detail' auftrag_id=p.auftrag.pk %}">{{ p.auftrag.nummer }} {{ p.auftrag.titel }}</a>: gebunden an {{ p.unterlage.kennung }} Version {{ p.gebunden }}, neue Grundlage Version {{ p.neu }}. Arbeitsumfang ändern heißt: neue Revision mit Freigabe.</li>{% endfor %}</ul></section>
+{% endif %}
+<section class="abschnitt" aria-labelledby="h-unterlagen">
+  <div class="abschnittkopf"><h2 id="h-unterlagen">Unterlagen <span class="zahl">{{ zeilen|length }}</span></h2>
+    <div><a class="knopf klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=text">+ Text schreiben</a> <a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=datei">Datei hochladen</a> <a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=link">Link hinterlegen</a></div></div>
+  <p class="gedaempft">Projekttexte, Dateien und Links mit Versionen. Neue Inhalte sind zunächst Entwürfe; „Grundlage“ legst du ausdrücklich je Version fest. Für KI verfügbar ist nur, was du freigibst.</p>
+  {% if zeilen %}
+  <div class="tabellenrahmen"><table>
+    <thead><tr><th scope="col">Unterlage</th><th scope="col">Art</th><th scope="col">Aktuelle Version</th><th scope="col">Geltende Grundlage</th><th scope="col">KI</th></tr></thead>
+    <tbody>{% for z in zeilen %}<tr>
+      <th scope="row"><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.u.nummer %}">{{ z.u.kennung }} {{ z.u.titel }}</a>{% if z.u.beschreibung %}<br><span class="gedaempft">{{ z.u.beschreibung|truncatechars:90 }}</span>{% endif %}</th>
+      <td>{{ z.u.get_art_display }}</td>
+      <td>{% if z.v %}Version {{ z.v.nummer }} · {{ z.v.get_rolle_display }}{% if z.v.blob %} · <span class="status {% if z.v.pruefung == 'sauber' %}ok{% elif z.v.pruefung == 'abgewiesen' %}aus{% else %}warn{% endif %}">{{ z.v.get_pruefung_display }}</span>{% endif %}{% if z.v.uri and not z.v.quellversion %} · <span class="status warn">veränderliche Quelle</span>{% endif %}{% endif %}</td>
+      <td>{% if z.grundlage %}Version {{ z.grundlage.nummer }}{% else %}<span class="gedaempft">keine</span>{% endif %}</td>
+      <td>{% if z.u.ki_freigegeben %}<span class="status ok">freigegeben</span>{% else %}<span class="status">nicht freigegeben</span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="leer">{% if zeigen_archiv %}Keine archivierte Unterlage.{% else %}Noch keine Unterlagen. Hier entstehen Projekttexte, hochgeladene Dateien und Links, die Aufträge und Funktionen begründen.{% endif %}</div>{% endif %}
+  <p class="kleinmeta">{% if zeigen_archiv %}<a href="?">Aktuelle Unterlagen</a>{% else %}<a href="?archiv=1">Archiv</a>{% endif %}</p>
+</section>
+
+<section id="entscheidungen" class="abschnitt" aria-labelledby="h-ent">
+  <div class="abschnittkopf"><h2 id="h-ent">Entscheidungen <span class="zahl">{{ entscheidungen|length }}</span></h2><a class="knopf zweit klein" href="{% url 'entscheidung_neu' %}?projekt={{ projekt.kennung }}">+ Entscheidung</a></div>
+  {% if entscheidungen %}
+  <ul class="liste-schlicht">{% for z in entscheidungen %}<li><a href="{% url 'entscheidung_detail' entscheidung_id=z.e.pk %}">{{ z.e.nummer }} {{ z.e.titel }}</a> · <span class="status">{{ z.e.get_zustand_display }}</span>{% if z.e.zustand == "ENTSCHIEDEN" %} · Stand {{ z.e.stand }} · {% if z.uebernommen %}<span class="status ok">für dieses Projekt übernommen</span>{% else %}<span class="status warn">Übernahme offen</span>{% endif %}{% endif %}{% if z.weitere %} <span class="gedaempft">· betrifft weitere Projekte</span>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<div class="leer">Noch keine Entscheidung für dieses Projekt.</div>{% endif %}
+</section>
+{% endblock %}

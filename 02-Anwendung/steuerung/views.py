@@ -1,7 +1,7 @@
 """Oberfläche. Views rufen nur den Dienst und rendern; keine Geschäftsregeln hier.
 
-Aufbau: persönliche Ebene (Posteingang, Meine Aufträge), projektübergreifende Listen, Projekte
-als Arbeitsbereiche mit Reitern, Verbindungen als Katalog. Auftragsdetails erscheinen als
+Aufbau: Projektauswahl als Einstieg, je Projekt sechs Bereiche (Akte in ``views_akte``),
+Verbindungen als technische Verwaltung. Frühere projektübergreifende Listen führen zur Auswahl. Auftragsdetails erscheinen als
 Seitenpanel (Fragment) oder als eigene Seite.
 """
 
@@ -12,6 +12,7 @@ from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -104,24 +105,18 @@ def _zurueck(request: HttpRequest, standard: str) -> HttpResponse:
 # --- Persönliche Ebene ---------------------------------------------------------------------
 
 
-@login_required
-def posteingang(request: HttpRequest) -> HttpResponse:
-    return render(
-        request,
-        "steuerung/posteingang.html",
-        {
-            "eintraege": dienst.posteingang(request.user),
-            "projekte_vorhanden": Projekt.objects.exists(),
-            "projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
-        },
+def _ins_projekt(request: HttpRequest, was: str) -> HttpResponse:
+    """Frühere projektübergreifende Seiten führen verständlich zur Projektauswahl, statt still
+    ein Projekt zu wählen."""
+    messages.info(
+        request, f"{was} findest du jetzt im jeweiligen Projekt. Bitte ein Projekt wählen."
     )
+    return redirect("projekte")
 
 
 @login_required
 def meine(request: HttpRequest) -> HttpResponse:
-    return render(
-        request, "steuerung/meine.html", {"auftraege": dienst.meine_auftraege(request.user)}
-    )
+    return _ins_projekt(request, "Deine Aufträge")
 
 
 # --- Projekte -------------------------------------------------------------------------------
@@ -129,15 +124,18 @@ def meine(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def projekte(request: HttpRequest) -> HttpResponse:
+    """Einstieg: Projekt wählen. Kein Dringlichkeitsboard über alle Projekte."""
     projekte_qs = Projekt.objects.filter(aktiv=True).prefetch_related("module")
-    karten = []
-    for p, zeile in zip(
-        projekte_qs, dienst.projektzeilen(projekte_qs, mit_modulen=False), strict=True
-    ):
-        zeile["beschreibung"] = p.beschreibung
-        zeile["module"] = [m.name for m in p.module.all() if m.aktiv]
-        karten.append(zeile)
-    return render(request, "steuerung/projekte.html", {"projektkarten": karten})
+    suche = request.GET.get("q", "").strip()
+    if suche:
+        projekte_qs = projekte_qs.filter(
+            Q(name__icontains=suche) | Q(beschreibung__icontains=suche) | Q(zweck__icontains=suche)
+        )
+    return render(
+        request,
+        "steuerung/projekte.html",
+        {"projekte": projekte_qs, "suche": suche, "ordneranfragen": OrdnerAnfrage.objects.count()},
+    )
 
 
 @login_required
@@ -274,56 +272,22 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
 
 @login_required
 def auftraege(request: HttpRequest) -> HttpResponse:
-    liste = Auftrag.objects.select_related("projekt", "modul").prefetch_related("revisionen")
-    return _auftragsliste(request, liste, "steuerung/auftraege.html", {"projekt": None})
-
-
-@login_required
-def projekt_uebersicht(request: HttpRequest, kennung: str) -> HttpResponse:
-    """Erster Reiter: Kennzahlen, Module als Karten, Arbeitsorte, verbundene KI, Aktivität."""
-    projekt = _projekt(kennung)
-    offen = projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
-    karten, archiv = [], []
-    for m in projekt.module.all():
-        eigene = offen.filter(modul=m)
-        eintrag = {
-            "m": m,
-            "auftraege": eigene.filter(typ=Auftrag.TYP_AUFTRAG).count(),
-            "issues": eigene.filter(typ=Auftrag.TYP_ISSUE).count(),
-        }
-        (karten if m.aktiv else archiv).append(eintrag)
-    kontext = _projekt_kontext(projekt, "uebersicht")
-    kontext.update(
-        {
-            "kennzahlen": {
-                "auftraege": offen.filter(typ=Auftrag.TYP_AUFTRAG).count(),
-                "issues": offen.filter(typ=Auftrag.TYP_ISSUE).count(),
-                "pruefung": offen.filter(zustand=Auftrag.ZUR_PRUEFUNG).count(),
-                "blockiert": offen.filter(
-                    zustand__in=(Auftrag.BLOCKIERT, Auftrag.KLAERUNG_ERFORDERLICH)
-                ).count(),
-            },
-            "modulkarten": karten,
-            "modularchiv": archiv,
-            "ohne_modul": offen.filter(modul__isnull=True).count(),
-            "arbeitsorte": projekt.arbeitsorte.filter(aktiv=True),
-            "ki": ChatBindung.objects.filter(letztes_projekt=projekt).order_by("-zuletzt_aktiv")[
-                :5
-            ],
-            "ereignisse": Ereignis.objects.filter(projekt=projekt).order_by("-zeitpunkt")[:8],
-            "modul_form": ModulForm(prefix="modul"),
-        }
-    )
-    return render(request, "steuerung/projekt_uebersicht.html", kontext)
+    return _ins_projekt(request, "Aufträge und Issues")
 
 
 @login_required
 def projekt_auftraege(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
     liste = projekt.auftraege.select_related("projekt", "modul").prefetch_related("revisionen")
-    return _auftragsliste(
-        request, liste, "steuerung/projekt_auftraege.html", _projekt_kontext(projekt, "auftraege")
-    )
+    kontext = _projekt_kontext(projekt, "auftraege")
+    # Was in diesem Projekt auf eine menschliche Entscheidung wartet; nie projektübergreifend.
+    kontext["eintraege"] = [
+        e
+        for e in dienst.posteingang(request.user)
+        if e.get("auftrag") is not None and e["auftrag"].projekt_id == projekt.pk
+    ]
+    kontext["pruefung_anzahl"] = projekt.auftraege.filter(zustand=Auftrag.ZUR_PRUEFUNG).count()
+    return _auftragsliste(request, liste, "steuerung/projekt_auftraege.html", kontext)
 
 
 def _pruefzeilen(liste, benutzer) -> list[dict]:
@@ -338,14 +302,7 @@ def _pruefzeilen(liste, benutzer) -> list[dict]:
 
 @login_required
 def pruefung(request: HttpRequest) -> HttpResponse:
-    liste = Auftrag.objects.filter(zustand=Auftrag.ZUR_PRUEFUNG).select_related(
-        "projekt", "modul", "pruefer"
-    )
-    return render(
-        request,
-        "steuerung/pruefung.html",
-        {"zeilen": _pruefzeilen(liste, request.user), "projekt": None},
-    )
+    return _ins_projekt(request, "Prüfungen")
 
 
 @login_required
@@ -359,40 +316,15 @@ def projekt_pruefung(request: HttpRequest, kennung: str) -> HttpResponse:
     return render(request, "steuerung/projekt_pruefung.html", kontext)
 
 
-def _entscheidungszeilen(liste) -> list[dict]:
-    zeilen = []
-    for e in liste:
-        bestaetigt = {b.projekt_id for b in e.bestaetigungen.all() if b.stand == e.stand}
-        zeilen.append(
-            {
-                "e": e,
-                "projekte": [(p, p.pk in bestaetigt) for p in e.betroffene_projekte.all()],
-            }
-        )
-    return zeilen
-
-
 @login_required
 def entscheidungen(request: HttpRequest) -> HttpResponse:
-    liste = Entscheidung.objects.prefetch_related("betroffene_projekte", "bestaetigungen__projekt")
-    return render(
-        request,
-        "steuerung/entscheidungen.html",
-        {"zeilen": _entscheidungszeilen(liste), "projekt": None},
-    )
+    return _ins_projekt(request, "Entscheidungen")
 
 
 @login_required
 def projekt_entscheidungen(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
-    liste = (
-        Entscheidung.objects.filter(betroffene_projekte=projekt)
-        .prefetch_related("betroffene_projekte", "bestaetigungen__projekt")
-        .distinct()
-    )
-    kontext = _projekt_kontext(projekt, "entscheidungen")
-    kontext["zeilen"] = _entscheidungszeilen(liste)
-    return render(request, "steuerung/projekt_entscheidungen.html", kontext)
+    return redirect(reverse("akte_wissen", kwargs={"kennung": projekt.kennung}) + "#entscheidungen")
 
 
 def _verlauf(request: HttpRequest, ereignisse, vorlage: str, kontext: dict) -> HttpResponse:
@@ -421,12 +353,7 @@ def _verlauf(request: HttpRequest, ereignisse, vorlage: str, kontext: dict) -> H
 
 @login_required
 def verlauf(request: HttpRequest) -> HttpResponse:
-    return _verlauf(
-        request,
-        Ereignis.objects.select_related("projekt"),
-        "steuerung/verlauf.html",
-        {"projekt": None},
-    )
+    return _ins_projekt(request, "Der Verlauf")
 
 
 @login_required
@@ -438,21 +365,6 @@ def projekt_verlauf(request: HttpRequest, kennung: str) -> HttpResponse:
         "steuerung/projekt_verlauf.html",
         _projekt_kontext(projekt, "verlauf"),
     )
-
-
-@login_required
-def projekt_einstellungen(request: HttpRequest, kennung: str) -> HttpResponse:
-    projekt = _projekt(kennung)
-    kontext = _projekt_kontext(projekt, "einstellungen")
-    kontext.update(
-        {
-            "arbeitsorte": projekt.arbeitsorte.all(),
-            "bindungen": projekt.bindungen.all(),
-            "arbeitsort_form": ArbeitsortForm(prefix="ort"),
-            "jetzt": timezone.now(),
-        }
-    )
-    return render(request, "steuerung/projekt_einstellungen.html", kontext)
 
 
 @login_required
@@ -469,7 +381,7 @@ def modul_neu(request: HttpRequest, kennung: str) -> HttpResponse:
             _fehler_anzeigen(request, fehler)
     else:
         messages.error(request, "Modul: Der Name ist erforderlich.")
-    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#module")
 
 
 def _modul(kennung: str, modul: str) -> Modul:
@@ -485,7 +397,7 @@ def modul_aendern(request: HttpRequest, kennung: str, modul: str) -> HttpRespons
         messages.success(request, f"Modul heißt jetzt „{m.name}“.")
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
-    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#module")
 
 
 @login_required
@@ -500,7 +412,7 @@ def modul_archivieren(request: HttpRequest, kennung: str, modul: str) -> HttpRes
         )
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
-    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#module")
 
 
 @login_required
@@ -519,7 +431,8 @@ def modul_neu_seite(request: HttpRequest) -> HttpResponse:
         else:
             messages.success(request, f"Modul „{d['name']}“ angelegt.")
             return redirect(
-                reverse("projekt_detail", kwargs={"kennung": d["projekt"].kennung}) + "#module"
+                reverse("projekt_einstellungen", kwargs={"kennung": d["projekt"].kennung})
+                + "#module"
             )
     return render(request, "steuerung/modul_neu.html", {"form": form})
 
@@ -959,7 +872,10 @@ def pruefung_detail(request: HttpRequest, ergebnis_id: int) -> HttpResponse:
 
 @login_required
 def entscheidung_neu(request: HttpRequest) -> HttpResponse:
-    form = EntscheidungForm(request.POST or None)
+    projekt = Projekt.objects.filter(kennung=request.GET.get("projekt", "")).first()
+    form = EntscheidungForm(
+        request.POST or None, initial={"projekte": [projekt.pk]} if projekt else None
+    )
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
         akteur = _akteur(request)
@@ -1109,6 +1025,8 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
             "programme": KI_PROGRAMME,
             "neuer": neuer,
             "eigenes_zertifikat": not settings.KIPM_OEFFENTLICHE_URL,
+            "ordneranfragen": OrdnerAnfrage.objects.select_related("bindung"),
+            "projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
             **_zugaenge(ChatBindung.objects.all()),
         },
     )
@@ -1185,13 +1103,13 @@ def ordner_zuordnen(request: HttpRequest, anfrage_id: int) -> HttpResponse:
     projekt = Projekt.objects.filter(pk=request.POST.get("projekt") or 0, aktiv=True).first()
     if projekt is None:
         messages.error(request, "Bitte ein Projekt wählen.")
-        return redirect("posteingang")
+        return redirect("verbindungen")
     try:
         ort = dienst.ordner_zuordnen(_akteur(request), anfrage, projekt)
         messages.success(request, f"Ordner „{ort.pfad}“ gehört jetzt zu {projekt.name}.")
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
-    return redirect("posteingang")
+    return redirect("verbindungen")
 
 
 @login_required
@@ -1202,7 +1120,7 @@ def ordner_verwerfen(request: HttpRequest, anfrage_id: int) -> HttpResponse:
         dienst.ordner_verwerfen(_akteur(request), anfrage)
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
-    return redirect("posteingang")
+    return redirect("verbindungen")
 
 
 @login_required

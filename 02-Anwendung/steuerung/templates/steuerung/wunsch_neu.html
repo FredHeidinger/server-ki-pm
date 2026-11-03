@@ -1,12 +1,12 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}{{ titel }}{% endblock %}
-{% block brotkrumen %}<a href="{% url 'auftraege' %}">Alle Aufträge</a> › {{ titel }}{% endblock %}
+{% block brotkrumen %}{% if projekt %}<a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}">{{ projekt.name }} · Arbeitsaufträge</a>{% else %}<a href="{% url 'projekte' %}">Projekte</a>{% endif %} › {{ titel }}{% endblock %}
 {% block inhalt %}
 <h1>{{ titel }}</h1>
 <p class="gedaempft">Kurz beschreiben, worum es geht. Danach planst du Ziel, Umfang und Abnahme; erst ein geplanter und freigegebener Auftrag wird bearbeitet. Das kann auch deine KI übernehmen.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}
   {% include "steuerung/formular_felder.html" %}
-  <p><button type="submit" class="knopf">Anlegen</button> <a class="knopf zweit" href="{% url 'auftraege' %}">Abbrechen</a></p>
+  <p><button type="submit" class="knopf">Anlegen</button> <a class="knopf zweit" href="{% if projekt %}{% url 'projekt_auftraege' kennung=projekt.kennung %}{% else %}{% url 'projekte' %}{% endif %}">Abbrechen</a></p>
 </form>
 {% endblock %}

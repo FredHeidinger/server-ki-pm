@@ -1,0 +1,18 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}Damaliger Stand{% endblock %}
+{% block projektinhalt %}
+<p class="oberzeile"><a href="{% url 'projekt_verlauf' kennung=projekt.kennung %}">Verlauf</a> › Ereignis {{ e.pk }}</p>
+<h2>{{ e.objekt_typ }} {{ e.objekt_kennung }}: {{ e.ereignis }}</h2>
+<p class="gedaempft">Erfasst {{ e.zeitpunkt|date:"d.m.Y H:i" }} von {{ e.akteur_name }}{% if e.beobachtet_am %} · geschehen {{ e.beobachtet_am|date:"d.m.Y H:i" }}{% endif %}{% if e.anlass %} · {{ e.anlass }}{% endif %}</p>
+{% if e.version %}
+<p>Nur Ansicht: so stand das Objekt direkt nach diesem Ereignis (Stand {{ e.version.nummer }}). Nichts wird zurückgerollt.</p>
+<div class="tabellenrahmen"><table>
+  <thead><tr><th scope="col">Feld</th><th scope="col">Vorher{% if vorher %} (Stand {{ vorher.nummer }}){% endif %}</th><th scope="col">Danach (Stand {{ e.version.nummer }})</th></tr></thead>
+  <tbody>{% load steuerung_extras %}{% for feld in felder %}<tr><th scope="row">{{ feld }}</th><td>{% if vorher %}{{ vorher.daten|wert:feld }}{% else %}<span class="gedaempft">ab Erfassung dokumentiert</span>{% endif %}</td><td>{{ e.version.daten|wert:feld }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% elif e.objekt_typ == "Auftrag" %}
+<p>Aufträge haben eigene Revisionen; der damalige Stand steht in Revision {{ e.revision|default:"–" }} des Auftrags.</p>
+{% else %}
+<p class="gedaempft">Zu diesem Ereignis wurde kein Objektstand gespeichert (ab Erfassung dokumentiert).</p>
+{% endif %}
+{% endblock %}

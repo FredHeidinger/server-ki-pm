@@ -1,0 +1,32 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}Unterlage{% endblock %}
+{% block projektinhalt %}
+<section class="box">
+  <h2>{% if unterlage %}Neue Dateiversion für {{ unterlage.kennung }} {{ unterlage.titel }}{% else %}Neue Unterlage{% endif %}</h2>
+  {% if not unterlage %}
+  <nav class="umschalter-zeile" aria-label="Art der Unterlage">
+    <a class="umschalter {% if art == 'text' %}aktiv{% endif %}" href="?art=text">Text schreiben</a>
+    <a class="umschalter {% if art == 'datei' %}aktiv{% endif %}" href="?art=datei">Datei hochladen</a>
+    <a class="umschalter {% if art == 'link' %}aktiv{% endif %}" href="?art=link">Link hinterlegen</a>
+  </nav>
+  {% endif %}
+  {% if art == "datei" %}
+    {% if fehler %}<div class="fehler" role="alert">{{ fehler }}</div>{% endif %}
+    {% if not uploads_aktiv %}<p class="box warn">Uploads sind auf diesem Server noch nicht freigeschaltet. Zuerst müssen Speicher, Prüfdienst und Sicherung im Betrieb nachgewiesen sein.</p>{% endif %}
+    <p class="gedaempft">Erlaubt: PDF, PNG, JPEG, TXT, Markdown, DOCX und XLSX ohne Makros; höchstens {{ grenzen.datei_mib }} MiB je Datei, eine Datei je Vorgang, {{ grenzen.projekt_mib }} MiB je Projekt. Neue Dateien bleiben in Quarantäne, bis die Schadsoftwareprüfung unauffällig ist.</p>
+    <form method="post" enctype="multipart/form-data" class="formular" action="{% if unterlage %}{% url 'hochladen_version' kennung=projekt.kennung nummer=unterlage.nummer %}{% else %}{% url 'hochladen' kennung=projekt.kennung %}{% endif %}">
+      {% csrf_token %}
+      {% if unterlage %}<input type="hidden" name="erwartete_nr" value="{{ unterlage.aktuelle_nr }}">{% endif %}
+      {% include "steuerung/formular_felder.html" with form=form %}
+      <button type="submit" class="knopf" {% if not uploads_aktiv %}disabled aria-disabled="true"{% endif %}>Hochladen</button>
+    </form>
+  {% else %}
+    {% if art == "link" %}<p class="gedaempft">Der Server lädt die Adresse nicht herunter. Ohne fixierten Stand gilt sie als veränderliche Quelle.</p>{% else %}<p class="gedaempft">Neue Texte sind Entwürfe. Als Grundlage legst du eine Version ausdrücklich fest.</p>{% endif %}
+    <form method="post" class="formular">
+      {% csrf_token %}<input type="hidden" name="art" value="{{ art }}">
+      {% include "steuerung/formular_felder.html" with form=form %}
+      <button type="submit" class="knopf">Speichern</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

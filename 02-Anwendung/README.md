@@ -5,10 +5,13 @@ Django 5.2 (LTS) mit einer SQLite-Datei. Oberfläche und HTTP-Schnittstelle für
 | Ordner / Datei | Inhalt |
 |---|---|
 | `kipm/settings.py` | Einstellungen: Daten in `daten/` (nicht im Repository), Geheimnis aus `KIPM_SECRET_KEY` oder `daten/.secret_key`, SQLite im WAL-Modus mit `BEGIN IMMEDIATE` |
-| `steuerung/models.py` | Projekt, Modul, Arbeitsort, ChatBindung, Auftrag, Revision, Abhängigkeit, Meldung, Ergebnis, Prüfung, Kriteriumsbewertung, Entscheidung, Übernahmebestätigung, AnfrageKennung, Ereignis |
+| `steuerung/models.py` | Projekt (mit Profil und Inhaltsrevision), Modul, Arbeitsort, ChatBindung, Auftrag, Revision, Abhängigkeit, Meldung, Ergebnis, Prüfung, Kriteriumsbewertung, Entscheidung, Übernahmebestätigung, AnfrageKennung, Ereignis; Projektakte: Objektversion, Funktion, Meilenstein, Nachweis, Umgebung, Release mit Komponenten, Installation, Unterlage, Unterlagenversion, Unterlagenzuordnung, RepoVerbindung, Abrufstand, ExternesObjekt, ExterneAktion, Besuchsmarke, Kontextbezug |
 | `steuerung/dienst.py` | Alle Regeln: Befugnis, Reifegrad, Freigabeprüfung mit Überschneidungssperre, exklusive Übernahme, Revisionen, Prüfung, Entscheidungen; jede Änderung schreibt ein Ereignis im selben Commit |
+| `steuerung/akte.py` | Dienst der Projektakte: Profil, Funktionen mit getrennten Zuständen (`funktionsstand`), Nachweise, Funktionsabnahme, Umgebungen, Releases, Installationen, Unterlagen mit Versionen und Rollen, Besuchsmarke, Suche, KI-Kontext mit Teilen und Manifest; jede Änderung mit Objektversion und Ereignis |
+| `steuerung/ablage.py`, `steuerung/extrakt.py` | Private Dateiablage: Größen-, Namens-, Typ- und Strukturprüfung, Quarantäne, Scanner-Adapter, Textauszug in eigenem Prozess |
+| `steuerung/github.py`, `steuerung/abgleich.py` | GitHub-App-Transport (austauschbar für Tests) und GitHub im Dienst: Verbindung an der stabilen ID, Lesen mit Abrufstand, bestätigte Schreibaktionen mit Reservierung, Schritten und Abgleich |
 | `steuerung/api.py` | HTTP-Schnittstelle für Chat-Bindungen (`Authorization: Bearer kipm_…`), Wiederholungsschutz über `anfrage_kennung` (Kennung wird vor der Ausführung reserviert, gleichzeitige Wiederholungen erhalten 409) |
-| `steuerung/views.py`, `templates/`, `static/` | Oberfläche: Posteingang, Meine Aufträge, Alle Aufträge, Entscheidungen, Verlauf, Projekte als Arbeitsbereiche mit Reitern, Verbindungen als Katalog mit Anleitung; Auftrag als Seitenpanel (Fragment `auftrag_panel`) oder Seite; serverseitig gerendert, ohne JavaScript bedienbar |
+| `steuerung/views.py`, `steuerung/views_akte.py`, `templates/`, `static/` | Oberfläche: Projektauswahl, je Projekt sechs Bereiche (Überblick, Funktionen & Planung, Arbeitsaufträge, Versionen & Betrieb, Wissen & Entscheidungen, Verlauf), Projekteinstellungen, „Konto & KI verbinden“; Auftrag als Seitenpanel oder Seite; serverseitig gerendert, ohne JavaScript bedienbar |
 | `steuerung/mcp.py` | MCP-Endpunkt `/mcp/<schlüssel>/` für jedes KI-Programm (Assistent: anlegen, planen, Issues, antworten, lesen); reicht Werkzeugaufrufe an `api.py` weiter |
 | `tests/` | Tests: Dienstregeln, Schnittstelle, MCP-Endpunkt, Oberfläche, gleichzeitige Übernahme und gleichzeitige Wiederholung, Regressionen aus der unabhängigen Prüfung, Spiegelerzeugung |
 | `requirements.txt` | Aus `uv.lock` exportiert für die Serverinstallation (`uv export --no-dev --extra server`) |
@@ -27,4 +30,8 @@ Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [
 | `POST /api/auftraege/<id>/ergebnis/` | `{revision, zusammenfassung, dateien[], pruefungen[], luecken, anfrage_kennung}` |
 | `GET /api/entscheidungen/`, `POST /api/entscheidungen/vorschlagen/`, `POST /api/entscheidungen/<id>/bestaetigen/` | Entscheidungen des eigenen Projekts; ein Vorschlag betrifft immer nur das eigene Projekt |
 
-Es gibt keine Schnittstelle für Freigabe, Prüferwechsel, Abnahme, Rollen oder Umfangsänderung. Fremde Projekte antworten mit 404, Konflikte und veraltete Revisionen mit 409.
+| `GET /api/projekt/akte/`, `GET /api/projekt/kontext/?auftrag=&kontext_id=&teil=`, `GET /api/projekt/verlauf/?seit=` | Projektakte, KI-Kontext (Teile mit gleicher Kontext-ID), Verlauf |
+| `GET /api/unterlagen/<nr>/` | Nur für KI freigegebene, geprüfte Unterlagen |
+| `POST /api/funktionen/vorschlagen/`, `…/nachweise/melden/`, `…/installationen/melden/`, `…/unterlagen/entwurf/`, `…/github/vorschlag/` | Vorschläge und Meldungen im Rahmen der Befugnisse; Funktionen nur als Idee, Unterlagen nur als Entwurf, GitHub nur als unbestätigter Entwurf |
+
+Es gibt keine Schnittstelle für Freigabe, Prüferwechsel, Abnahme, Funktionsabnahme, Grundlagen, KI-Freigabe, Datei-Upload, Rollen, Umfangsänderung oder Bestätigung von GitHub-Aktionen. Fremde Projekte antworten mit 404, Konflikte und veraltete Revisionen mit 409.

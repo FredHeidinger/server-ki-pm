@@ -1,0 +1,86 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{{ f.kennung }} {{ f.titel }}{% endblock %}
+{% block projektinhalt %}
+<p class="oberzeile"><a href="{% url 'akte_funktionen' kennung=projekt.kennung %}">Funktionen</a> › {{ f.kennung }} · Revision {{ f.revision }}</p>
+<h2>{{ f.titel }}</h2>
+{% if f.nutzen %}<p>{{ f.nutzen|linebreaksbr }}</p>{% endif %}
+
+<section class="box{% if stand.widerspruch %} warn{% endif %}" aria-labelledby="h-stand">
+  <h2 id="h-stand">Stand</h2>
+  <p class="satz">{{ stand.satz }}</p>
+  <dl class="felder">
+    <dt>Planung</dt><dd>{{ stand.planung }}</dd>
+    <dt>Umsetzung</dt><dd>{{ stand.umsetzung }}{% if stand.umsetzung_nachweis %} · Version <code>{{ stand.version }}</code> · Quelle {{ stand.umsetzung_nachweis.quelle }} · {{ stand.umsetzung_nachweis.beobachtet_am|date:"d.m.Y H:i" }}{% endif %}</dd>
+    <dt>Prüfung</dt><dd>{% for e in stand.pruefungen %}<div>{{ e.ort }}: <span class="status {% if e.n.ergebnis == 'bestanden' %}ok{% elif e.n.ergebnis == 'fehlgeschlagen' %}aus{% else %}warn{% endif %}">{{ e.n.get_ergebnis_display }}</span> · {{ e.n.umfang }} · Quelle {{ e.n.quelle }} · {{ e.n.beobachtet_am|date:"d.m.Y" }}{% if e.veraltet %} <span class="status warn">veraltet</span>{% endif %}{% if e.n.bindung %} <span class="gedaempft">(gemeldet von {{ e.n.akteur_name }})</span>{% endif %}</div>{% empty %}nicht geprüft{% if stand.version %} für Version {{ stand.version }}{% endif %}{% endfor %}
+      {% if stand.aeltere %}<div class="gedaempft">{{ stand.aeltere|length }} Prüfung(en) zu anderen Versionen gelten hier nicht.</div>{% endif %}</dd>
+    <dt>Abnahme</dt><dd>{{ stand.abnahme }}{% if stand.abnahme_nachweis %} · {{ stand.abnahme_nachweis.akteur_name }} am {{ stand.abnahme_nachweis.beobachtet_am|date:"d.m.Y" }}{% endif %}</dd>
+  </dl>
+</section>
+
+<div class="zwei">
+<section class="box" aria-labelledby="h-auftraege">
+  <h2 id="h-auftraege">Zugehörige Aufträge</h2>
+  {% if auftraege %}<ul class="liste-schlicht">{% for a in auftraege %}<li><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}">{{ a.nummer }} {{ a.titel }}</a> · {{ a.get_zustand_display }}
+    <form method="post" action="{% url 'funktion_aktion' kennung=projekt.kennung nummer=f.nummer aktion='loesen' %}" class="inline">{% csrf_token %}<input type="hidden" name="auftrag" value="{{ a.pk }}"><button type="submit" class="leise">lösen</button></form></li>{% endfor %}</ul>
+  {% else %}<p class="gedaempft">Noch kein Auftrag arbeitet an dieser Funktion.</p>{% endif %}
+  {% if waehlbar %}
+  <form method="post" action="{% url 'funktion_aktion' kennung=projekt.kennung nummer=f.nummer aktion='verknuepfen' %}" class="zeile">{% csrf_token %}
+    <label>Auftrag verknüpfen <select name="auftrag" required><option value="">wählen …</option>{% for a in waehlbar %}<option value="{{ a.pk }}">{{ a.nummer }} {{ a.titel|truncatechars:60 }}</option>{% endfor %}</select></label>
+    <button type="submit" class="knopf zweit klein">Verknüpfen</button>
+  </form>
+  {% endif %}
+  <p><a href="{% url 'wunsch_neu' %}?art=auftrag&amp;projekt={{ projekt.kennung }}">Neuen Auftrag anlegen</a> und danach hier verknüpfen.</p>
+  {% if ergebnisse %}
+  <h3>Eingereichte Ergebnisse übernehmen</h3>
+  <p class="gedaempft">Ein Ergebnis wird erst durch deine Übernahme zum Umsetzungsnachweis (Version aus „datei@commit“).</p>
+  <ul class="liste-schlicht">{% for e in ergebnisse %}<li>{{ e.auftrag.nummer }} Revision {{ e.revision_nr }}: {{ e.zusammenfassung|truncatechars:90 }}
+    <form method="post" action="{% url 'funktion_aktion' kennung=projekt.kennung nummer=f.nummer aktion='ergebnis' %}" class="inline">{% csrf_token %}<input type="hidden" name="ergebnis" value="{{ e.pk }}"><button type="submit" class="knopf zweit klein">Als Umsetzungsnachweis übernehmen</button></form></li>{% endfor %}</ul>
+  {% endif %}
+</section>
+<section class="box" aria-labelledby="h-kriterien">
+  <h2 id="h-kriterien">Kriterien</h2>
+  {% if f.kriterienliste %}<ol class="kriterien">{% for k in f.kriterienliste %}<li>{{ k }}</li>{% endfor %}</ol>{% else %}<p class="gedaempft">Noch keine Kriterien.</p>{% endif %}
+  <h3>Unterlagen</h3>
+  {% if unterlagen %}<ul class="liste-schlicht">{% for z in unterlagen %}<li><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.version.unterlage.nummer %}">{{ z.version.unterlage.kennung }} {{ z.version.unterlage.titel }}</a> Version {{ z.version.nummer }} ({{ z.version.get_rolle_display }}){% if z.zweck %} · {{ z.zweck }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="gedaempft">Keine Unterlage zugeordnet.</p>{% endif %}
+</section>
+</div>
+
+<section class="box" aria-labelledby="h-nachweise">
+  <h2 id="h-nachweise">Nachweise</h2>
+  {% if nachweise %}
+  <div class="tabellenrahmen"><table class="klein">
+    <thead><tr><th scope="col">Art</th><th scope="col">Ergebnis</th><th scope="col">Version</th><th scope="col">Umgebung</th><th scope="col">Umfang und Quelle</th><th scope="col">Beobachtet / erfasst</th></tr></thead>
+    <tbody>{% for n in nachweise %}<tr><td>{{ n.get_art_display }}</td><td>{{ n.get_ergebnis_display }}</td><td><code>{{ n.version }}</code></td><td>{{ n.umgebung.name|default:"–" }}</td><td>{{ n.umfang|default:"" }}{% if n.kriterien %}<br>{{ n.kriterien|linebreaksbr }}{% endif %}<br><span class="gedaempft">{{ n.quelle }} · {{ n.akteur_name }}{% if n.gemessen %} · automatische Messung{% endif %}</span></td><td>{{ n.beobachtet_am|date:"d.m.Y H:i" }}<br><span class="gedaempft">{{ n.erfasst_am|date:"d.m.Y H:i" }}</span></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="gedaempft">Noch kein Nachweis. Ohne Nachweis gilt die Funktion nicht als umgesetzt oder geprüft.</p>{% endif %}
+  <details>
+    <summary class="knopf zweit klein">+ Nachweis ergänzen</summary>
+    <form method="post" action="{% url 'nachweis_neu' kennung=projekt.kennung %}" class="formular klein">
+      {% csrf_token %}<input type="hidden" name="zurueck" value="{{ request.path }}">
+      {% include "steuerung/formular_felder.html" with form=nachweis_form %}
+      <button type="submit" class="knopf zweit">Nachweis speichern</button>
+    </form>
+  </details>
+  <details>
+    <summary class="knopf zweit klein">Funktion abnehmen</summary>
+    <form method="post" action="{% url 'funktion_aktion' kennung=projekt.kennung nummer=f.nummer aktion='abnahme' %}" class="formular klein">
+      {% csrf_token %}
+      <p class="gedaempft">Die Abnahme gilt genau für die genannte Version. Wer die Umsetzung gemeldet hat, nimmt nicht selbst ab.</p>
+      {% include "steuerung/formular_felder.html" with form=abnahme_form %}
+      <button type="submit" class="knopf">Abnahme speichern</button>
+    </form>
+  </details>
+</section>
+
+<section class="box" aria-labelledby="h-bearbeiten">
+  <details>
+    <summary class="knopf zweit klein" id="h-bearbeiten">Funktion bearbeiten</summary>
+    <form method="post" action="{% url 'funktion_aktion' kennung=projekt.kennung nummer=f.nummer aktion='bearbeiten' %}" class="formular">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=bearbeiten %}
+      <button type="submit" class="knopf">Neue Revision speichern</button>
+    </form>
+  </details>
+  {% if versionen %}<details><summary>Frühere Stände ({{ versionen|length }})</summary><ul class="liste-schlicht">{% for v in versionen %}<li>Stand {{ v.nummer }} · {{ v.zeitpunkt|date:"d.m.Y H:i" }} · {{ v.akteur_name }}: {{ v.daten.titel }} · {{ v.daten.planung }}{% if v.daten.auftraege %} · {{ v.daten.auftraege|join:", " }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+</section>
+{% endblock %}
