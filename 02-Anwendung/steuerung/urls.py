@@ -49,7 +49,8 @@ urlpatterns = [
     # Projekte als Arbeitsbereich
     path("projekte/", views.projekte, name="projekte"),
     path("projekt/neu/", views.projekt_neu, name="projekt_neu"),
-    path("projekt/<slug:kennung>/", views.projekt_auftraege, name="projekt_detail"),
+    path("projekt/<slug:kennung>/", views.projekt_uebersicht, name="projekt_detail"),
+    path("projekt/<slug:kennung>/auftraege/", views.projekt_auftraege, name="projekt_auftraege"),
     path("projekt/<slug:kennung>/pruefung/", views.projekt_pruefung, name="projekt_pruefung"),
     path(
         "projekt/<slug:kennung>/entscheidungen/",
@@ -63,6 +64,17 @@ urlpatterns = [
         name="projekt_einstellungen",
     ),
     path("projekt/<slug:kennung>/modul/", views.modul_neu, name="modul_neu"),
+    path(
+        "projekt/<slug:kennung>/modul/<slug:modul>/aendern/",
+        views.modul_aendern,
+        name="modul_aendern",
+    ),
+    path(
+        "projekt/<slug:kennung>/modul/<slug:modul>/archivieren/",
+        views.modul_archivieren,
+        name="modul_archivieren",
+    ),
+    path("modul/neu/", views.modul_neu_seite, name="modul_neu_seite"),
     path("projekt/<slug:kennung>/arbeitsort/", views.arbeitsort_neu, name="arbeitsort_neu"),
     # Verbindungen
     path("verbindungen/", views.verbindungen, name="verbindungen"),

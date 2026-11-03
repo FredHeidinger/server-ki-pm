@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
@@ -26,6 +27,7 @@ from .forms import (
     EntscheidenForm,
     EntscheidungForm,
     ModulForm,
+    ModulNeuForm,
     ProjektForm,
     WunschForm,
     listen_zusammenfuehren,
@@ -38,6 +40,7 @@ from .models import (
     Ergebnis,
     Kriteriumsbewertung,
     Meldung,
+    Modul,
     OrdnerAnfrage,
     Projekt,
 )
@@ -157,7 +160,7 @@ def projekt_neu(request: HttpRequest) -> HttpResponse:
             form.add_error(None, str(fehler))
         else:
             messages.success(request, f"Projekt „{projekt.name}“ ist registriert.")
-            return redirect("projekt_einstellungen", kennung=projekt.kennung)
+            return redirect("projekt_detail", kennung=projekt.kennung)
     return render(request, "steuerung/projekt_neu.html", {"form": form})
 
 
@@ -203,16 +206,12 @@ def _spalten(auftraege) -> list[dict]:
 
 
 def _reifegrad(auftrag: Auftrag) -> str:
-    rev = auftrag.aktuelle_revision
-    if rev.ist_wunsch:
-        return "Wunsch – unvollständig"
-    if auftrag.zustand == Auftrag.ENTWURF:
-        return (
-            "Arbeitspaket – freigabefähig"
-            if dienst.freigabefaehig(auftrag)
-            else "Arbeitspaket – nicht freigabefähig"
-        )
-    return "Arbeitspaket"
+    """Planungsstand eines Entwurfs; nach der Freigabe zählt nur noch der Zustand."""
+    if auftrag.zustand != Auftrag.ENTWURF:
+        return ""
+    if auftrag.aktuelle_revision.ist_wunsch:
+        return "noch nicht geplant"
+    return "geplant – freigabebereit" if dienst.freigabefaehig(auftrag) else "in Planung"
 
 
 def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> HttpResponse:
@@ -220,8 +219,22 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     ansicht = "liste" if request.GET.get("ansicht") == "liste" else "board"
     kontext["ansicht"] = ansicht
     kontext["zeige_projekt"] = kontext.get("projekt") is None
+    art = request.GET.get("art", "")
+    if art in dict(Auftrag.TYPEN):
+        liste = liste.filter(typ=art)
+    kontext["art"] = art
+    modul = request.GET.get("modul", "")
+    if modul == "ohne":
+        liste = liste.filter(modul__isnull=True)
+    elif modul:
+        liste = liste.filter(modul__kennung=modul)
+    kontext["modul"] = modul
+    if kontext.get("projekt") is not None:
+        kontext["module_filter"] = kontext["projekt"].module.filter(aktiv=True)
     if ansicht == "board":
         alle = list(liste)
+        for a in alle:
+            a.stand = _reifegrad(a)
         kontext["spalten"] = _spalten(alle)
         kontext["abgebrochen"] = sum(1 for a in alle if a.zustand == Auftrag.ABGEBROCHEN)
         return render(request, vorlage, kontext)
@@ -239,9 +252,7 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     zeilen = []
     for a in liste:
         stufe = _reifegrad(a)
-        if reifegrad == "wunsch" and not stufe.startswith("Wunsch"):
-            continue
-        if reifegrad == "paket" and stufe.startswith("Wunsch"):
+        if reifegrad and not stufe.startswith(reifegrad):
             continue
         zeilen.append({"a": a, "reifegrad": stufe})
     kontext.update(
@@ -265,6 +276,45 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
 def auftraege(request: HttpRequest) -> HttpResponse:
     liste = Auftrag.objects.select_related("projekt", "modul").prefetch_related("revisionen")
     return _auftragsliste(request, liste, "steuerung/auftraege.html", {"projekt": None})
+
+
+@login_required
+def projekt_uebersicht(request: HttpRequest, kennung: str) -> HttpResponse:
+    """Erster Reiter: Kennzahlen, Module als Karten, Arbeitsorte, verbundene KI, Aktivität."""
+    projekt = _projekt(kennung)
+    offen = projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+    karten, archiv = [], []
+    for m in projekt.module.all():
+        eigene = offen.filter(modul=m)
+        eintrag = {
+            "m": m,
+            "auftraege": eigene.filter(typ=Auftrag.TYP_AUFTRAG).count(),
+            "issues": eigene.filter(typ=Auftrag.TYP_ISSUE).count(),
+        }
+        (karten if m.aktiv else archiv).append(eintrag)
+    kontext = _projekt_kontext(projekt, "uebersicht")
+    kontext.update(
+        {
+            "kennzahlen": {
+                "auftraege": offen.filter(typ=Auftrag.TYP_AUFTRAG).count(),
+                "issues": offen.filter(typ=Auftrag.TYP_ISSUE).count(),
+                "pruefung": offen.filter(zustand=Auftrag.ZUR_PRUEFUNG).count(),
+                "blockiert": offen.filter(
+                    zustand__in=(Auftrag.BLOCKIERT, Auftrag.KLAERUNG_ERFORDERLICH)
+                ).count(),
+            },
+            "modulkarten": karten,
+            "modularchiv": archiv,
+            "ohne_modul": offen.filter(modul__isnull=True).count(),
+            "arbeitsorte": projekt.arbeitsorte.filter(aktiv=True),
+            "ki": ChatBindung.objects.filter(letztes_projekt=projekt).order_by("-zuletzt_aktiv")[
+                :5
+            ],
+            "ereignisse": Ereignis.objects.filter(projekt=projekt).order_by("-zeitpunkt")[:8],
+            "modul_form": ModulForm(prefix="modul"),
+        }
+    )
+    return render(request, "steuerung/projekt_uebersicht.html", kontext)
 
 
 @login_required
@@ -396,10 +446,8 @@ def projekt_einstellungen(request: HttpRequest, kennung: str) -> HttpResponse:
     kontext = _projekt_kontext(projekt, "einstellungen")
     kontext.update(
         {
-            "module": projekt.module.all(),
             "arbeitsorte": projekt.arbeitsorte.all(),
             "bindungen": projekt.bindungen.all(),
-            "modul_form": ModulForm(prefix="modul"),
             "arbeitsort_form": ArbeitsortForm(prefix="ort"),
             "jetzt": timezone.now(),
         }
@@ -416,12 +464,64 @@ def modul_neu(request: HttpRequest, kennung: str) -> HttpResponse:
         try:
             name = form.cleaned_data["name"]
             dienst.modul_anlegen(_akteur(request), projekt, kennung=slugify(name), name=name)
-            messages.success(request, "Modul angelegt.")
+            messages.success(request, f"Modul „{name}“ angelegt.")
         except dienst.DienstFehler as fehler:
             _fehler_anzeigen(request, fehler)
     else:
         messages.error(request, "Modul: Der Name ist erforderlich.")
-    return redirect("projekt_einstellungen", kennung=kennung)
+    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+
+
+def _modul(kennung: str, modul: str) -> Modul:
+    return get_object_or_404(Modul, projekt__kennung=kennung, kennung=modul)
+
+
+@login_required
+@require_POST
+def modul_aendern(request: HttpRequest, kennung: str, modul: str) -> HttpResponse:
+    m = _modul(kennung, modul)
+    try:
+        dienst.modul_aendern(_akteur(request), m, name=request.POST.get("name", ""))
+        messages.success(request, f"Modul heißt jetzt „{m.name}“.")
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+
+
+@login_required
+@require_POST
+def modul_archivieren(request: HttpRequest, kennung: str, modul: str) -> HttpResponse:
+    m = _modul(kennung, modul)
+    aktiv = request.POST.get("aktiv") == "1"
+    try:
+        dienst.modul_archivieren(_akteur(request), m, aktiv=aktiv)
+        messages.success(
+            request, f"Modul „{m.name}“ ist {'wieder aktiv' if aktiv else 'archiviert'}."
+        )
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#module")
+
+
+@login_required
+def modul_neu_seite(request: HttpRequest) -> HttpResponse:
+    """„+ Neu → Modul“ ohne aktuelles Projekt: Projekt wählen und Modul anlegen."""
+    projekt = Projekt.objects.filter(kennung=request.GET.get("projekt", "")).first()
+    form = ModulNeuForm(request.POST or None, projekt=projekt)
+    if request.method == "POST" and form.is_valid():
+        d = form.cleaned_data
+        try:
+            dienst.modul_anlegen(
+                _akteur(request), d["projekt"], kennung=slugify(d["name"]), name=d["name"]
+            )
+        except dienst.DienstFehler as fehler:
+            form.add_error(None, str(fehler))
+        else:
+            messages.success(request, f"Modul „{d['name']}“ angelegt.")
+            return redirect(
+                reverse("projekt_detail", kwargs={"kennung": d["projekt"].kennung}) + "#module"
+            )
+    return render(request, "steuerung/modul_neu.html", {"form": form})
 
 
 @login_required
@@ -451,7 +551,8 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
     projekt = None
     if request.GET.get("projekt"):
         projekt = Projekt.objects.filter(kennung=request.GET["projekt"]).first()
-    form = WunschForm(request.POST or None, projekt=projekt)
+    art = request.GET.get("art", "")
+    form = WunschForm(request.POST or None, projekt=projekt, typ=art)
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
         try:
@@ -463,17 +564,21 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
                 modul=d["modul"],
                 prioritaet=d["prioritaet"],
                 erzwingen=d["erzwingen"],
+                typ=d["typ"],
             )
         except dienst.DienstFehler as fehler:
             form.add_error(None, str(fehler))
         else:
+            wort = "Issue" if auftrag.typ == Auftrag.TYP_ISSUE else "Auftrag"
             messages.success(
                 request,
-                f"Wunsch {auftrag.nummer} ist erfasst. Zum Arbeitspaket konkretisieren, "
-                "bevor jemand daran arbeitet.",
+                f"{wort} {auftrag.nummer} ist angelegt. Als Nächstes planen: Ziel, Umfang, Abnahme.",
             )
             return redirect("auftrag_detail", auftrag_id=auftrag.pk)
-    return render(request, "steuerung/wunsch_neu.html", {"form": form, "projekt": projekt})
+    titel = "Issue anlegen" if art == Auftrag.TYP_ISSUE else "Auftrag anlegen"
+    return render(
+        request, "steuerung/wunsch_neu.html", {"form": form, "projekt": projekt, "titel": titel}
+    )
 
 
 def _auftrag_oder_404(auftrag_id: int) -> Auftrag:

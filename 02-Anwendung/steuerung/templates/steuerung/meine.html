@@ -21,5 +21,5 @@
   {% endfor %}
   </tbody>
 </table>
-{% else %}<div class="leer">Du bearbeitest gerade nichts selbst und nichts wartet auf deine Prüfung.</div>{% endif %}
+{% else %}<div class="leer">Du bearbeitest gerade nichts selbst und nichts wartet auf deine Prüfung. Alles Offene steht unter <a href="{% url 'auftraege' %}">Alle Aufträge</a>.</div>{% endif %}
 {% endblock %}

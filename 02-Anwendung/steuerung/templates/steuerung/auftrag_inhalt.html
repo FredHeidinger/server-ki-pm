@@ -1,9 +1,9 @@
 {% load steuerung_extras %}
 <div class="kopf">
   <span class="id">{{ auftrag.nummer }}</span>
-  <span>Revision {{ auftrag.revision_nr }}</span>
+  {% if auftrag.typ == "issue" %}<span class="issue">Issue</span>{% else %}<span>Auftrag</span>{% endif %}
   {{ auftrag.zustand|zustand }}
-  <span>{{ reifegrad }}</span>
+  {% if reifegrad %}<span>{{ reifegrad }}</span>{% endif %}
   <span>{{ auftrag.projekt.name }}{% if auftrag.modul %} / {{ auftrag.modul.name }}{% endif %}</span>
   <span>Priorität: {{ auftrag.prioritaet }}</span>
   {% if auftrag.abgeleitet_von %}<span>abgeleitet aus <a href="{% url 'auftrag_detail' auftrag_id=auftrag.abgeleitet_von.pk %}">{{ auftrag.abgeleitet_von.nummer }}</a></span>{% endif %}
@@ -60,7 +60,7 @@
 <div class="haupt">
   <section class="box">
     <dl class="felder">
-      <dt>Wunsch</dt><dd>{{ rev.beschreibung|linebreaksbr|default:"–" }}</dd>
+      <dt>Beschreibung</dt><dd>{{ rev.beschreibung|linebreaksbr|default:"–" }}</dd>
       <dt>Ziel</dt><dd>{{ rev.ziel|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
       <dt>Nicht-Ziele</dt><dd>{{ rev.nicht_ziele|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
       <dt>Arbeitsort</dt><dd>{% if rev.arbeitsort %}{{ rev.arbeitsort.name }}{% if rev.arbeitsort.pfad %} · <code>{{ rev.arbeitsort.pfad }}</code>{% endif %}{% else %}<em>noch leer</em>{% endif %}</dd>
@@ -75,7 +75,7 @@
       <dt>Abnahmekriterien</dt><dd>{% if rev.kriterien %}<ol class="kriterien">{% for k in rev.kriterien %}<li>{{ k }}</li>{% endfor %}</ol>{% else %}<em>noch leer</em>{% endif %}</dd>
       <dt>Revision</dt><dd>{{ rev.nummer }} · {{ rev.erstellt_am|date:"d.m.Y H:i" }} · {{ rev.erstellt_von_name }} · {{ rev.anlass }}{% if revisionen|length > 1 %} <span class="gedaempft">({{ revisionen|length }} Revisionen)</span>{% endif %}</dd>
     </dl>
-    {% if bearbeitbar %}<p><a class="knopf" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Bearbeiten → Revision {{ auftrag.revision_nr|add:1 }}</a> <a class="knopf zweit" href="{% url 'auftrag_teilen' auftrag_id=auftrag.pk %}">Teilauftrag ableiten</a></p>{% endif %}
+    {% if bearbeitbar %}<p><a class="knopf" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Planen</a> <a class="knopf zweit" href="{% url 'auftrag_teilen' auftrag_id=auftrag.pk %}">Teilauftrag anlegen</a></p>{% endif %}
     {% if abgeleitete %}<p class="gedaempft">Abgeleitet: {% for t in abgeleitete %}<a href="{% url 'auftrag_detail' auftrag_id=t.pk %}">{{ t.nummer }}</a> {% endfor %}</p>{% endif %}
   </section>
 

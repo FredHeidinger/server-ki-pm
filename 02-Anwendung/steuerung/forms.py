@@ -55,19 +55,33 @@ class ModulForm(forms.Form):
     name = forms.CharField(label="Name des Moduls", max_length=120)
 
 
-class ArbeitsortForm(forms.Form):
-    name = forms.CharField(label="Name", max_length=120, help_text="z. B. Repository Nexus")
-    rechner = forms.CharField(
-        label="Rechner", max_length=120, required=False, help_text="z. B. Freds PC"
+class ModulNeuForm(forms.Form):
+    """Modul über „+ Neu“ anlegen: Projekt wählen, Namen eingeben."""
+
+    projekt = NamensAuswahl(label="Projekt", queryset=Projekt.objects.filter(aktiv=True))
+    name = forms.CharField(
+        label="Name des Moduls", max_length=120, help_text="z. B. Export oder Oberfläche"
     )
+
+    def __init__(self, *args, projekt: Projekt | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if projekt is not None:
+            self.fields["projekt"].initial = projekt
+        _stufen(self)
+
+
+class ArbeitsortForm(forms.Form):
+    name = forms.CharField(label="Name", max_length=120, help_text="z. B. Nexus auf meinem PC")
     pfad = forms.CharField(
-        label="Ordner auf dem Rechner",
+        label="Ordner auf dem PC",
         max_length=300,
         required=False,
         help_text=(
-            "z. B. W:/Projekte/Nexus. Ein PC-Zugang erkennt daran das Projekt; "
-            "der Dienst öffnet den Ordner nicht."
+            "z. B. W:\\Projekte\\Nexus. Arbeitet eine KI in diesem Ordner, weiß sie das Projekt."
         ),
+    )
+    rechner = forms.CharField(
+        label="PC", max_length=120, required=False, help_text="z. B. Arbeitsplatz"
     )
     repository = forms.URLField(
         label="Repository",
@@ -75,8 +89,7 @@ class ArbeitsortForm(forms.Form):
         required=False,
         assume_scheme="https",
         help_text=(
-            "z. B. https://github.com/FredHeidinger/nexus; "
-            "macht Datei@Commit in Ergebnissen anklickbar."
+            "z. B. https://github.com/FredHeidinger/nexus; macht Dateien in Ergebnissen anklickbar."
         ),
     )
 
@@ -86,21 +99,34 @@ class ArbeitsortForm(forms.Form):
 
 
 class WunschForm(forms.Form):
+    """Auftrag oder Issue anlegen; geplant wird danach."""
+
+    typ = forms.ChoiceField(
+        label="Art",
+        choices=Auftrag.TYPEN,
+        initial=Auftrag.TYP_AUFTRAG,
+        widget=forms.RadioSelect,
+        help_text=(
+            "Issue: ein Fehler oder Problem. Auftrag: etwas soll gebaut oder geändert werden."
+        ),
+    )
     projekt = NamensAuswahl(label="Projekt", queryset=Projekt.objects.filter(aktiv=True))
     modul = NamensAuswahl(label="Modul", queryset=Modul.objects.none(), required=False)
     titel = forms.CharField(label="Titel", max_length=200)
     beschreibung = forms.CharField(
-        label="Beschreibung in deinen Worten",
+        label="Beschreibung",
         widget=forms.Textarea(attrs={"rows": 5}),
-        help_text="Was soll anders sein? Ziel, Umfang und Abnahme folgen beim Konkretisieren.",
+        help_text="In deinen Worten. Ziel, Umfang und Abnahme folgen beim Planen.",
     )
     prioritaet = forms.ChoiceField(label="Priorität", choices=Auftrag.PRIO, initial="mittel")
     erzwingen = forms.BooleanField(
         label="Trotz gleichem Titel anlegen (kein Doppel)", required=False
     )
 
-    def __init__(self, *args, projekt: Projekt | None = None, **kwargs):
+    def __init__(self, *args, projekt: Projekt | None = None, typ: str = "", **kwargs):
         super().__init__(*args, **kwargs)
+        if typ in dict(Auftrag.TYPEN):
+            self.fields["typ"].initial = typ
         aktive = Projekt.objects.filter(aktiv=True)
         if projekt is None and aktive.count() == 1:
             projekt = aktive.first()
@@ -112,7 +138,7 @@ class WunschForm(forms.Form):
         else:
             self.fields["modul"].help_text = (
                 "Zuerst das Projekt wählen und speichern; das Modul lässt sich beim "
-                "Konkretisieren nachtragen."
+                "Planen nachtragen."
             )
         _stufen(self)
 

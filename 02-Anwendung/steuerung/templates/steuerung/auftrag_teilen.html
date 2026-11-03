@@ -3,7 +3,7 @@
 {% block inhalt %}
 <p><a href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">← {{ auftrag.nummer }}</a></p>
 <h1>Aus {{ auftrag.nummer }} einen Teilauftrag ableiten</h1>
-<p class="gedaempft">Der neue Auftrag beginnt als Wunsch im selben Projekt und trägt den Verweis „abgeleitet aus {{ auftrag.nummer }}“. {{ auftrag.nummer }} bleibt unverändert.</p>
+<p class="gedaempft">Der neue Auftrag beginnt als Entwurf im selben Projekt und trägt den Verweis „abgeleitet aus {{ auftrag.nummer }}“. {{ auftrag.nummer }} bleibt unverändert.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}
   {% include "steuerung/formular_felder.html" %}

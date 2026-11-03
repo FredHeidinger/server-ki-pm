@@ -264,6 +264,40 @@ def modul_anlegen(akteur: Akteur, projekt: Projekt, *, kennung: str, name: str) 
     return modul
 
 
+def modul_aendern(akteur: Akteur, modul: Modul, *, name: str) -> None:
+    """Modul umbenennen; die Kennung bleibt, damit Verweise und KI-Aufrufe gültig bleiben."""
+    _planung_erforderlich(akteur, "Module ändern")
+    if not name.strip():
+        raise DienstFehler("Der Name darf nicht leer sein.")
+    with transaction.atomic():
+        alt = modul.name
+        modul.name = name.strip()
+        modul.save(update_fields=["name"])
+        _ereignis(
+            akteur,
+            projekt=modul.projekt,
+            objekt_typ="Modul",
+            objekt_kennung=str(modul),
+            ereignis="Modul umbenannt",
+            anlass=f"{alt} → {modul.name}",
+        )
+
+
+def modul_archivieren(akteur: Akteur, modul: Modul, *, aktiv: bool) -> None:
+    """Modul archivieren oder zurückholen; Aufträge behalten ihr Modul."""
+    _planung_erforderlich(akteur, "Module archivieren")
+    with transaction.atomic():
+        modul.aktiv = aktiv
+        modul.save(update_fields=["aktiv"])
+        _ereignis(
+            akteur,
+            projekt=modul.projekt,
+            objekt_typ="Modul",
+            objekt_kennung=str(modul),
+            ereignis="Modul wieder aktiv" if aktiv else "Modul archiviert",
+        )
+
+
 def arbeitsort_anlegen(
     akteur: Akteur,
     projekt: Projekt,
@@ -679,9 +713,10 @@ def wunsch_erfassen(
             nummer=1,
             beschreibung=beschreibung.strip(),
             erstellt_von_name=akteur.name,
-            anlass="Wunsch erfasst",
+            anlass="Angelegt",
         )
-        anlass = "Issue" if typ == Auftrag.TYP_ISSUE else "Wunsch"
+        wort = "Issue" if typ == Auftrag.TYP_ISSUE else "Auftrag"
+        anlass = ""
         if abgeleitet_von is not None:
             anlass = f"abgeleitet aus {abgeleitet_von.nummer}"
         if entscheidung is not None:
@@ -691,7 +726,7 @@ def wunsch_erfassen(
             projekt=projekt,
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
-            ereignis="Wunsch erfasst",
+            ereignis=f"{wort} angelegt",
             anlass=anlass,
             revision="1",
         )
@@ -1683,7 +1718,7 @@ def posteingang(benutzer) -> list[dict]:
                 "art": "wunsch",
                 "auftrag": a,
                 "zeit": a.angelegt_am,
-                "titel": f"Wunsch von {rev.erstellt_von_name}: {a.nummer} {a.titel}",
+                "titel": f"{a.nummer} {a.titel}",
                 "text": rev.beschreibung,
                 "von": rev.erstellt_von_name,
             }

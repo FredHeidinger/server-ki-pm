@@ -50,6 +50,7 @@ def test_wunsch_formular_und_auftragsseite(owner_client, projekt):
     antwort = owner_client.post(
         reverse("wunsch_neu"),
         {
+            "typ": "auftrag",
             "projekt": projekt.pk,
             "titel": "Schneller starten",
             "beschreibung": "Dauert zu lange.",
@@ -58,7 +59,7 @@ def test_wunsch_formular_und_auftragsseite(owner_client, projekt):
     )
     assert antwort.status_code == 302
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "Wunsch – unvollständig" in seite and "Freigeben – nicht möglich" in seite
+    assert "noch nicht geplant" in seite and "Freigeben – nicht möglich" in seite
     assert "Ziel vorhanden" in seite and "✘" in seite
 
 
@@ -87,7 +88,7 @@ def test_konkretisieren_und_freigeben_ueber_oberflaeche(owner_client, owner, pro
     auftrag.refresh_from_db()
     assert auftrag.revision_nr == 2 and auftrag.pruefer == owner
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "Arbeitspaket – freigabefähig" in seite
+    assert "geplant – freigabebereit" in seite
     antwort = owner_client.post(
         reverse("auftrag_aktion", kwargs={"auftrag_id": auftrag.pk, "aktion": "freigeben"})
     )
@@ -276,7 +277,7 @@ def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
     uebersicht = owner_client.get(reverse("projekte")).content.decode()
     assert "projektkarte" in uebersicht and "1 freigegeben" in uebersicht
     detail = owner_client.get(
-        reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
+        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
     ).content.decode()
     assert 'class="board"' in detail and 'class="reiter"' in detail
 
@@ -291,9 +292,7 @@ def test_plus_listen_und_kuerzel_automatisch(owner_client):
             "module_eintrag": ["Core", "", "Standards"],
         },
     )
-    assert antwort.status_code == 302 and antwort["Location"].endswith(
-        "/projekt/nexus-projekt/einstellungen/"
-    )
+    assert antwort.status_code == 302 and antwort["Location"].endswith("/projekt/nexus-projekt/")
     seite = owner_client.get(antwort["Location"]).content.decode()
     assert "Core" in seite and "Standards" in seite
     owner_client.post(
@@ -350,7 +349,12 @@ def test_posteingang_zeigt_konkrete_eintraege(owner_client, akteur, projekt, fre
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
     dienst.rueckfrage_melden(chat, freigegeben, 2, "Welche Sprache für den Hinweis?")
     seite = owner_client.get(reverse("posteingang")).content.decode()
-    assert "Wunsch von Chat A" in seite and "Rückfrage" in seite and "Welche Sprache" in seite
+    assert (
+        "Neuer Auftrag" in seite
+        and "Idee vom Chat" in seite
+        and "Rückfrage" in seite
+        and "Welche Sprache" in seite
+    )
     antwort = owner_client.post(
         reverse("antwort", kwargs={"auftrag_id": freigegeben.pk}),
         {"text": "Deutsch", "zurueck": "/"},
@@ -389,3 +393,92 @@ def test_datei_link_mit_repository(akteur, projekt):
     assert "https://github.com/FredHeidinger/nexus/blob/9c2e7b1/src/a.py" in html
     assert "https://github.com/FredHeidinger/nexus/commit/9c2e7b1" in html
     assert str(datei_link("ohne-commit", ort)) == "<code>ohne-commit</code>"
+
+
+def test_neu_menue_issues_und_filter(owner_client, akteur, projekt):
+    seite = owner_client.get(reverse("posteingang")).content.decode()
+    assert "+ Neu" in seite and "+ Wunsch" not in seite
+    for wort in ("Auftrag", "Issue", "Projekt", "Entscheidung"):
+        assert f"<strong>{wort}</strong>" in seite
+    projektseite = owner_client.get(
+        reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
+    ).content.decode()
+    assert f"art=issue&amp;projekt={projekt.kennung}" in projektseite
+
+    formular = owner_client.get(reverse("wunsch_neu") + "?art=issue").content.decode()
+    assert "Issue anlegen" in formular
+    antwort = owner_client.post(
+        reverse("wunsch_neu"),
+        {
+            "typ": "issue",
+            "projekt": projekt.pk,
+            "titel": "Absturz beim Speichern",
+            "beschreibung": "Seite bleibt weiß.",
+            "prioritaet": "hoch",
+        },
+    )
+    assert antwort.status_code == 302
+    assert Auftrag.objects.get(titel="Absturz beim Speichern").typ == "issue"
+    dienst.wunsch_erfassen(akteur, projekt, titel="Export nach CSV", beschreibung="B")
+
+    board = owner_client.get(reverse("auftraege")).content.decode()
+    assert '<span class="issue">Issue</span>' in board
+    issues = owner_client.get(reverse("auftraege") + "?ansicht=liste&art=issue").content.decode()
+    assert "Absturz beim Speichern" in issues and "Export nach CSV" not in issues
+    auftraege = owner_client.get(reverse("auftraege") + "?art=auftrag").content.decode()
+    assert "Export nach CSV" in auftraege and "Absturz beim Speichern" not in auftraege
+
+
+def test_projekt_uebersicht_mit_modulen(owner_client, akteur, projekt):
+    kern = projekt.module.get(kennung="kern")
+    dienst.wunsch_erfassen(
+        akteur, projekt, titel="Absturz", beschreibung="B", modul=kern, typ="issue"
+    )
+    dienst.wunsch_erfassen(akteur, projekt, titel="Export", beschreibung="B", modul=kern)
+    dienst.wunsch_erfassen(akteur, projekt, titel="Ohne Modul", beschreibung="B")
+    url = reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
+    seite = owner_client.get(url).content.decode()
+    assert "Übersicht" in seite and 'id="module"' in seite and "Kern" in seite
+    assert "1 Auftrag</a> · <a" in seite and "1 Issue</a>" in seite
+    assert "1 offene ohne Modul" in seite and "Offene Issues" in seite
+
+    owner_client.post(
+        reverse("modul_aendern", kwargs={"kennung": projekt.kennung, "modul": "kern"}),
+        {"name": "Kernfunktionen"},
+    )
+    kern.refresh_from_db()
+    assert kern.name == "Kernfunktionen" and kern.kennung == "kern"
+    antwort = owner_client.post(
+        reverse("modul_archivieren", kwargs={"kennung": projekt.kennung, "modul": "kern"}),
+        {"aktiv": "0"},
+    )
+    assert antwort["Location"].endswith("#module")
+    kern.refresh_from_db()
+    assert not kern.aktiv
+    assert "Archiv: 1 Module" in owner_client.get(url).content.decode()
+
+    liste = owner_client.get(
+        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+        + "?ansicht=liste&modul=kern"
+    ).content.decode()
+    assert "Absturz" in liste and "Ohne Modul" not in liste
+
+
+def test_modul_ueber_neu_anlegen(owner_client, projekt):
+    seite = owner_client.get(reverse("modul_neu_seite")).content.decode()
+    assert "Modul anlegen" in seite
+    antwort = owner_client.post(
+        reverse("modul_neu_seite"), {"projekt": projekt.pk, "name": "Export"}
+    )
+    assert antwort.status_code == 302 and antwort["Location"].endswith("#module")
+    assert projekt.module.filter(kennung="export", name="Export").exists()
+
+
+def test_assistent_darf_module_pflegen(akteur, projekt):
+    pc, _ = dienst.bindung_anlegen(akteur, None, name="Claude Desktop")
+    ki = dienst.Akteur.aus_bindung(pc)
+    modul = projekt.module.get(kennung="kern")
+    dienst.modul_aendern(ki, modul, name="Kern neu")
+    dienst.modul_archivieren(ki, modul, aktiv=False)
+    modul.refresh_from_db()
+    assert modul.name == "Kern neu" and not modul.aktiv

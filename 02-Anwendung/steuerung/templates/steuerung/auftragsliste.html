@@ -2,13 +2,27 @@
 <div class="werkzeuge umschalter-zeile">
   <a class="umschalter {% if ansicht == 'board' %}aktiv{% endif %}" href="{% filterlink ansicht='' %}">Board</a>
   <a class="umschalter {% if ansicht == 'liste' %}aktiv{% endif %}" href="{% filterlink ansicht='liste' %}">Liste</a>
+  <span class="trenner" aria-hidden="true"></span>
+  <a class="umschalter {% if not art %}aktiv{% endif %}" href="{% filterlink art='' %}">Alles</a>
+  <a class="umschalter {% if art == 'auftrag' %}aktiv{% endif %}" href="{% filterlink art='auftrag' %}">Aufträge</a>
+  <a class="umschalter {% if art == 'issue' %}aktiv{% endif %}" href="{% filterlink art='issue' %}">Issues</a>
 </div>
+{% if module_filter %}
+<div class="werkzeuge umschalter-zeile modulfilter" aria-label="Nach Modul filtern">
+  <span class="gedaempft">Modul:</span>
+  <a class="umschalter {% if not modul %}aktiv{% endif %}" href="{% filterlink modul='' %}">Alle</a>
+  {% for m in module_filter %}<a class="umschalter {% if modul == m.kennung %}aktiv{% endif %}" href="{% filterlink modul=m.kennung %}">{{ m.name }}</a>{% endfor %}
+  <a class="umschalter {% if modul == 'ohne' %}aktiv{% endif %}" href="{% filterlink modul='ohne' %}">ohne Modul</a>
+</div>
+{% endif %}
 {% if ansicht == 'board' %}
   {% include "steuerung/board.html" with spalten=spalten zeige_projekt=zeige_projekt %}
   {% if abgebrochen %}<p class="gedaempft">{{ abgebrochen }} abgebrochene Aufträge, sichtbar in der Listenansicht.</p>{% endif %}
 {% else %}
 <form method="get" class="filterzeile">
   <input type="hidden" name="ansicht" value="liste">
+  <input type="hidden" name="art" value="{{ art }}">
+  <input type="hidden" name="modul" value="{{ modul }}">
   <label>Zustand
     <select name="zustand" onchange="this.form.submit()">
       <option value="" {% if not filter.zustand %}selected{% endif %}>Alle</option>
@@ -16,11 +30,12 @@
       {% for wert, wort in zustaende %}<option value="{{ wert }}" {% if filter.zustand == wert %}selected{% endif %}>{{ wort }}</option>{% endfor %}
     </select>
   </label>
-  <label>Reifegrad
+  <label>Planung
     <select name="reifegrad" onchange="this.form.submit()">
       <option value="" {% if not filter.reifegrad %}selected{% endif %}>Alle</option>
-      <option value="wunsch" {% if filter.reifegrad == "wunsch" %}selected{% endif %}>Wunsch</option>
-      <option value="paket" {% if filter.reifegrad == "paket" %}selected{% endif %}>Arbeitspaket</option>
+      <option value="noch nicht geplant" {% if filter.reifegrad == "noch nicht geplant" %}selected{% endif %}>noch nicht geplant</option>
+      <option value="in Planung" {% if filter.reifegrad == "in Planung" %}selected{% endif %}>in Planung</option>
+      <option value="geplant" {% if filter.reifegrad == "geplant" %}selected{% endif %}>geplant – freigabebereit</option>
     </select>
   </label>
   <label>Bearbeiter
@@ -34,15 +49,15 @@
 </form>
 {% if zeilen %}
 <table>
-  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th>{% if zeige_projekt %}<th scope="col">Projekt</th>{% endif %}<th scope="col">Modul</th><th scope="col">Reifegrad</th><th scope="col">Zustand</th><th scope="col">Bearbeiter</th><th scope="col">Prio</th><th scope="col">Rev</th><th scope="col">Letzte Meldung</th></tr></thead>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th>{% if zeige_projekt %}<th scope="col">Projekt</th>{% endif %}<th scope="col">Modul</th><th scope="col">Planung</th><th scope="col">Zustand</th><th scope="col">Bearbeiter</th><th scope="col">Prio</th><th scope="col">Rev</th><th scope="col">Letzte Meldung</th></tr></thead>
   <tbody>
   {% for z in zeilen %}
     <tr>
       <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
-      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a></td>
+      <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a></td>
       {% if zeige_projekt %}<td>{{ z.a.projekt.name }}</td>{% endif %}
       <td>{{ z.a.modul.name|default:"–" }}</td>
-      <td>{{ z.reifegrad }}</td>
+      <td>{{ z.reifegrad|default:"–" }}</td>
       <td>{{ z.a.zustand|zustand }}</td>
       <td>{{ z.a.bearbeiter_name|default:"–" }}</td>
       <td>{{ z.a.prioritaet }}</td>
@@ -53,6 +68,6 @@
   </tbody>
 </table>
 {% else %}
-<div class="leer">Keine Aufträge für diese Auswahl.</div>
+<div class="leer">Nichts für diese Auswahl. Neues legst du mit „+ Neu“ oben rechts an.</div>
 {% endif %}
 {% endif %}

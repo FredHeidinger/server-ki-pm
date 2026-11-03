@@ -10,27 +10,43 @@
 <a class="sprung" href="#inhalt">Zum Inhalt springen</a>
 <div class="app">
 <nav class="seitenleiste" aria-label="Bereiche">
-  <p class="marke">Server-KI-PM</p>
+  <a class="marke" href="{% url 'posteingang' %}"><span class="marke-zeichen">{% include "steuerung/symbol.html" with name="puls" %}</span><span><strong>Server-KI-PM</strong><small>Projektsteuerung mit KI</small></span></a>
+  <p class="navtitel">Arbeitsbereich</p>
   {% url 'posteingang' as u_post %}{% url 'meine' as u_meine %}{% url 'auftraege' as u_auf %}{% url 'entscheidungen' as u_ent %}{% url 'verlauf' as u_ver %}{% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
-  <a href="{{ u_post }}" {% if request.path == u_post %}aria-current="page"{% endif %}><span class="sym">✉</span> Posteingang{% if posteingang_anzahl %} <span class="zaehler">{{ posteingang_anzahl }}</span>{% endif %}</a>
-  <a href="{{ u_meine }}" {% if request.path == u_meine %}aria-current="page"{% endif %}><span class="sym">●</span> Meine Aufträge</a>
-  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}><span class="sym">☰</span> Alle Aufträge</a>
-  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}><span class="sym">⚖</span> Entscheidungen</a>
-  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}><span class="sym">◷</span> Verlauf</a>
-  <p class="gruppe"><a href="{{ u_proj }}" {% if request.path == u_proj %}aria-current="page"{% endif %}>Projekte</a><a class="plus" href="{% url 'projekt_neu' %}" title="Projekt anlegen">+</a></p>
+  <a href="{{ u_post }}" {% if request.path == u_post %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="eingang" %} Posteingang{% if posteingang_anzahl %} <span class="zaehler">{{ posteingang_anzahl }}</span>{% endif %}</a>
+  <a href="{{ u_meine }}" {% if request.path == u_meine %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ich" %} Meine Aufträge</a>
+  <a href="{{ u_auf }}" {% if request.path|slice:":10" == "/auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
+  <a href="{{ u_ent }}" {% if request.path|slice:":15" == "/entscheidungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="waage" %} Entscheidungen</a>
+  <a href="{{ u_ver }}" {% if request.path == u_ver %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
+  <a href="{{ u_proj }}" {% if request.path == u_proj %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ordner" %} Projekte</a>
+  {% if seitenleiste_projekte %}<p class="navtitel">Projekte im Blick</p>{% endif %}
   {% for p in seitenleiste_projekte %}
-  <a class="projektlink" href="{% url 'projekt_detail' kennung=p.kennung %}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}aria-current="page"{% endif %}><span class="sym">▪</span> {{ p.name }}</a>
+  <a class="projektlink" href="{% url 'projekt_detail' kennung=p.kennung %}" {% if aktives_projekt and aktives_projekt.pk == p.pk %}aria-current="page"{% endif %}><span class="punkt" aria-hidden="true"></span> {{ p.name }}</a>
   {% endfor %}
-  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}><span class="sym">⚿</span> KI verbinden</a></p>
+  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %} KI verbinden</a></p>
 </nav>
 <main id="inhalt">
 <header class="kopfzeile">
   <div class="brotkrumen">{% block brotkrumen %}{% endblock %}</div>
-  <form method="post" action="{% url 'abmelden' %}" class="benutzer">
-    {% csrf_token %}
-    <span>Angemeldet: <strong>{{ user.get_username }}</strong></span>
-    <button type="submit" class="knopf zweit klein">Abmelden</button>
-  </form>
+  <div class="kopfrechts">
+    <details class="neu-menue">
+      <summary class="knopf">+ Neu</summary>
+      <div class="menue" role="menu">
+        {% with p=aktives_projekt.kennung|default:"" %}
+        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag{% if p %}&amp;projekt={{ p }}{% endif %}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
+        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue{% if p %}&amp;projekt={{ p }}{% endif %}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
+        <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt mit Modulen</span></a>
+        <a role="menuitem" href="{% if p %}{% url 'projekt_detail' kennung=p %}#module{% else %}{% url 'modul_neu_seite' %}{% endif %}"><strong>Modul</strong><span>Teilbereich eines Projekts</span></a>
+        <a role="menuitem" href="{% url 'entscheidung_neu' %}"><strong>Entscheidung</strong><span>Festlegung für ein oder mehrere Projekte</span></a>
+        {% endwith %}
+      </div>
+    </details>
+    <form method="post" action="{% url 'abmelden' %}" class="benutzer">
+      {% csrf_token %}
+      <span class="avatar" title="Angemeldet als {{ user.get_username }}">{{ user.get_username|slice:":2"|upper }}</span>
+      <button type="submit" class="knopf zweit klein">Abmelden</button>
+    </form>
+  </div>
 </header>
 {% if messages %}
 <ul class="meldungen" aria-live="polite">

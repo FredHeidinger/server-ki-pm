@@ -24,8 +24,8 @@ PROTOKOLLE = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 ANWEISUNGEN = (
     "Server-KI-PM ist Freds zentrale Projektsteuerung. Du arbeitest als sein Assistent: "
-    "Projekte und Module anlegen, Wünsche und Issues (art=issue) erfassen, Aufträge mit "
-    "kipm_planen zu Arbeitspaketen ausarbeiten (Ziel, Nicht-Ziele, Arbeitsort, Schreibumfang, "
+    "Projekte und Module anlegen, Aufträge und Issues (art=issue) anlegen, Aufträge mit "
+    "kipm_planen ausplanen (Ziel, Nicht-Ziele, Arbeitsort, Schreibumfang, "
     "Abnahmekriterien, Prüfer), bis „fuer_freigabe_fehlt“ leer ist, Rückfragen mit "
     "kipm_antworten beantworten und alles lesen. Freigeben und Abnehmen macht Fred selbst in "
     "der Oberfläche. Das Projekt nennst du mit „projekt“ (Kennung aus kipm_projekte) oder "
@@ -69,7 +69,7 @@ WERKZEUGE = [
     ),
     (
         "kipm_auftrag_anlegen",
-        "Wunsch (art=auftrag) oder Issue (art=issue, Fehler oder Problem) als Entwurf anlegen; "
+        "Auftrag (art=auftrag) oder Issue (art=issue, Fehler oder Problem) als Entwurf anlegen; "
         "gleicher Titel wie ein offener Auftrag wird abgewiesen, außer erzwingen=true",
         {
             "titel": _TEXT,
@@ -90,7 +90,7 @@ WERKZEUGE = [
     ),
     (
         "kipm_planen",
-        "Auftrag zum Arbeitspaket planen oder ändern; nur angegebene Felder ändern sich, eine "
+        "Auftrag oder Issue planen oder ändern; nur angegebene Felder ändern sich, eine "
         "Freigabe erlischt. Listenfelder je Eintrag eine Zeile. pruefer ist ein Benutzername.",
         {
             "auftrag": _AUFTRAG,

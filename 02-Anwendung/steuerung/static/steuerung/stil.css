@@ -1,26 +1,33 @@
 /* Server-KI-PM – ein Stylesheet, keine Abhängigkeiten. Zustände immer als Wort, nie nur als Farbe. */
 :root {
-  --hintergrund: #f3f5f8; --flaeche: #ffffff; --weich: #eaeef3; --text: #1b2430; --gedaempft: #5c6777; --linie: #d8dee7;
-  --akzent: #2563eb; --akzent-dunkel: #1d4ed8; --akzent-text: #ffffff; --schatten: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 6px rgba(16, 24, 40, .06);
+  --hintergrund: #f6f7fb; --flaeche: #ffffff; --weich: #f4f3fc; --text: #252c41; --gedaempft: #68718a; --linie: #e6e8f0;
+  --akzent: #6955d9; --akzent-dunkel: #5643c4; --akzent-weich: #eeebfd; --akzent-text: #ffffff; --schatten: 0 8px 30px #24223b0b;
   --warn-flaeche: #fff4d6; --warn-linie: #d9a400; --ok-flaeche: #e3f5e8; --ok-linie: #2e8b57;
   --fehler-flaeche: #fde8e8; --fehler-linie: #c62828; --fokus: #e07b00;
-  --c-entwurf: #9aa5b5; --c-freigegeben: #2563eb; --c-arbeit: #f59e0b; --c-pruefung: #8b5cf6; --c-abgenommen: #16a34a;
+  --c-entwurf: #9aa5b5; --c-freigegeben: #6955d9; --c-arbeit: #f59e0b; --c-pruefung: #8b5cf6; --c-abgenommen: #16a34a;
 }
 * { box-sizing: border-box; }
-html { font: 15px/1.45 system-ui, "Segoe UI", sans-serif; color: var(--text); background: var(--hintergrund); }
+html { font: 15px/1.55 Inter, "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--hintergrund); }
 body { margin: 0; }
 a { color: var(--akzent); }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--fokus); outline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--akzent); outline-offset: 3px; }
+svg { width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .sprung { position: absolute; left: -999px; top: 0; background: var(--flaeche); padding: 8px; }
 .sprung:focus { left: 8px; z-index: 10; }
 
 /* Rahmen */
-.app { display: grid; grid-template-columns: 224px 1fr; min-height: 100vh; }
-.seitenleiste { background: #111827; color: #e5e7eb; padding: 18px 14px; }
-.seitenleiste .marke { font-weight: 700; font-size: 17px; margin: 0 0 18px; color: #fff; letter-spacing: .2px; }
-.seitenleiste a { display: flex; gap: 10px; align-items: center; padding: 9px 11px; margin-bottom: 4px; border-radius: 8px; text-decoration: none; color: #d1d5db; }
-.seitenleiste a:hover { background: #1f2937; color: #fff; }
-.seitenleiste a[aria-current="page"] { background: var(--akzent); color: #fff; }
+.app { display: grid; grid-template-columns: 234px 1fr; min-height: 100vh; }
+.seitenleiste { background: var(--flaeche); color: var(--text); padding: 26px 16px 18px; border-right: 1px solid var(--linie); }
+.seitenleiste .marke { display: flex; align-items: center; gap: 11px; padding: 0 6px 24px; margin: 0; }
+.seitenleiste .marke:hover { background: none; }
+.seitenleiste .marke strong { display: block; font-size: 18px; letter-spacing: -.6px; color: var(--text); }
+.seitenleiste .marke small { display: block; font-size: 11px; color: var(--gedaempft); line-height: 1.3; }
+.marke-zeichen { width: 35px; height: 37px; background: var(--akzent); border-radius: 11px; color: #fff; display: grid; place-items: center; box-shadow: 0 5px 12px #6955d933; }
+.navtitel { margin: 14px 10px 8px; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--gedaempft); font-weight: 700; }
+.seitenleiste a { display: flex; gap: 12px; align-items: center; min-height: 42px; padding: 9px 12px; margin: 2px 0; border-radius: 9px; text-decoration: none; color: var(--gedaempft); font-weight: 500; font-size: 14px; }
+.seitenleiste a:hover { background: var(--weich); color: var(--text); }
+.seitenleiste a[aria-current="page"] { background: var(--akzent-weich); color: var(--akzent); font-weight: 650; }
+.seitenleiste .punkt { width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin: 0 6px 0 7px; opacity: .6; }
 .seitenleiste .sym { width: 18px; text-align: center; opacity: .9; }
 .seitenleiste .legende-zustand { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px; }
 main { padding: 0 26px 48px; min-width: 0; }
@@ -31,7 +38,8 @@ main { padding: 0 26px 48px; min-width: 0; }
 .seitenkopf h1 { margin: 0; }
 .werkzeuge { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-h1 { font-size: 23px; margin: 0 0 12px; }
+h1 { font-size: 29px; line-height: 1.2; letter-spacing: -.8px; margin: 0 0 9px; }
+h2 { font-size: 18px; letter-spacing: -.25px; }
 h2 { font-size: 16px; margin: 22px 0 10px; }
 h3 { font-size: 14px; margin: 0 0 8px; }
 .gedaempft { color: var(--gedaempft); }
@@ -105,7 +113,7 @@ a.kachel:hover { border-color: var(--akzent); }
 .kleinmeta { font-size: 12px; color: var(--gedaempft); margin: 6px 0; }
 
 /* Board */
-.board { display: grid; grid-template-columns: repeat(5, minmax(200px, 1fr)); gap: 12px; overflow-x: auto; align-items: start; padding-bottom: 8px; }
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: start; padding-bottom: 8px; }
 .spalte { background: var(--weich); border-radius: 12px; padding: 10px; min-height: 180px; border-top: 4px solid var(--linie); }
 .spalte h3 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: var(--gedaempft); margin: 2px 4px 10px; }
 .spalte .anzahl { background: var(--flaeche); border-radius: 10px; padding: 0 8px; font-size: 12px; }
@@ -170,7 +178,7 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .anmeldekarte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 26px 30px; width: min(420px, 92vw); box-shadow: var(--schatten); }
 .anmeldekarte h1 { margin-top: 0; }
 
-@media (max-width: 1100px) { .board { grid-template-columns: repeat(5, 220px); } .drei { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .drei { grid-template-columns: 1fr; } }
 @media (max-width: 1000px) { .detail { grid-template-columns: 1fr; } .zwei { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
@@ -189,7 +197,7 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .seitenleiste .gruppe.unten a { font-size: 14px; text-transform: none; letter-spacing: 0; color: #d1d5db; display: flex; gap: 10px; padding: 9px 11px; border-radius: 8px; }
 .seitenleiste .gruppe.unten a[aria-current="page"] { background: var(--akzent); color: #fff; }
 .seitenleiste .projektlink { font-size: 14px; }
-.zaehler { background: var(--fehler-linie); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; margin-left: auto; }
+.zaehler { background: var(--akzent); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; margin-left: auto; }
 .brotkrumen { color: var(--gedaempft); font-size: 14px; }
 .brotkrumen a { color: var(--gedaempft); }
 
@@ -245,3 +253,61 @@ td.aktionen { white-space: nowrap; }
 .programmkarte:hover, .programmkarte:focus-visible { border-color: var(--akzent); }
 .programmkarte strong { font-size: 16px; } .programmkarte span { color: var(--gedaempft); font-size: 14px; }
 .anleitung { padding-left: 22px; margin: 0 0 12px; } .anleitung li { margin-bottom: 10px; } .anleitung pre { margin: 6px 0; }
+.kopfrechts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.neu-menue { position: relative; }
+.neu-menue > summary { list-style: none; cursor: pointer; }
+.neu-menue > summary::-webkit-details-marker { display: none; }
+.neu-menue .menue { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 300px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; box-shadow: var(--schatten); padding: 6px; display: flex; flex-direction: column; }
+.neu-menue .menue a { display: flex; flex-direction: column; padding: 9px 12px; border-radius: 8px; text-decoration: none; color: var(--text); }
+.neu-menue .menue a:hover, .neu-menue .menue a:focus-visible { background: var(--weich); }
+.neu-menue .menue a span { color: var(--gedaempft); font-size: 13px; }
+.issue { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: #b42318; background: #fee4e2; border: 1px solid #fda29b; border-radius: 6px; padding: 0 6px; vertical-align: middle; }
+.karte.ist-issue { border-left: 3px solid #d92d20; }
+.karte .issue { margin-bottom: 4px; }
+.stand { font-size: 12px; color: var(--gedaempft); } .stand.fertig { color: var(--ok-linie); font-weight: 600; }
+.trenner { width: 1px; height: 22px; background: var(--linie); margin: 0 4px; }
+
+/* Gestaltung nach ProjectPulse: Kopfzeile, Überschriften, Kennzahlen, Module */
+.kopfzeile { border-bottom-color: var(--linie); padding: 14px 0; margin-bottom: 26px; }
+.avatar { width: 32px; height: 32px; display: grid; place-items: center; background: var(--akzent-weich); color: var(--akzent); border-radius: 50%; font-size: 11px; font-weight: 700; }
+.knopf { border-radius: 9px; font-weight: 600; }
+.knopf:not(.zweit) { box-shadow: 0 3px 7px #6955d91a; }
+.knopf.zweit { border-color: var(--linie); color: var(--text); }
+.knopf.zweit:hover { border-color: var(--akzent); color: var(--akzent); background: var(--flaeche); }
+.knopf.gefahr { color: var(--fehler-linie); }
+.oberzeile { text-transform: uppercase; font-size: 10px; letter-spacing: 1.4px; font-weight: 700; color: var(--gedaempft); margin: 0 0 8px; }
+.unterzeile { margin-top: -4px; }
+.box, table { border-radius: 11px; }
+.reiter { border-bottom-width: 1px; }
+.reiter a { font-size: 14px; }
+.spalte { background: var(--weich); border: 1px solid var(--linie); border-top-width: 3px; border-radius: 10px; }
+.karte { border-radius: 8px; }
+.umschalter.aktiv { background: var(--akzent-weich); color: var(--akzent); border-color: #d6cff9; }
+.kennzahlen { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 26px; }
+.kennzahl { display: flex; flex-direction: column; gap: 2px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 16px 18px; text-decoration: none; color: var(--text); box-shadow: var(--schatten); }
+.kennzahl strong { font-size: 26px; letter-spacing: -.5px; }
+.kennzahl span { color: var(--gedaempft); font-size: 13px; }
+.kennzahl:hover { border-color: var(--akzent); background: var(--akzent-weich); }
+.kennzahl.achtung strong { color: var(--fehler-linie); }
+.abschnitt { margin-bottom: 26px; scroll-margin-top: 16px; }
+.abschnittkopf h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.abschnittkopf .zahl { background: var(--akzent-weich); color: var(--akzent); border-radius: 6px; font-size: 12px; padding: 0 7px; }
+.modulraster { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin: 12px 0; }
+.modulkarte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 14px 16px; box-shadow: var(--schatten); }
+.modulkarte .modulkopf { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.modulkarte h3 { margin: 0 0 6px; font-size: 16px; }
+.modulkarte h3 a { color: var(--text); text-decoration: none; }
+.modulkarte h3 a:hover { color: var(--akzent); }
+.modulzahlen { font-size: 14px; margin: 0 0 8px; }
+.modulpflege summary { cursor: pointer; color: var(--gedaempft); font-size: 13px; }
+.modulpflege form { margin-top: 8px; }
+.modulkarte.neu { border-style: dashed; background: var(--weich); box-shadow: none; }
+.modulkarte.neu input { width: 100%; margin-bottom: 8px; }
+.letzte { list-style: none; padding: 0; margin: 0 0 10px; }
+.letzte li { padding: 7px 0; border-bottom: 1px solid var(--linie); font-size: 14px; }
+.letzte .zeit { color: var(--gedaempft); font-size: 12px; margin-right: 6px; }
+.seitenleiste .gruppe.unten a { color: var(--gedaempft); font-weight: 500; gap: 12px; min-height: 42px; }
+.seitenleiste .gruppe.unten a:hover { background: var(--weich); color: var(--text); }
+.seitenleiste .gruppe.unten a[aria-current="page"] { background: var(--akzent-weich); color: var(--akzent); }
+.unsichtbar { position: absolute; left: -9999px; }
+.modulfilter { flex-wrap: wrap; }

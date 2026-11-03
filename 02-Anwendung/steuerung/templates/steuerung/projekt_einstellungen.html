@@ -2,30 +2,21 @@
 {% block titel %}{{ projekt.name }} – Einstellungen{% endblock %}
 {% block projektinhalt %}
 {% if projekt.beschreibung %}<p class="gedaempft">{{ projekt.beschreibung }}</p>{% endif %}
-<div class="zwei">
-<section class="box">
-  <h2>Module <span class="stufe optional">optional</span></h2>
-  {% if module %}<p class="chips">{% for m in module %}<span class="chip">{{ m.name }}</span>{% endfor %}</p>{% else %}<p class="gedaempft">Keine Module.</p>{% endif %}
-  <form method="post" action="{% url 'modul_neu' kennung=projekt.kennung %}" class="zeile">
-    {% csrf_token %}
-    <label for="{{ modul_form.name.id_for_label }}">Name {{ modul_form.name }}</label>
-    <button type="submit" class="knopf zweit">+ Modul</button>
-  </form>
-</section>
-
 <section class="box">
   <h2>Arbeitsorte <span class="stufe freigabe">für Freigabe nötig</span></h2>
-  <p class="gedaempft">Wo Bearbeiter Dateien ändern dürfen. Der Ordner ordnet einen PC-Zugang diesem Projekt zu, das Repository macht Datei@Commit in Ergebnissen anklickbar. Der Dienst öffnet selbst nichts.</p>
+  <p class="gedaempft">Wo der Code dieses Projekts liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu; mit Repository-Adresse werden Dateien in Ergebnissen anklickbar. Server-KI-PM selbst öffnet nichts.</p>
   {% if arbeitsorte %}
   <ul class="liste-schlicht">{% for o in arbeitsorte %}<li><strong>{{ o.name }}</strong>{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}</li>{% endfor %}</ul>
   {% else %}<p class="gedaempft">Noch kein Arbeitsort.</p>{% endif %}
-  <form method="post" action="{% url 'arbeitsort_neu' kennung=projekt.kennung %}" class="formular klein">
-    {% csrf_token %}
-    {% include "steuerung/formular_felder.html" with form=arbeitsort_form %}
-    <button type="submit" class="knopf zweit">+ Arbeitsort</button>
-  </form>
+  <details{% if not arbeitsorte %} open{% endif %}>
+    <summary class="knopf zweit klein">+ Arbeitsort hinzufügen</summary>
+    <form method="post" action="{% url 'arbeitsort_neu' kennung=projekt.kennung %}" class="formular klein">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=arbeitsort_form %}
+      <button type="submit" class="knopf zweit">Arbeitsort speichern</button>
+    </form>
+  </details>
 </section>
-</div>
 
 <section class="box">
   <h2>Zugänge dieses Projekts</h2>

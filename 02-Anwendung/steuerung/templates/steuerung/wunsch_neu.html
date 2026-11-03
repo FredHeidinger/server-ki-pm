@@ -1,12 +1,12 @@
 {% extends "steuerung/grund.html" %}
-{% block titel %}Wunsch erfassen{% endblock %}
+{% block titel %}{{ titel }}{% endblock %}
+{% block brotkrumen %}<a href="{% url 'auftraege' %}">Alle Aufträge</a> › {{ titel }}{% endblock %}
 {% block inhalt %}
-<p><a href="{% url 'auftraege' %}">← Aufträge</a></p>
-<h1>Wunsch erfassen</h1>
-<p class="gedaempft">Schreib in deinen Worten, was du möchtest. Ziel, Umfang und Abnahme ergänzt du später beim Konkretisieren; erst dann kann jemand daran arbeiten.</p>
+<h1>{{ titel }}</h1>
+<p class="gedaempft">Kurz beschreiben, worum es geht. Danach planst du Ziel, Umfang und Abnahme; erst ein geplanter und freigegebener Auftrag wird bearbeitet. Das kann auch deine KI übernehmen.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}
   {% include "steuerung/formular_felder.html" %}
-  <p><button type="submit" class="knopf">Als Wunsch speichern</button> <a class="knopf zweit" href="{% url 'auftraege' %}">Abbrechen</a></p>
+  <p><button type="submit" class="knopf">Anlegen</button> <a class="knopf zweit" href="{% url 'auftraege' %}">Abbrechen</a></p>
 </form>
 {% endblock %}

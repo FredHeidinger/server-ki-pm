@@ -1,0 +1,13 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Modul anlegen{% endblock %}
+{% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › Modul anlegen{% endblock %}
+{% block inhalt %}
+<p class="oberzeile">Neu</p>
+<h1>Modul anlegen</h1>
+<p class="gedaempft">Ein Modul ist ein Teilbereich eines Projekts, zum Beispiel „Export“ oder „Oberfläche“.</p>
+<form method="post" class="formular" novalidate>
+  {% csrf_token %}
+  {% include "steuerung/formular_felder.html" %}
+  <p><button type="submit" class="knopf">Anlegen</button> <a class="knopf zweit" href="{% url 'projekte' %}">Abbrechen</a></p>
+</form>
+{% endblock %}
