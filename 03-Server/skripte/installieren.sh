@@ -52,21 +52,14 @@ with sqlite3.connect(sys.argv[1]) as q, sqlite3.connect(sys.argv[2]) as z:
     q.backup(z)
 EOF
   chown kipm:kipm "$PROBE/kipm.sqlite3"
-  zaehlen() {
-    "$VENV/bin/python" - "$1" <<'EOF'
-import sqlite3, sys
-z = sqlite3.connect(sys.argv[1])
-assert z.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "Datenbank nicht integer"
-tabellen = ("projekt", "auftrag", "revision", "ergebnis", "pruefung", "ereignis", "chatbindung")
-print(" ".join(str(z.execute(f"select count(*) from steuerung_{t}").fetchone()[0]) for t in tabellen))
-EOF
-  }
-  VORHER=$(zaehlen "$PROBE/kipm.sqlite3")
+  VORHER=$("$VENV/bin/python" "$SKRIPTE/bestand.py" zaehlen "$PROBE/kipm.sqlite3")
   runuser -u kipm --preserve-environment -- env KIPM_DATEN_DIR="$PROBE" "$VENV/bin/python" "$APP/manage.py" migrate --noinput
-  NACHHER=$(zaehlen "$PROBE/kipm.sqlite3")
+  NACHHER=$("$VENV/bin/python" "$SKRIPTE/bestand.py" zaehlen "$PROBE/kipm.sqlite3")
   rm -rf "$PROBE"
-  [ "$VORHER" = "$NACHHER" ] || { echo "Probemigration verändert den Bestand ($VORHER → $NACHHER); Abbruch."; exit 4; }
-  echo "Probemigration ohne Bestandsänderung: $NACHHER"
+  # Nichts darf verloren gehen; nur der Verlauf darf wachsen (Umstellungen einer Migration).
+  "$VENV/bin/python" "$SKRIPTE/bestand.py" vergleichen "$VORHER" "$NACHHER" \
+    || { echo "Probemigration verändert den Bestand ($VORHER → $NACHHER); Abbruch."; exit 4; }
+  echo "Probemigration ohne Bestandsverlust: $VORHER → $NACHHER"
 fi
 
 echo "== Datenbank migrieren und statische Dateien sammeln"
