@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, dienst
+from . import abgleich, akte, dienst
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -34,6 +34,7 @@ from .models import (
     Arbeitsort,
     Auftrag,
     ChatBindung,
+    Entscheidung,
     Ereignis,
     Meldung,
     Modul,
@@ -113,7 +114,7 @@ def projekte(request: HttpRequest) -> HttpResponse:
     abgleich.versionen_auffrischen(projekte_liste)
     for p in projekte_liste:
         p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
-        p.wartet = len(dienst.wartet_auf_dich(p))
+        p.wartet = len(akte.wartet_liste(p))
         p.version = abgleich.version_anzeige(p)["zustand"]
     return render(
         request,
@@ -165,7 +166,7 @@ SPALTEN = [
     ("blockiert", "Blockiert", Auftrag.BLOCKIERT, (Auftrag.BLOCKIERT,)),
     ("erledigt", "Erledigt", Auftrag.ERLEDIGT, (Auftrag.ERLEDIGT,)),
 ]
-PRIO_RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
+PRIO_RANG = dienst.PRIO_RANG
 
 
 def _spalten(auftraege) -> list[dict]:
@@ -215,6 +216,10 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
         gruende = ", ".join(p.text for p in offen)
         satz = f"Freigeben noch nicht möglich ({gruende}). Was fehlt, steht unten unter „Freigabe“."
         return {"art": "hinweis", "satz": satz, "kurz": "Freigabe noch nicht möglich"}
+    if dienst.ist_faellig(auftrag):
+        # Vor „nichts zu tun“: Ein fälliger Eintrag bleibt in „Wartet auf dich“.
+        satz = "Der Termin ist da. Verschiebe oder entferne ihn, sonst wartet er weiter auf dich."
+        return {"art": "hinweis", "satz": satz, "kurz": ""}
     if z == Auftrag.FREIGEGEBEN:
         satz = "Freigegeben: Ein Chat übernimmt ihn mit „weiter“. Für dich ist nichts zu tun."
     elif z == Auftrag.IN_ARBEIT:
@@ -229,8 +234,13 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
 
 
 def wartet_eintraege(projekt: Projekt) -> list[dict]:
-    """Einträge für „Wartet auf dich“: Auftrag mit seinem Hauptknopf."""
-    return [{"a": a, "h": hauptaktion(a)} for a in dienst.wartet_auf_dich(projekt)]
+    """Einträge für „Wartet auf dich“; Aufträge mit ihrem Hauptknopf."""
+    return [
+        {"e": x}
+        if isinstance(x, Entscheidung)
+        else {"a": x, "h": hauptaktion(x), "faellig": dienst.ist_faellig(x)}
+        for x in akte.wartet_liste(projekt)
+    ]
 
 
 def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> HttpResponse:
@@ -467,6 +477,7 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
                 prioritaet=d["prioritaet"],
                 erzwingen=d["erzwingen"],
                 typ=d["typ"],
+                faellig=d["faellig"],
             )
         except dienst.DienstFehler as fehler:
             form.add_error(None, str(fehler))
@@ -672,6 +683,13 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
             vorgaenger = get_object_or_404(Auftrag, pk=request.POST.get("vorgaenger"))
             dienst.vorgaenger_entfernen(akteur, auftrag, vorgaenger)
             messages.success(request, "Vorgänger entfernt.")
+        elif aktion == "faellig":
+            entfernen = request.POST.get("wahl") == "entfernen"
+            wert = "" if entfernen else request.POST.get("faellig", "")
+            dienst.faellig_setzen(akteur, auftrag, wert)
+            messages.success(
+                request, f"Termin von {auftrag.nummer} {'gespeichert' if wert else 'entfernt'}."
+            )
         else:
             raise Http404
     except dienst.DienstFehler as fehler:

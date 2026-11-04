@@ -24,8 +24,16 @@ PROTOKOLLE = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 ANWEISUNGEN = (
     "Server-KI-PM ist Freds zentrale Projektsteuerung. Du arbeitest als sein Assistent. "
+    "Wichtigste Regel: Frag Fred, bevor du in KI-PM etwas anlegst oder änderst (Aufträge, Issues, "
+    "Entscheidungen, Texte, Meilensteine, Projekte, alles andere auch), und warte auf seine "
+    "Antwort. Seine Worte aus dem Chat gehören wörtlich in fred_sagte; ohne dieses Feld lehnt "
+    "KI-PM den Aufruf ab und ändert nichts, mit ihm stehen sie im Verlauf. Erfinde sie nie. "
+    "Ausgenommen sind nur das Lesen und die Arbeit an einem freigegebenen Auftrag "
+    "(kipm_uebernehmen, kipm_fortschritt, kipm_rueckfrage, kipm_hindernis, kipm_fehler, "
+    "kipm_ergebnis) sowie eine offene Frage an Fred (kipm_entscheidung_fragen): Sie legt nichts "
+    "fest, erst seine Antwort macht daraus eine Entscheidung. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
-    "Nachweis); nur Offenes, Größeres oder für einen anderen Chat legst du in KI-PM an. "
+    "Nachweis); nur Offenes, Größeres oder für einen anderen Chat schlägst du Fred für KI-PM vor. "
     "Ablauf eines Auftrags: Entwurf → Freigegeben → In Arbeit → Erledigt oder Blockiert "
     "(Abbrechen jederzeit); eine Nutzerabnahme gibt es nicht. Anlegen: kipm_auftrag_anlegen "
     "mit der ganzen Planung in einem Aufruf (Ziel, Nicht-Ziele, Arbeitsort, Schreibumfang, "
@@ -41,15 +49,17 @@ ANWEISUNGEN = (
     "Prüfungen des Projekts; Ziel, Schreibumfang und Abnahmekriterien aus kipm_lesen sind "
     "bindend. Alle Prüfungen bestanden → erledigt; eine fehlgeschlagen (in fehlgeschlagen) → "
     "blockiert mit Grund; hat das Projekt keine automatischen Tests, pruefungen leer lassen → "
-    "erledigt mit Vermerk „ohne automatische Tests“. Passt später etwas nicht, legst du ein "
-    "neues Issue an. Am Ende einer Sitzung trägst du Offenes als Issue oder Auftrag ein. "
-    "Für einen neuen Chat zuerst kipm_projektkontext lesen (alle Teile). Entscheidungen trägst "
-    "du direkt ein (kipm_entscheidung_eintragen: Entscheidung und Warum), die Projektbeschreibung "
-    "pflegst du direkt (kipm_profil_aendern), Texte mit kipm_text_anlegen und kipm_text_aendern; "
-    "alles gilt sofort, steht im Verlauf und im Kontext jedes neuen Chats des Projekts. "
+    "erledigt mit Vermerk „ohne automatische Tests“. Passt später etwas nicht, schlägst du Fred "
+    "ein neues Issue vor. Am Ende einer Sitzung nennst du Fred das Offene und trägst nur ein, was "
+    "er bestätigt. Für einen neuen Chat zuerst kipm_projektkontext lesen (alle Teile). "
+    "Entscheidungen trägst du nach Freds Ja mit kipm_entscheidung_eintragen ein (Entscheidung und "
+    "Warum), die Projektbeschreibung mit kipm_profil_aendern, Texte mit kipm_text_anlegen und "
+    "kipm_text_aendern; das gilt sofort, steht im Verlauf und im Kontext jedes neuen Chats. "
     "Meilensteine haben nur Name und Datum (kipm_meilenstein_anlegen, kipm_meilenstein_aendern); "
     "Aufträge ordnest du mit meilenstein (z. B. M-3) in kipm_auftrag_anlegen oder kipm_planen zu, "
-    "den Fortschritt zählt KI-PM selbst. Versionen und Installationen kommen aus GitHub (Releases "
+    "den Fortschritt zählt KI-PM selbst. Termine setzt du mit faellig (JJJJ-MM-TT) in "
+    "kipm_auftrag_anlegen oder kipm_planen; ab dem Tag steht der Eintrag oben in „Wartet auf "
+    "dich“. Versionen und Installationen kommen aus GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
 
@@ -62,6 +72,15 @@ _AUFTRAG = {"type": "string", "description": "Auftragsnummer, z. B. A-12"}
 _MEILENSTEIN = {
     "type": "string",
     "description": "Meilensteinnummer des eigenen Projekts aus kipm_meilensteine, z. B. M-3",
+}
+_FAELLIG = {
+    "type": "string",
+    "description": "Fälligkeit JJJJ-MM-TT, leer entfernt sie; ab dem Tag oben in „Wartet auf dich“",
+}
+_FRED_SAGTE = {
+    "type": "string",
+    "description": "Freds Worte aus dem Chat, mit denen er diese Änderung angewiesen oder "
+    "bestätigt hat; erst fragen, nie erfinden. Ohne sie lehnt KI-PM ab. Sie stehen im Verlauf",
 }
 _KENNUNG = {
     "type": "string",
@@ -139,7 +158,7 @@ WERKZEUGE = [
     ),
     (
         "kipm_profil_aendern",
-        "Projektbeschreibung und Profil direkt ändern (beschreibung, zweck, zielgruppe, "
+        "Projektbeschreibung und Profil ändern (beschreibung, zweck, zielgruppe, "
         "nicht_ziele, entwicklungsstufe, phase; nur genannte Felder); revision = profil_revision "
         "aus kipm_projektakte. Gilt sofort und steht im Verlauf",
         {
@@ -189,6 +208,7 @@ WERKZEUGE = [
             "art": {"type": "string", "enum": ["auftrag", "issue"]},
             "modul": {"type": "string", "description": "Modulkennung"},
             "meilenstein": _MEILENSTEIN,
+            "faellig": _FAELLIG,
             "prioritaet": {"type": "string", "enum": ["hoch", "mittel", "niedrig"]},
             "ziel": _TEXT,
             "nicht_ziele": _TEXT,
@@ -217,6 +237,8 @@ WERKZEUGE = [
         "Freigabe erlischt. Listenfelder je Eintrag eine Zeile. "
         "meilenstein ordnet zu (leer löst) und lässt allein Revision und Freigabe unberührt, "
         "auch bei laufenden und erledigten Aufträgen. "
+        "faellig setzt den Termin (leer entfernt), lässt allein ebenfalls Revision und Freigabe "
+        "unberührt, nur bei offenen Einträgen. "
         "freigeben=true gibt danach frei, nur auf Freds Anweisung im Chat.",
         {
             "auftrag": _AUFTRAG,
@@ -230,6 +252,7 @@ WERKZEUGE = [
             "abnahmekriterien": _LISTE,
             "modul": _TEXT,
             "meilenstein": _MEILENSTEIN,
+            "faellig": _FAELLIG,
             "prioritaet": {"type": "string", "enum": ["hoch", "mittel", "niedrig"]},
             "art": {"type": "string", "enum": ["auftrag", "issue"]},
             "anlass": _TEXT,
@@ -336,13 +359,23 @@ WERKZEUGE = [
     ),
     (
         "kipm_entscheidung_eintragen",
-        "Entscheidung des Projekts direkt eintragen, wenn Fred im Chat etwas festlegt; gilt "
+        "Entscheidung des Projekts eintragen, wenn Fred sie im Chat festgelegt hat; gilt "
         "sofort, steht im Verlauf und im Kontext jedes neuen Chats",
         {
             "entscheidung": {"type": "string", "description": "Was gilt, in einem Satz"},
             "warum": {"type": "string", "description": "Begründung"},
         },
         ["entscheidung"],
+    ),
+    (
+        "kipm_entscheidung_fragen",
+        "Offene Frage stellen, die nur Fred entscheiden kann; sie wartet in „Wartet auf dich“ und "
+        "legt nichts fest, bis er antwortet. Braucht kein fred_sagte",
+        {
+            "frage": {"type": "string", "description": "Was Fred entscheiden soll"},
+            "warum": {"type": "string", "description": "Warum das jetzt ansteht"},
+        },
+        ["frage"],
     ),
     (
         "kipm_entscheidung_aendern",
@@ -411,6 +444,7 @@ _PFLEGEWERKZEUGE = {
         + ("beschreibung",),
     ),
     "kipm_entscheidung_eintragen": ("api_entscheidung_eintragen", ("entscheidung", "warum")),
+    "kipm_entscheidung_fragen": ("api_entscheidung_fragen", ("frage", "warum")),
     "kipm_meilenstein_anlegen": ("api_meilenstein_anlegen", ("name", "datum")),
     "kipm_meilenstein_aendern": (
         "api_meilenstein_aendern",
@@ -423,24 +457,55 @@ class _Ungueltig(Exception):
     pass
 
 
-def werkzeugliste() -> list[dict]:
-    return [
-        {
-            "name": name,
-            "description": beschreibung,
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "projekt": _PROJEKT,
-                    "ordner": _ORDNER,
-                    "anfrage_kennung": _KENNUNG,
-                    **eigenschaften,
-                },
-                "required": pflicht,
+# Alles andere verlangt fred_sagte, auch jedes neue Werkzeug, das hier niemand einträgt.
+_NUR_LESEN = frozenset(
+    {
+        "kipm_projekte",
+        "kipm_projekt",
+        "kipm_auftraege",
+        "kipm_lesen",
+        "kipm_projektkontext",
+        "kipm_projektakte",
+        "kipm_verlauf",
+        "kipm_unterlage_lesen",
+        "kipm_entscheidungen",
+        "kipm_meilensteine",
+    }
+)
+_ARBEIT_AM_AUFTRAG = frozenset(
+    {
+        "kipm_uebernehmen",
+        "kipm_fortschritt",
+        "kipm_rueckfrage",
+        "kipm_hindernis",
+        "kipm_fehler",
+        "kipm_ergebnis",
+    }
+)
+_FRAGE_AN_FRED = frozenset({"kipm_entscheidung_fragen"})
+
+
+def _werkzeug_eintrag(name: str, beschreibung: str, eigenschaften: dict, pflicht: list) -> dict:
+    braucht_fred = name not in _NUR_LESEN | _ARBEIT_AM_AUFTRAG | _FRAGE_AN_FRED
+    return {
+        "name": name,
+        "description": beschreibung,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "projekt": _PROJEKT,
+                "ordner": _ORDNER,
+                "anfrage_kennung": _KENNUNG,
+                **eigenschaften,
+                **({"fred_sagte": _FRED_SAGTE} if braucht_fred else {}),
             },
-        }
-        for name, beschreibung, eigenschaften, pflicht in WERKZEUGE
-    ]
+            "required": [*pflicht, "fred_sagte"] if braucht_fred else pflicht,
+        },
+    }
+
+
+def werkzeugliste() -> list[dict]:
+    return [_werkzeug_eintrag(*werkzeug) for werkzeug in WERKZEUGE]
 
 
 def _nummer(text) -> int:
@@ -478,6 +543,9 @@ def _intern(schluessel: str, aussen: HttpRequest, a: dict, pfad: str, daten=None
         kennung = str(a.get("anfrage_kennung") or "").strip() or uuid.uuid4().hex
         daten = {k: v for k, v in daten.items() if k != "anfrage_kennung"}
         daten["anfrage_kennung"] = kennung
+        # Die Schnittstelle prüft das Feld; hier wird es nur durchgereicht.
+        if a.get("fred_sagte") is not None:
+            daten["fred_sagte"] = a["fred_sagte"]
     innen._body = json.dumps(daten).encode("utf-8") if daten is not None else b""
     treffer = resolve(pfad)
     antwort = treffer.func(innen, *treffer.args, **treffer.kwargs)
@@ -531,7 +599,7 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
     if name == "kipm_auftrag_anlegen":
         felder = ("titel", "modul", "prioritaet", "art", "erzwingen", "ziel", "nicht_ziele")
         felder += ("arbeitsort", "schreibumfang", "quellen", "abnahmekriterien")
-        daten = _felder(a, (*felder, "freigeben", "meilenstein"))
+        daten = _felder(a, (*felder, "freigeben", "meilenstein", "faellig"))
         daten["beschreibung"] = a.get("text", "")
         return rufe(reverse("api_auftrag_anlegen"), daten)
     if name == "kipm_projektkontext":

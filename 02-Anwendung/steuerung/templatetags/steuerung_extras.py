@@ -1,5 +1,6 @@
 from django import template
 
+from .. import dienst
 from ..models import Auftrag, Entscheidung
 
 register = template.Library()
@@ -26,6 +27,22 @@ def zustand(wert: str) -> str:
     return format_html(
         '<span class="status {}">{}</span>', _KLASSEN.get(wert, ""), _WORTE.get(wert, wert)
     )
+
+
+@register.filter
+def faellig_marke(auftrag: Auftrag) -> str:
+    """Termin als Wort, ab dem Tag hervorgehoben; ohne Termin und bei Abgeschlossenem nichts."""
+    from django.utils.html import format_html
+    from django.utils.timezone import localdate
+
+    if auftrag.faellig is None or auftrag.ist_endzustand:
+        return ""
+    tag = auftrag.faellig.strftime("%d.%m.%Y")
+    if not dienst.ist_faellig(auftrag):
+        return format_html('<span class="status">fällig am {}</span>', tag)
+    if auftrag.faellig == localdate():
+        return format_html('<span class="status warn">{}</span>', "heute fällig")
+    return format_html('<span class="status warn">fällig seit {}</span>', tag)
 
 
 @register.filter

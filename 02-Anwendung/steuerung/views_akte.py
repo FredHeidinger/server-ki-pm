@@ -68,7 +68,8 @@ def _ausfuehren(request: HttpRequest, erfolg: str, fn, *args, **kwargs):
 
 @login_required
 def ueberblick(request: HttpRequest, kennung: str) -> HttpResponse:
-    """Von oben: Wartet auf dich · Versionszeile · Meilensteine · zuletzt erledigt · Beschreibung."""
+    """Von oben: Wartet auf dich · Als Nächstes · Versionszeile · Meilensteine · zuletzt erledigt ·
+    Beschreibung."""
     projekt = _projekt(kennung)
     abgleich.versionen_auffrischen([projekt])
     return render(
@@ -78,6 +79,7 @@ def ueberblick(request: HttpRequest, kennung: str) -> HttpResponse:
             projekt,
             "ueberblick",
             wartet=wartet_eintraege(projekt),
+            als_naechstes=dienst.weiter_reihenfolge(projekt)[:5],
             version=abgleich.version_anzeige(projekt),
             meilensteine=_meilensteine_mit_form(projekt),
             meilenstein_form=MeilensteinForm(prefix="m"),
@@ -171,6 +173,27 @@ def wissen(request: HttpRequest, kennung: str) -> HttpResponse:
             zeigen_archiv=zeigen_archiv,
         ),
     )
+
+
+@login_required
+@require_POST
+def entscheidung_antworten(request: HttpRequest, kennung: str, nummer: int) -> HttpResponse:
+    """Antwort aus „Wartet auf dich“; danach gilt sie als Entscheidung."""
+    projekt = _projekt(kennung)
+    akteur = _akteur(request)
+    e = _gefunden(akte.entscheidung_holen, akteur, projekt, nummer)
+    stand = request.POST.get("stand", "")
+    _ausfuehren(
+        request,
+        f"{e.nummer} gilt jetzt als Entscheidung.",
+        akte.entscheidung_beantworten,
+        akteur,
+        projekt,
+        e,
+        erwarteter_stand=int(stand) if stand.isdecimal() else -1,
+        antwort=request.POST.get("antwort", ""),
+    )
+    return redirect("projekt_detail", kennung=kennung)
 
 
 @login_required

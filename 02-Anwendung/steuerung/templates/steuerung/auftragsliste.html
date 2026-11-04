@@ -46,7 +46,7 @@
   {% for z in zeilen %}
     <tr>
       <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
-      <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a></td>
+      <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a> {{ z.a|faellig_marke }}</td>
       <td class="nur-mittel">{{ z.a.modul.name|default:"–" }}</td>
       <td class="nur-breit">{{ z.reifegrad|default:"–" }}</td>
       <td>{{ z.a.zustand|zustand }}</td>

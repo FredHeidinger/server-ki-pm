@@ -3,15 +3,19 @@
 - Anmeldung mit ``Authorization: Bearer kipm_…`` (Chat-Bindung); keine Sitzung, kein CSRF.
 - Jede verändernde Anfrage trägt ``anfrage_kennung``: gleiche Kennung mit gleichem Inhalt
   liefert die gespeicherte Antwort erneut, mit anderem Inhalt wird sie abgewiesen.
+- Jede verändernde Anfrage außer der Arbeit an einem freigegebenen Auftrag trägt ``fred_sagte``:
+  Freds Worte aus dem Chat. Ohne sie wird nichts geändert, mit ihnen stehen sie im Verlauf.
 - Antworten sind JSON mit ``ok`` und entweder Daten oder ``fehler``.
 """
 
+import dataclasses
 import hashlib
 import json
 from functools import wraps
 
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
@@ -26,6 +30,7 @@ from .models import (
     Ereignis,
     Ergebnis,
     Meilenstein,
+    Meldung,
     Modul,
     Projekt,
 )
@@ -72,6 +77,98 @@ def bindung_erforderlich(view):
         return view(request, *args, **kwargs)
 
     return innen
+
+
+SITZUNGSSTART_VERTRAG = 1
+SITZUNGSSTART_OFFEN = 50
+
+
+def _sitzungsprojekt(request: HttpRequest, bindung: ChatBindung) -> Projekt | None:
+    """Wie ``bindung_erforderlich``, aber ohne Ordneranfrage: Ein unbekannter Ordner ist kein
+    Vorgang, sondern der Normalfall eines Hooks in einem nicht eingetragenen Ordner."""
+    if bindung.art != bindung.ART_PC:
+        return bindung.projekt
+    kennung = request.headers.get("X-KIPM-Projekt", "").strip()
+    if kennung:
+        return Projekt.objects.filter(kennung=kennung, aktiv=True).first()
+    return dienst.projekt_fuer_ordner(request.headers.get("X-KIPM-Ordner", "").strip())[0]
+
+
+def _sitzungseintrag(a: Auftrag, uebernehmbar: set[int]) -> dict:
+    return {
+        "nummer": a.nummer,
+        "titel": akte._bereinigt(a.titel),
+        "art": a.typ,
+        "zustand": a.zustand,
+        "prioritaet": a.prioritaet,
+        "faellig": a.faellig.isoformat() if a.faellig else None,
+        "uebernehmbar": a.pk in uebernehmbar,
+        "bearbeiter": a.bearbeiter_name or None,
+    }
+
+
+def _wartet_eintrag(x: Auftrag | Entscheidung) -> dict:
+    if isinstance(x, Entscheidung):
+        return {
+            "art": "entscheidung",
+            "nummer": x.nummer,
+            "titel": akte._bereinigt(x.titel),
+            "text": akte._bereinigt(x.text),
+            "faellig": None,
+        }
+    frage = None
+    if x.zustand == Auftrag.BLOCKIERT:
+        frage = x.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
+    if dienst.ist_faellig(x):
+        art = "faellig"
+    elif x.zustand == Auftrag.BLOCKIERT:
+        art = frage.art.lower() if frage else "hindernis"
+    else:
+        art = "freigabe"
+    return {
+        "art": art,
+        "nummer": x.nummer,
+        "titel": akte._bereinigt(x.titel),
+        "text": akte._bereinigt(frage.text) if frage else "",
+        "faellig": x.faellig.isoformat() if x.faellig else None,
+    }
+
+
+@csrf_exempt
+@require_GET
+def sitzungsstart(request: HttpRequest) -> JsonResponse:
+    """Fester Vertrag für den Hook beim Sitzungsstart (``01-Planung/ROADMAP-ERSATZ.md``). Schreibt
+    nichts: darum weder ``bindung_erforderlich`` noch ``bindung_pruefen``."""
+    kopf = request.headers.get("Authorization", "")
+    bindung = dienst.bindung_finden(kopf[7:]) if kopf.startswith("Bearer ") else None
+    if bindung is None:
+        return _fehler(401, "Zugangsschlüssel fehlt, ist ungültig, abgelaufen oder widerrufen.")
+    projekt = _sitzungsprojekt(request, bindung)
+    antwort = {
+        "ok": True,
+        "vertrag": SITZUNGSSTART_VERTRAG,
+        "stand": timezone.now().isoformat(timespec="seconds"),
+        "projekt": None,
+        "naechster": None,
+        "offen": [],
+        "weitere": 0,
+        "wartet": [],
+    }
+    if projekt is None:
+        return JsonResponse(antwort)
+    weiter = dienst.weiter_reihenfolge(projekt)
+    uebernehmbar = {a.pk for a in weiter}
+    offen = dienst.offene_eintraege(projekt)
+    antwort.update(
+        {
+            "projekt": projekt.kennung,
+            "naechster": _sitzungseintrag(weiter[0], uebernehmbar) if weiter else None,
+            "offen": [_sitzungseintrag(a, uebernehmbar) for a in offen[:SITZUNGSSTART_OFFEN]],
+            "weitere": max(len(offen) - SITZUNGSSTART_OFFEN, 0),
+            "wartet": [_wartet_eintrag(x) for x in akte.wartet_liste(projekt)],
+        }
+    )
+    return JsonResponse(antwort)
 
 
 def _projekt_noetig(request: HttpRequest) -> Projekt:
@@ -148,6 +245,42 @@ def _mit_wiederholungsschutz(view):
         )
         return antwort
 
+    innen.aendert = True
+    return innen
+
+
+FRED_SAGTE_LAENGE = 500
+
+
+def _fred_bestaetigt(view):
+    """Der Chat fragt Fred, bevor er etwas ändert, und nennt dessen Worte in ``fred_sagte``. Steht
+    vor dem Wiederholungsschutz: Eine Ablehnung verbraucht keine Kennung, der Chat sendet nach
+    Freds Ja denselben Aufruf erneut. Ob die Worte wirklich von Fred stammen, prüft niemand; sie
+    stehen im Verlauf, dort sieht er es."""
+
+    @wraps(view)
+    def innen(request: HttpRequest, *args, **kwargs):
+        try:
+            daten = _json(request)
+        except dienst.DienstFehler as fehler:
+            return _fehler(400, str(fehler))
+        worte = daten.get("fred_sagte")
+        worte = worte.strip() if isinstance(worte, str) else ""
+        if not worte:
+            return _fehler(
+                400,
+                "Frag Fred zuerst. Diese Änderung braucht seine Worte aus dem Chat in "
+                "„fred_sagte“; es wurde nichts geändert.",
+            )
+        if len(worte) > FRED_SAGTE_LAENGE:
+            return _fehler(
+                400,
+                f"fred_sagte ist zu lang (höchstens {FRED_SAGTE_LAENGE} Zeichen); nichts geändert.",
+            )
+        request.akteur = dataclasses.replace(request.akteur, fred_sagte=akte._bereinigt(worte))
+        return view(request, *args, **kwargs)
+
+    innen.fred_noetig = True
     return innen
 
 
@@ -181,6 +314,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
             if auftrag.meilenstein
             else None
         ),
+        "faellig": auftrag.faellig.isoformat() if auftrag.faellig else None,
         "art": auftrag.typ,
         "zustand": auftrag.zustand,
         "prioritaet": auftrag.prioritaet,
@@ -299,6 +433,7 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -307,7 +442,7 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     freigegeben, alles in einem Aufruf: scheitert die Freigabeprüfung, wird nichts angelegt.
     Gleicher Titel wie ein offener Auftrag ergibt 409 mit dessen Nummer, außer ``erzwingen``.
     ``art`` „issue“ legt ein Issue (Fehler oder Problem) an. ``meilenstein`` (M-3) ordnet ihn
-    einem Meilenstein desselben Projekts zu."""
+    einem Meilenstein desselben Projekts zu, ``faellig`` (JJJJ-MM-TT) setzt den Termin."""
     projekt = _projekt_noetig(request)
     modul = None
     if daten.get("modul"):
@@ -335,6 +470,7 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         planung=planung,
         freigeben=bool(daten.get("freigeben", False)),
         meilenstein=_meilenstein(projekt, daten.get("meilenstein")),
+        faellig=daten.get("faellig"),
     )
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
@@ -478,10 +614,11 @@ def entscheidungen(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def entscheidung_eintragen(request: HttpRequest, daten: dict) -> JsonResponse:
-    """Der Chat trägt eine Entscheidung seines Projekts direkt ein; gilt sofort."""
+    """Der Chat trägt nach Freds Ja eine Entscheidung seines Projekts ein; gilt sofort."""
     e = akte.entscheidung_eintragen(
         request.akteur,
         _akte_projekt(request),
@@ -494,6 +631,7 @@ def entscheidung_eintragen(request: HttpRequest, daten: dict) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def entscheidung_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -522,6 +660,22 @@ def entscheidung_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
     return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)})
 
 
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def entscheidung_fragen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Offene Frage an Fred; kein ``fred_sagte``, denn erst seine Antwort legt etwas fest."""
+    e = akte.entscheidung_fragen(
+        request.akteur,
+        _akte_projekt(request),
+        frage=str(daten.get("frage", "")),
+        warum=str(daten.get("warum", "")),
+    )
+    return JsonResponse({"ok": True, "entscheidung": _entscheidung_json(e)}, status=201)
+
+
 def _meilenstein_json(m: Meilenstein) -> dict:
     """``m`` aus ``akte.meilensteine_des_projekts`` oder ``akte.meilenstein_gezaehlt``."""
     return {
@@ -547,6 +701,7 @@ def meilensteine(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def meilenstein_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -564,6 +719,7 @@ def meilenstein_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def meilenstein_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -619,6 +775,7 @@ def projekte(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -636,6 +793,7 @@ def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def modul_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -664,6 +822,7 @@ def _modul_json(m: Modul) -> dict:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def modul_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -715,6 +874,7 @@ def _ort_json(o: Arbeitsort) -> dict:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def arbeitsort_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -752,6 +912,7 @@ def arbeitsort_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def arbeitsort_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -788,13 +949,14 @@ def _nach_kennung(modell, projekt: Projekt, wert, was: str):
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     """Auftrag planen oder ändern; nur angegebene Felder ändern sich. Eine bestehende Freigabe
-    erlischt dabei, außer es ändert sich nur der Meilenstein (leer löst ihn). Mit ``freigeben``
-    gibt der Assistent danach auf Freds Anweisung im Chat frei; scheitert die Freigabeprüfung,
-    bleibt auch die Planung unverändert."""
+    erlischt dabei, außer es ändern sich nur Meilenstein oder Termin (leer löst sie). Mit
+    ``freigeben`` gibt der Assistent danach auf Freds Anweisung im Chat frei; scheitert die
+    Freigabeprüfung, bleibt auch die Planung unverändert."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     rev = auftrag.aktuelle_revision
     werte = {feld: getattr(rev, feld) for feld in PLANFELDER}
@@ -812,7 +974,7 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     if prioritaet not in dict(Auftrag.PRIO):
         raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
     with transaction.atomic():
-        if set(daten) - {"freigeben", "meilenstein", "anfrage_kennung"}:
+        if set(daten) - {"freigeben", "meilenstein", "faellig", "anfrage_kennung", "fred_sagte"}:
             dienst.auftrag_bearbeiten(
                 request.akteur,
                 auftrag,
@@ -826,6 +988,8 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
             )
         if "meilenstein" in daten:
             dienst.meilenstein_zuordnen(request.akteur, auftrag, meilenstein)
+        if "faellig" in daten:
+            dienst.faellig_setzen(request.akteur, auftrag, daten["faellig"])
         if daten.get("freigeben"):
             dienst.auftrag_freigeben(request.akteur, auftrag)
     auftrag.refresh_from_db()
@@ -835,6 +999,7 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def antworten(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
@@ -1000,6 +1165,7 @@ def unterlage_lesen(request: HttpRequest, nummer: int) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def unterlage_entwurf(request: HttpRequest, daten: dict) -> JsonResponse:
@@ -1029,10 +1195,11 @@ def _erwartete_revision(daten: dict) -> int:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def profil_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
-    """Beschreibung und Profil direkt ändern; die Änderung steht im Verlauf."""
+    """Beschreibung und Profil ändern; die Änderung steht im Verlauf."""
     p = akte.profil_bearbeiten(
         request.akteur,
         _akte_projekt(request),
@@ -1051,6 +1218,7 @@ def profil_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
+@_fred_bestaetigt
 @_mit_wiederholungsschutz
 @_behandeln
 def unterlage_version(request: HttpRequest, daten: dict, nummer: int) -> JsonResponse:

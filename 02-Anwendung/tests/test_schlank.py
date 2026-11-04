@@ -107,6 +107,7 @@ def test_mcp_kennt_nur_die_schlanken_werkzeuge():
         "kipm_entscheidungen",
         "kipm_entscheidung_eintragen",
         "kipm_entscheidung_aendern",
+        "kipm_entscheidung_fragen",
         "kipm_meilensteine",
         "kipm_meilenstein_anlegen",
         "kipm_meilenstein_aendern",

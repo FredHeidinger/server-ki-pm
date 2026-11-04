@@ -201,6 +201,7 @@ class Auftrag(models.Model):
     meilenstein = models.ForeignKey(
         "Meilenstein", null=True, blank=True, on_delete=models.PROTECT, related_name="auftraege"
     )
+    faellig = models.DateField("Fällig am", null=True, blank=True)
     titel = models.CharField("Titel", max_length=200)
     zustand = models.CharField("Zustand", max_length=24, choices=ZUSTAENDE, default=ENTWURF)
     zustand_vor_pause = models.CharField(max_length=24, blank=True)

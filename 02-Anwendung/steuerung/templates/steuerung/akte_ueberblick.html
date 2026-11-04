@@ -1,4 +1,5 @@
 {% extends "steuerung/projekt_grund.html" %}
+{% load steuerung_extras %}
 {% block titel %}{{ projekt.name }} – Überblick{% endblock %}
 {% block projektinhalt %}
 <section class="box{% if wartet %} warn{% endif %}" aria-labelledby="h-wartet">
@@ -6,15 +7,35 @@
   {% if wartet %}
   <ul class="eingang">
   {% for w in wartet %}
-    <li class="eintrag {% if w.a.zustand == 'BLOCKIERT' %}eintrag-blockade{% else %}eintrag-freigabe{% endif %}">
-      <div class="eintragkopf"><span class="eintragart">{% if w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><span class="eintragzeit">{{ w.a.aktualisiert_am|date:"d.m. H:i" }}</span></div>
-      <p class="eintragtitel"><a href="{% url 'auftrag_detail' auftrag_id=w.a.pk %}"><span class="nr">{{ w.a.nummer }}</span> {{ w.a.titel }}</a></p>
-      <div class="eintragaktionen">{% include "steuerung/hauptknopf.html" with a=w.a h=w.h ort="eingang" zurueck=request.path %}</div>
+    {% if w.e %}
+    <li class="eintrag eintrag-frage">
+      <div class="eintragkopf"><span class="eintragart">Offene Entscheidung</span><span class="eintragzeit">{{ w.e.vorgeschlagen_am|date:"d.m. H:i" }}</span></div>
+      <p class="eintragtitel"><span class="nr">{{ w.e.nummer }}</span> {{ w.e.text|linebreaksbr }}</p>
+      {% if w.e.warum %}<p class="eintragtext"><strong>Warum:</strong> {{ w.e.warum|linebreaksbr }}</p>{% endif %}
+      <form method="post" action="{% url 'entscheidung_antworten' kennung=projekt.kennung nummer=w.e.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="stand" value="{{ w.e.stand }}"><input type="text" name="antwort" aria-label="Antwort zu {{ w.e.nummer }}" placeholder="Deine Antwort"><button type="submit" class="knopf">Antworten</button></form>
+      <p class="gedaempft klein">Lässt du das Feld leer, gilt der Text so, wie er dasteht.</p>
     </li>
+    {% else %}
+    <li class="eintrag {% if w.faellig %}eintrag-faellig{% elif w.a.zustand == 'BLOCKIERT' %}eintrag-blockade{% else %}eintrag-freigabe{% endif %}">
+      <div class="eintragkopf"><span class="eintragart">{{ w.a|faellig_marke }} {% if w.faellig %}{{ w.a.get_zustand_display }}{% elif w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><span class="eintragzeit">{{ w.a.aktualisiert_am|date:"d.m. H:i" }}</span></div>
+      <p class="eintragtitel"><a href="{% url 'auftrag_detail' auftrag_id=w.a.pk %}"><span class="nr">{{ w.a.nummer }}</span> {{ w.a.titel }}</a></p>
+      <div class="eintragaktionen">{% include "steuerung/hauptknopf.html" with a=w.a h=w.h ort="eingang" zurueck=request.path %}{% if w.faellig %}{% include "steuerung/faellig_form.html" with a=w.a ort="eingang" zurueck=request.path %}{% endif %}</div>
+    </li>
+    {% endif %}
   {% endfor %}
   </ul>
   {% else %}
-  <p class="gedaempft">Nichts. Offene Fragen, blockierte Aufträge und Entwürfe zum Freigeben erscheinen hier.</p>
+  <p class="gedaempft">Nichts. Fälliges, offene Entscheidungen und Fragen, blockierte Aufträge und Entwürfe zum Freigeben erscheinen hier.</p>
+  {% endif %}
+</section>
+
+<section class="box" id="als-naechstes" aria-labelledby="h-naechstes">
+  <h2 id="h-naechstes">Als Nächstes</h2>
+  {% if als_naechstes %}
+  <ol class="letzte naechste">{% for a in als_naechstes %}<li><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a> {% if a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<span class="prio prio-{{ a.prioritaet }}" title="Priorität">{{ a.prioritaet }}</span> {{ a|faellig_marke }}</li>{% endfor %}</ol>
+  <p class="gedaempft klein">Das nimmt ein Chat bei „weiter“ der Reihe nach. Vorziehen heißt: Priorität auf „hoch“ setzen.</p>
+  {% else %}
+  <p class="gedaempft">Nichts freigegeben. Bei „weiter“ fragt der Chat, welchen Entwurf er nehmen soll.</p>
   {% endif %}
 </section>
 

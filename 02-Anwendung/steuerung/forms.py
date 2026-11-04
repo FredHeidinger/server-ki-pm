@@ -110,6 +110,13 @@ class WunschForm(forms.Form):
         help_text="In deinen Worten. Ziel, Umfang und Kriterien folgen beim Planen.",
     )
     prioritaet = forms.ChoiceField(label="Priorität", choices=Auftrag.PRIO, initial="mittel")
+    # Ein Datumsfeld im Browser versteht nur das ISO-Format; lokalisiert bliebe es leer.
+    faellig = forms.DateField(
+        label="Fällig am",
+        required=False,
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+        help_text="Ab diesem Tag steht der Eintrag oben in „Wartet auf dich“.",
+    )
     erzwingen = forms.BooleanField(
         label="Trotz gleichem Titel anlegen (kein Doppel)", required=False
     )

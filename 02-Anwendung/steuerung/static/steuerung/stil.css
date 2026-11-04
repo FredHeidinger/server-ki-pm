@@ -46,7 +46,7 @@ code { background: var(--weich); padding: 1px 5px; border-radius: 4px; font-size
 .kuerzel { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--gedaempft); background: var(--weich); padding: 2px 7px; border-radius: 10px; vertical-align: middle; }
 
 /* Bedienelemente */
-select, input[type="text"], input[type="password"], input[type="number"], textarea {
+select, input[type="text"], input[type="password"], input[type="number"], input[type="date"], textarea {
   font: inherit; padding: 7px 9px; border: 1px solid var(--linie); border-radius: 7px; background: var(--flaeche); color: var(--text);
 }
 textarea { width: 100%; max-width: 680px; }
@@ -205,6 +205,15 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .eintragtitel { margin: 4px 0; font-weight: 600; } .eintragtitel a { color: var(--text); text-decoration: none; }
 .eintragtext { margin: 2px 0 8px; color: var(--gedaempft); }
 .eintragaktionen { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.eintrag-faellig { border-left-color: var(--warn-linie); }
+.naechste { padding-left: 22px; }
+.naechste li { overflow-wrap: anywhere; }
+.eintrag-frage { border-left-color: var(--akzent); }
+.eintrag-frage .antwortzeile { margin-top: 8px; }
+.eintrag-frage .gedaempft { margin: 6px 0 0; }
+.faelligform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0; }
+.faelligform label { font-size: 13px; color: var(--gedaempft); }
+.faelligform input[type="date"] { max-width: 100%; }
 .antwortzeile { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0; width: 100%; }
 .antwortzeile input[type="text"] { flex: 1; max-width: 520px; }
 

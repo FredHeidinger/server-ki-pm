@@ -3,7 +3,7 @@
 {% block projektinhalt %}
 <section class="box">
   <h2>Beschreibung bearbeiten</h2>
-  <p class="gedaempft">Meist pflegt der Chat die Beschreibung direkt; jede Änderung steht im Verlauf. Ändert jemand sie gleichzeitig, erhältst du einen Konflikt statt einer stillen Überschreibung.</p>
+  <p class="gedaempft">Meist pflegt der Chat die Beschreibung auf deine Anweisung; jede Änderung steht im Verlauf. Ändert jemand sie gleichzeitig, erhältst du einen Konflikt statt einer stillen Überschreibung.</p>
   <form method="post" class="formular">
     {% csrf_token %}
     {% include "steuerung/formular_felder.html" with form=form %}

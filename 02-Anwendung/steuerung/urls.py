@@ -54,6 +54,11 @@ urlpatterns = [
         name="wissen_entscheidung",
     ),
     path(
+        "projekt/<slug:kennung>/wissen/entscheidung/<int:nummer>/antworten/",
+        views_akte.entscheidung_antworten,
+        name="entscheidung_antworten",
+    ),
+    path(
         "projekt/<slug:kennung>/wissen/<int:nummer>/",
         views_akte.unterlage_detail,
         name="unterlage_detail",
@@ -183,4 +188,10 @@ urlpatterns = [
         api.entscheidung_aendern,
         name="api_entscheidung_aendern",
     ),
+    path(
+        "api/entscheidungen/fragen/",
+        api.entscheidung_fragen,
+        name="api_entscheidung_fragen",
+    ),
+    path("api/sitzungsstart/", api.sitzungsstart, name="api_sitzungsstart"),
 ]

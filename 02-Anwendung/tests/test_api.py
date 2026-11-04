@@ -16,6 +16,7 @@ def api(schluessel: str) -> Client:
 
 
 def post(c: Client, pfad: str, **daten):
+    daten.setdefault("fred_sagte", "Ja, mach das.")
     return c.post(pfad, data=json.dumps(daten), content_type="application/json")
 
 

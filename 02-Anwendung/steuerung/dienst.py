@@ -10,7 +10,7 @@ Regeln:
 import hashlib
 import secrets
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.apps import apps
 from django.contrib.auth.models import AbstractBaseUser
@@ -59,6 +59,8 @@ class Akteur:
     ordner: str = ""
     # PC-Zugang: KI-Assistent des Owners; legt an, plant und gibt auf Freds Anweisung im Chat frei.
     ist_assistent: bool = False
+    # Freds Worte aus dem Chat, die eine Änderung tragen; jedes Ereignis der Anfrage nennt sie.
+    fred_sagte: str = ""
 
     @classmethod
     def aus_benutzer(cls, benutzer: AbstractBaseUser) -> "Akteur":
@@ -112,6 +114,8 @@ def _ereignis(
 ) -> Ereignis:
     """Verlaufseintrag im selben Commit; jedes Ereignis eines Projekts erhöht dessen
     Inhaltsrevision (Lesen, Besuchsmarken und unveränderte Abrufe schreiben keines)."""
+    if akteur.fred_sagte:
+        anlass = (anlass + " · " if anlass else "") + f"Fred sagte: „{akteur.fred_sagte}“"
     if akteur.ordner:
         anlass = (anlass + " · " if anlass else "") + f"Ordner {akteur.ordner}"
     if projekt is not None:
@@ -171,6 +175,18 @@ def _projekt_sichtbar(akteur: Akteur, projekt: Projekt) -> None:
 
 def zeilen(text: str) -> list[str]:
     return [z.strip() for z in (text or "").splitlines() if z.strip()]
+
+
+def datum_lesen(wert) -> date | None:
+    """ISO-Datum oder ``date``; leer heißt kein Datum."""
+    if wert in (None, ""):
+        return None
+    if isinstance(wert, date):
+        return wert
+    try:
+        return date.fromisoformat(str(wert).strip())
+    except ValueError as fehler:
+        raise DienstFehler(f"Datum „{wert}“ ist ungültig (z. B. 2026-12-01).") from fehler
 
 
 def module_aus_text(text: str) -> list[tuple[str, str]]:
@@ -777,7 +793,16 @@ def ordner_verwerfen(akteur: Akteur, anfrage: OrdnerAnfrage) -> None:
 
 
 def bindung_pruefen(schluessel: str) -> ChatBindung | None:
-    """Schlüssel prüfen; gibt die aktive Bindung zurück oder None. Nie Details nach außen."""
+    """Schlüssel prüfen und „zuletzt aktiv“ vermerken; gibt die aktive Bindung zurück oder None."""
+    bindung = bindung_finden(schluessel)
+    if bindung is not None:
+        ChatBindung.objects.filter(pk=bindung.pk).update(zuletzt_aktiv=timezone.now())
+    return bindung
+
+
+def bindung_finden(schluessel: str) -> ChatBindung | None:
+    """Schlüssel nur lesend prüfen; gibt die aktive Bindung zurück oder None. Nie Details nach
+    außen."""
     teile = (schluessel or "").strip().split("_", 2)
     if len(teile) != 3 or teile[0] != "kipm":
         return None
@@ -788,7 +813,6 @@ def bindung_pruefen(schluessel: str) -> ChatBindung | None:
         return None
     if not secrets.compare_digest(bindung.schluessel_hash, _schluessel_hash(schluessel.strip())):
         return None
-    ChatBindung.objects.filter(pk=bindung.pk).update(zuletzt_aktiv=timezone.now())
     return bindung
 
 
@@ -1013,12 +1037,14 @@ def wunsch_erfassen(
     typ: str = Auftrag.TYP_AUFTRAG,
     planung: dict | None = None,
     meilenstein: Meilenstein | None = None,
+    faellig=None,
 ) -> Auftrag:
     """Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; mit ``planung`` (Ziel,
     Nicht-Ziele, Arbeitsort, Schreibumfang, Quellen, Abnahmekriterien) gleich geplant, das dürfen
     nur Owner und Assistent. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer
     ``erzwingen``."""
     _projekt_sichtbar(akteur, projekt)
+    faellig = datum_lesen(faellig)
     planung = {k: v for k, v in (planung or {}).items() if v not in (None, "")}
     if planung:
         _planung_erforderlich(akteur, "Aufträge planen")
@@ -1049,6 +1075,7 @@ def wunsch_erfassen(
             projekt=projekt,
             modul=modul,
             meilenstein=meilenstein,
+            faellig=faellig,
             titel=titel.strip(),
             prioritaet=prioritaet,
             typ=typ,
@@ -1071,6 +1098,8 @@ def wunsch_erfassen(
         anlass = "geplant" if planung else ""
         if meilenstein is not None:
             anlass = "; ".join(t for t in (anlass, f"Meilenstein {meilenstein.nummer}") if t)
+        if faellig is not None:
+            anlass = "; ".join(t for t in (anlass, f"fällig am {faellig:%d.%m.%Y}") if t)
         _ereignis(
             akteur,
             projekt=projekt,
@@ -1099,6 +1128,7 @@ def auftrag_anlegen(
     planung: dict | None = None,
     freigeben: bool = False,
     meilenstein: Meilenstein | None = None,
+    faellig=None,
 ) -> Auftrag:
     """Auftrag in einem Schritt anlegen, planen und auf Anweisung freigeben. Alles oder nichts:
     scheitert die Freigabeprüfung, wird auch nichts angelegt."""
@@ -1114,6 +1144,7 @@ def auftrag_anlegen(
             typ=typ,
             planung=planung,
             meilenstein=meilenstein,
+            faellig=faellig,
         )
         if freigeben:
             auftrag_freigeben(akteur, auftrag)
@@ -1234,6 +1265,33 @@ def meilenstein_zuordnen(akteur: Akteur, auftrag: Auftrag, meilenstein: Meilenst
             if meilenstein is not None
             else "Meilenstein gelöst",
             anlass=meilenstein.name if meilenstein is not None else "",
+            revision=str(auftrag.revision_nr),
+        )
+
+
+def faellig_setzen(akteur: Akteur, auftrag: Auftrag, wert) -> None:
+    """Fälligkeit setzen, leer entfernt sie. Chats des Projekts, von Hand nur der Owner; nur an
+    offenen Einträgen. Ändert weder Revision noch Freigabe noch die Zeit „zuletzt erledigt“."""
+    _projekt_sichtbar(akteur, auftrag.projekt)
+    if akteur.bindung is None:
+        _owner_erforderlich(akteur, "Fälligkeit ändern")
+    faellig = datum_lesen(wert)
+    with transaction.atomic():
+        auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if auftrag.ist_endzustand:
+            raise Konflikt(
+                f"{auftrag.nummer} ist „{auftrag.get_zustand_display()}“ und braucht keinen Termin."
+            )
+        if auftrag.faellig == faellig:
+            return
+        auftrag.faellig = faellig
+        auftrag.save(update_fields=["faellig"])
+        _ereignis(
+            akteur,
+            projekt=auftrag.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=auftrag.nummer,
+            ereignis=f"Fällig am {faellig:%d.%m.%Y} gesetzt" if faellig else "Termin entfernt",
             revision=str(auftrag.revision_nr),
         )
 
@@ -1675,16 +1733,73 @@ def ergebnis_einreichen(
     return ergebnis
 
 
+# --- Was als Nächstes dran ist --------------------------------------------------------------
+
+PRIO_RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
+
+
+def _nach_rang(auftraege) -> list[Auftrag]:
+    """Priorität, dann die älteste Nummer; keine Sortierung von Hand."""
+    return sorted(auftraege, key=lambda a: (PRIO_RANG[a.prioritaet], a.pk))
+
+
+def _mit_offenem_vorgaenger(projekt: Projekt):
+    """Abgebrochene Vorgänger halten nichts auf: Sie werden nie mehr erledigt."""
+    return Abhaengigkeit.objects.filter(auftrag__projekt=projekt).exclude(
+        vorgaenger__zustand__in=Auftrag.ENDZUSTAENDE
+    )
+
+
+def weiter_reihenfolge(projekt: Projekt) -> list[Auftrag]:
+    """Die einzige Stelle mit der Regel für „weiter“: freigegebene Aufträge und Issues ohne
+    Bearbeiter und ohne offenen Vorgänger, nach Priorität, dann die älteste Nummer."""
+    return _nach_rang(
+        projekt.auftraege.filter(
+            zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None
+        ).exclude(pk__in=_mit_offenem_vorgaenger(projekt).values("auftrag_id"))
+    )
+
+
+def offene_eintraege(projekt: Projekt) -> list[Auftrag]:
+    """Alles nicht Abgeschlossene: übernehmbar in „weiter“-Reihenfolge, dann Freigegebenes, das
+    auf einen Vorgänger wartet, dann In Arbeit und Blockiert, dann Entwürfe."""
+    weiter = weiter_reihenfolge(projekt)
+    uebernehmbar = {a.pk for a in weiter}
+    offen = list(projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE))
+    wartend = [a for a in offen if a.zustand == Auftrag.FREIGEGEBEN and a.pk not in uebernehmbar]
+    laufend = [a for a in offen if a.zustand in Auftrag.BEARBEITER_ZUSTAENDE]
+    entwuerfe = [a for a in offen if a.zustand == Auftrag.ENTWURF]
+    return [*weiter, *_nach_rang(wartend), *_nach_rang(laufend), *_nach_rang(entwuerfe)]
+
+
 # --- Wartet auf dich ------------------------------------------------------------------------
 
 
+def ist_faellig(auftrag: Auftrag) -> bool:
+    """Offen, und der Termin ist heute oder vorbei (Ortszeit)."""
+    return (
+        auftrag.faellig is not None
+        and not auftrag.ist_endzustand
+        and auftrag.faellig <= timezone.localdate()
+    )
+
+
 def wartet_auf_dich(projekt: Projekt) -> list[Auftrag]:
-    """Was in diesem Projekt auf Fred wartet: blockierte Aufträge (Rückfrage, Hindernis, Fehler)
-    und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort fehlt. Entwürfe in Planung
-    warten auf einen Chat, nicht auf ihn."""
-    offen = projekt.auftraege.filter(
-        zustand__in=(Auftrag.BLOCKIERT, Auftrag.ENTWURF)
-    ).select_related("projekt", "modul")
+    """Was in diesem Projekt auf Fred wartet. Zuoberst jeder offene Eintrag ab seinem Termin, der
+    älteste Termin zuerst, in jedem Zustand. Danach blockierte Aufträge (Rückfrage, Hindernis,
+    Fehler) und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort fehlt. Entwürfe in
+    Planung warten ohne Termin auf einen Chat, nicht auf ihn."""
+    faellige = list(
+        projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+        .filter(faellig__lte=timezone.localdate())
+        .select_related("projekt", "modul")
+        .order_by("faellig", "id")
+    )
+    offen = (
+        projekt.auftraege.filter(zustand__in=(Auftrag.BLOCKIERT, Auftrag.ENTWURF))
+        .exclude(pk__in=[a.pk for a in faellige])
+        .select_related("projekt", "modul")
+    )
     blockiert, entwuerfe = [], []
     for a in offen.order_by("-aktualisiert_am", "-id"):
         if a.zustand == Auftrag.BLOCKIERT:
@@ -1693,4 +1808,4 @@ def wartet_auf_dich(projekt: Projekt) -> list[Auftrag]:
             offene = [p for p in freigabepruefung(a) if not p.erfuellt]
             if all(p.arbeitsort_wahl for p in offene):
                 entwuerfe.append(a)
-    return blockiert + entwuerfe
+    return faellige + blockiert + entwuerfe

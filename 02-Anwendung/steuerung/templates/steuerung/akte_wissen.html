@@ -13,7 +13,7 @@
       <th scope="row">{{ e.text|linebreaksbr }}{% if e.zustand != "ENTSCHIEDEN" %} <span class="status warn">nur Vorschlag</span>{% endif %}{% if e.warum %}<span class="nur-schmal gedaempft">Warum: {{ e.warum|linebreaksbr }}</span>{% endif %}</th>
       <td class="nur-mittel">{% if e.warum %}{{ e.warum|linebreaksbr }}{% else %}<span class="gedaempft">–</span>{% endif %}</td>
       <td>{% if e.entschieden_am %}{{ e.entschieden_am|date:"d.m.Y" }}{% else %}{{ e.vorgeschlagen_am|date:"d.m.Y" }}{% endif %}</td>
-      <td><a href="{% url 'wissen_entscheidung' kennung=projekt.kennung nummer=e.pk %}">Bearbeiten</a></td>
+      <td>{% if e.zustand != "ENTSCHIEDEN" %}<a href="{% url 'projekt_detail' kennung=projekt.kennung %}#h-wartet">Antworten</a><br>{% endif %}<a href="{% url 'wissen_entscheidung' kennung=projekt.kennung nummer=e.pk %}">Bearbeiten</a></td>
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<div class="leer">Noch keine Entscheidung. Legt Fred im Chat etwas fest, trägt der Chat es hier ein.</div>{% endif %}

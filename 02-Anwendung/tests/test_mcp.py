@@ -22,6 +22,10 @@ def _rpc(client, schluessel, methode, params=None, rid: int | None = 1, **kopf):
 
 
 def _werkzeug(client, schluessel, werkzeug, /, **argumente):
+    """Ruft ein Werkzeug auf, wie es ein Chat nach Freds Ja tut; ``fred_sagte=None`` lässt das
+    Feld weg (tests/test_fred_bestaetigung.py)."""
+    if argumente.setdefault("fred_sagte", "Ja, mach das.") is None:
+        del argumente["fred_sagte"]
     antwort = _rpc(client, schluessel, "tools/call", {"name": werkzeug, "arguments": argumente})
     assert antwort.status_code == 200
     ergebnis = antwort.json()["result"]
@@ -236,7 +240,7 @@ def test_assistent_plant_issues_und_arbeitspakete(client, owner, projekt, projek
     assert not fehler and daten["auftrag"]["zustand"] == Auftrag.FREIGEGEBEN
     assert daten["auftrag"]["revision"] == auftrag.revision_nr  # keine neue Revision
     assert Ereignis.objects.filter(
-        objekt_kennung=nr, ereignis="Freigegeben", anlass=dienst.IM_CHAT_FREIGEGEBEN
+        objekt_kennung=nr, ereignis="Freigegeben", anlass__startswith=dienst.IM_CHAT_FREIGEGEBEN
     ).exists()
 
 

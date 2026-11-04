@@ -12,6 +12,7 @@
       <div class="kartenfuss">
         {% if a.zustand != spalte.hauptzustand %}{{ a.zustand|zustand }}{% endif %}
         <span class="prio prio-{{ a.prioritaet }}" title="Priorität">{{ a.prioritaet }}</span>
+        {{ a|faellig_marke }}
         {% if a.bearbeiter_name %}<span class="bearbeiter" title="Bearbeiter">{% if a.bearbeiter_bindung_id %}<span class="ki">KI</span>{% else %}👤{% endif %} {{ a.bearbeiter_name }}</span>{% endif %}
       </div>
     </article>

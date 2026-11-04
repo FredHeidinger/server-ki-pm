@@ -26,18 +26,22 @@ Befehle stehen in [PLAYBOOK.md](../PLAYBOOK.md). Die Serverinstallation ist in [
 | `POST /api/projekte/anlegen/`, `POST /api/module/anlegen/`, `POST /api/module/aendern/` | Projekt und Module pflegen |
 | `POST /api/arbeitsorte/vorschlagen/`, `POST /api/arbeitsorte/aendern/` | Arbeitsort vorschlagen oder ändern; gilt erst mit Freds Häkchen |
 | `GET /api/auftraege/` | Alle offenen Aufträge; `?nur_meine=1` übernehmbare und eigene, `?alle=1` auch abgeschlossene, `?art=issue` nur Issues |
-| `POST /api/auftraege/anlegen/` | `{titel, beschreibung, art?, modul?, meilenstein?, prioritaet?, ziel?, nicht_ziele?, arbeitsort?, schreibumfang[]?, quellen?, abnahmekriterien[]?, freigeben?, erzwingen?, anfrage_kennung}`; in einem Aufruf angelegt und geplant (Planen nur Freds Assistent, PC-Zugang); `freigeben` nur auf Freds Anweisung im Chat, mit Vermerk im Verlauf; scheitert die Freigabeprüfung, wird nichts angelegt; 409 bei gleichem Titel eines offenen Auftrags |
-| `POST /api/auftraege/<id>/planen/` | Nur angegebene Felder ändern sich, eine Freigabe erlischt; `freigeben` wie beim Anlegen; `meilenstein` allein (`M-n`, leer löst) lässt Revision und Freigabe unberührt |
+| `POST /api/auftraege/anlegen/` | `{titel, beschreibung, art?, modul?, meilenstein?, faellig?, prioritaet?, ziel?, nicht_ziele?, arbeitsort?, schreibumfang[]?, quellen?, abnahmekriterien[]?, freigeben?, erzwingen?, anfrage_kennung}`; in einem Aufruf angelegt und geplant (Planen nur Freds Assistent, PC-Zugang); `freigeben` nur auf Freds Anweisung im Chat, mit Vermerk im Verlauf; scheitert die Freigabeprüfung, wird nichts angelegt; 409 bei gleichem Titel eines offenen Auftrags |
+| `POST /api/auftraege/<id>/planen/` | Nur angegebene Felder ändern sich, eine Freigabe erlischt; `freigeben` wie beim Anlegen; `meilenstein` allein (`M-n`, leer löst) und `faellig` allein (`JJJJ-MM-TT`, leer entfernt) lassen Revision und Freigabe unberührt |
 | `GET /api/auftraege/<id>/` | Gebundene Revision mit Umfang und Kriterien |
 | `POST /api/auftraege/<id>/uebernehmen/` | `{revision, anfrage_kennung}`; exklusiv, genau einer gewinnt |
 | `POST /api/auftraege/<id>/fortschritt/`, `…/rueckfrage/`, `…/hindernis/`, `…/fehler/` | `{revision, text, anfrage_kennung}`; Rückfrage, Hindernis und Fehler blockieren den Auftrag bis zur Antwort |
 | `POST /api/auftraege/<id>/antworten/` | Antwort in Freds Namen; hebt die Blockade auf |
 | `POST /api/auftraege/<id>/ergebnis/` | `{revision, zusammenfassung, dateien[], pruefungen[]?, fehlgeschlagen[]?, luecken, anfrage_kennung}`; alle Prüfungen bestanden → Erledigt, eine fehlgeschlagen → Blockiert mit Grund, keine Prüfungen → Erledigt mit Vermerk „ohne automatische Tests“ |
 | `GET /api/entscheidungen/`, `POST /api/entscheidungen/eintragen/`, `POST /api/entscheidungen/aendern/` | Entscheidungen des Projekts (Entscheidung, Warum, Seit); eintragen `{entscheidung, warum?}`, ändern oder zurückziehen `{entscheidung: "E-n", stand, entscheidung_text?, warum?, zurueckziehen?}` |
+| `POST /api/entscheidungen/fragen/` | Offene Frage an Fred `{frage, warum?, anfrage_kennung}`; legt nichts fest, bis er in „Wartet auf dich“ antwortet |
 | `GET /api/meilensteine/`, `POST /api/meilensteine/anlegen/`, `POST /api/meilensteine/aendern/` | Meilensteine mit Name, Datum und automatisch gezähltem Stand (Abgebrochene zählen nicht mit); anlegen `{name, datum?}`, ändern `{meilenstein: "M-n", revision, name?, datum?}`, leeres Datum entfernt es |
 | `GET /api/projekt/akte/`, `GET /api/projekt/kontext/?auftrag=&modul=&kontext_id=&teil=`, `GET /api/projekt/verlauf/?seit=` | Profil mit Übersicht der Texte und Links, KI-Kontext (Teile mit gleicher Kontext-ID), Verlauf |
-| `POST /api/profil/aendern/` | Beschreibung und Profil direkt ändern (`{revision, beschreibung?, zweck?, …}`), mit Eintrag im Verlauf |
+| `GET /api/sitzungsstart/` | Für den Hook beim Sitzungsstart: nächster Eintrag nach der Regel für „weiter“, offene Einträge, was auf Fred wartet. Schreibt nichts; unbekannter Ordner ergibt `projekt: null`. Vertrag in [ROADMAP-ERSATZ.md](../01-Planung/ROADMAP-ERSATZ.md) |
+| `POST /api/profil/aendern/` | Beschreibung und Profil ändern (`{revision, beschreibung?, zweck?, …}`), mit Eintrag im Verlauf |
 | `GET /api/unterlagen/<nr>/` | Neueste Fassung eines Texts oder Links des Projekts, ohne Freigabe; archivierte und früher hochgeladene Dateien ohne damalige Freigabe nicht |
 | `POST /api/unterlagen/entwurf/`, `POST /api/unterlagen/<nr>/version/` | Text anlegen; neue Fassung unter derselben Kennung mit `erwartete_version` und `grund`, ältere Fassungen bleiben |
+
+Jeder `POST` außer `uebernehmen`, `fortschritt`, `rueckfrage`, `hindernis`, `fehler`, `ergebnis` und `entscheidungen/fragen` verlangt `fred_sagte`: Freds Worte aus dem Chat, mit denen er die Änderung angewiesen oder bestätigt hat (höchstens 500 Zeichen). Ohne sie antwortet die Schnittstelle mit 400 und ändert nichts, mit ihnen stehen sie im Verlauf.
 
 Freigeben kann über die Schnittstelle nur Freds Assistent (PC-Zugang) auf seine Anweisung im Chat. Fremde Projekte antworten mit 404, Konflikte und veraltete Revisionen mit 409.

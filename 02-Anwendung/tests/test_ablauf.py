@@ -54,7 +54,7 @@ def test_anlegen_planen_und_freigeben_in_einem_aufruf(client, owner, projekt, pc
     assert a["ziel"] == GEPLANT["ziel"] and a["schreibumfang"] == ["src/login/**"]
     assert a["arbeitsort"]["kennung"] == "repo" and a["fuer_freigabe_fehlt"] == []
     vermerk = Ereignis.objects.get(objekt_kennung=a["nummer"], ereignis="Freigegeben")
-    assert vermerk.anlass == "freigegeben auf Freds Anweisung im Chat"
+    assert vermerk.anlass.startswith("freigegeben auf Freds Anweisung im Chat")
     assert vermerk.akteur_name == pc_zugang.name
 
     # Ohne freigeben bleibt der fertig geplante Auftrag ein Entwurf.

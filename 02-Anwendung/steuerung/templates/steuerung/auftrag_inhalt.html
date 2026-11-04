@@ -2,14 +2,15 @@
 <div class="auftrag" id="auftrag-{{ auftrag.pk }}">
 <p class="zurueckzeile"><a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">← Zurück zum Board</a></p>
 <header class="box auftragskopf" aria-labelledby="titel-{{ auftrag.pk }}">
-  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span></p>
+  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span>{% if not auftrag.ist_endzustand %} {% if auftrag.faellig %}{{ auftrag|faellig_marke }}{% else %}<span>kein Termin</span>{% endif %}{% endif %}</p>
   <h1 class="auftragstitel" id="titel-{{ auftrag.pk }}">{{ auftrag.titel }}</h1>
   <div class="kopfknopf">{% include "steuerung/hauptknopf.html" with a=auftrag h=haupt ort="kopf" %}</div>
   {% if weitere_aktionen or bearbeitbar %}
   <details class="weitere-aktionen">
     <summary>Weitere Aktionen</summary>
     <div class="weitere-liste">
-      {% if bearbeitbar %}<p><a class="knopf zweit klein" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Bearbeiten</a></p>{% endif %}
+      {% if bearbeitbar %}<p><a class="knopf zweit klein" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Bearbeiten</a></p>
+      <div>{% include "steuerung/faellig_form.html" with a=auftrag ort="kopf" %}<p class="gedaempft klein">Ab diesem Tag steht er oben in „Wartet auf dich“. Der Termin ändert weder Revision noch Freigabe.</p></div>{% endif %}
       {% for a in weitere_aktionen %}
         {% if a.erlaubt %}
         <form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion=a.name %}" class="aktion">
