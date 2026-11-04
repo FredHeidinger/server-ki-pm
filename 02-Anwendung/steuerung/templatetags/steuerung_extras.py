@@ -9,12 +9,7 @@ _KLASSEN = {
     Auftrag.FREIGEGEBEN: "ok",
     Auftrag.IN_ARBEIT: "ok",
     Auftrag.ERLEDIGT: "fertig",
-    Auftrag.ZUR_PRUEFUNG: "warn",
-    Auftrag.NACHARBEIT: "warn",
-    Auftrag.ABGENOMMEN: "fertig",
     Auftrag.BLOCKIERT: "bad",
-    Auftrag.KLAERUNG_ERFORDERLICH: "bad",
-    Auftrag.PAUSIERT: "",
     Auftrag.ABGEBROCHEN: "aus",
     Entscheidung.VORSCHLAG: "warn",
     Entscheidung.ENTSCHIEDEN: "ok",
@@ -72,22 +67,3 @@ def datei_link(zeile: str, arbeitsort) -> str:
         commit,
         commit[:12],
     )
-
-
-@register.filter
-def wert(daten: dict, feld: str) -> str:
-    """Feld eines gespeicherten Objektstands lesbar machen (Listen mit Komma)."""
-    w = (daten or {}).get(feld, "")
-    if isinstance(w, list):
-        return (
-            ", ".join(
-                str(x) if not isinstance(x, dict) else " | ".join(str(v) for v in x.values())
-                for x in w
-            )
-            or "–"
-        )
-    if isinstance(w, dict):
-        return ", ".join(f"{k}: {v}" for k, v in w.items()) or "–"
-    if w in (None, ""):
-        return "–"
-    return str(w)

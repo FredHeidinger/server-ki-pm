@@ -1,207 +1,105 @@
 {% load steuerung_extras %}
-<div class="auftrag{% if als_panel %} im-panel{% endif %}" id="auftrag-{{ auftrag.pk }}">
-<div class="kopf">
-  <span class="id">{{ auftrag.nummer }}</span>
-  {% if auftrag.typ == "issue" %}<span class="issue">Issue</span>{% else %}<span>Auftrag</span>{% endif %}
-  {{ auftrag.zustand|zustand }}
-  {% if reifegrad %}<span>{{ reifegrad }}</span>{% endif %}
-  <span>{{ auftrag.projekt.name }}{% if auftrag.modul %} / {{ auftrag.modul.name }}{% endif %}</span>
-  <span>Priorität: {{ auftrag.prioritaet }}</span>
-  {% if auftrag.abgeleitet_von %}<span>abgeleitet aus <a href="{% url 'auftrag_detail' auftrag_id=auftrag.abgeleitet_von.pk %}">{{ auftrag.abgeleitet_von.nummer }}</a></span>{% endif %}
-  {% if auftrag.entscheidung %}<span>zu <a href="{% url 'entscheidung_detail' entscheidung_id=auftrag.entscheidung.pk %}">{{ auftrag.entscheidung.nummer }}</a> Stand {{ auftrag.entscheidung_stand }}</span>{% endif %}
-</div>
-<h1 class="auftragstitel">{{ auftrag.titel }}</h1>
-<p class="kleinmeta auftragsfakten">
-  Bearbeiter: {% if auftrag.bearbeiter_name %}{% if auftrag.bearbeiter_bindung_id %}<span class="ki">KI</span> {% endif %}{{ auftrag.bearbeiter_name }} seit {{ auftrag.uebernommen_am|date:"d.m. H:i" }}{% elif auftrag.letzter_bearbeiter_name %}niemand (zuletzt {{ auftrag.letzter_bearbeiter_name }}){% else %}niemand{% endif %}
-  · Prüfer: {{ auftrag.pruefer.get_username|default:"–" }}
-  · Letzte Meldung: {% if auftrag.zuletzt_gemeldet_am %}{{ auftrag.zuletzt_gemeldet_am|date:"d.m. H:i" }}{% else %}–{% endif %}
-  · Revision {{ rev.nummer }}{% if auftrag.zustand == "ERLEDIGT" and auftrag.abgenommene_revision %} · erledigt mit Revision {{ auftrag.abgenommene_revision }}{% if ergebnis.ohne_tests %} · <span class="status warn">ohne automatische Tests</span>{% endif %}{% endif %}
-</p>
-
-{% if offene_blockade %}
-<section class="box warn">
-  <h2>{{ offene_blockade.get_art_display }} von {{ offene_blockade.akteur_name }} · {{ offene_blockade.zeitpunkt|date:"d.m. H:i" }}</h2>
-  <p>{{ offene_blockade.text|linebreaksbr }}</p>
-  <form method="post" action="{% url 'antwort' auftrag_id=auftrag.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" placeholder="Antwort" required aria-label="Antwort"><button type="submit" class="knopf klein">Antworten und Blockade aufheben</button></form>
-</section>
-{% endif %}
-
-<section class="box schritt{% if pruefpunkte and pruef_erfuellt < pruefpunkte|length %} warn{% endif %}" aria-labelledby="schritt-{{ auftrag.pk }}">
-  <div class="schritt-kopf">
-    <div>
-      <h2 id="schritt-{{ auftrag.pk }}" class="schritt-text">Nächster Schritt: {{ schritt.text }}</h2>
-      {% if pruefpunkte %}<p class="gedaempft klein">{{ pruef_erfuellt }} von {{ pruefpunkte|length }} Punkten der Freigabeprüfung erfüllt</p>{% endif %}
-    </div>
-    <div class="schritt-knoepfe">
-      {% if schritt.planen and bearbeitbar %}<a class="knopf" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Planen</a>{% endif %}
-      {% if schritt.pruefen %}<a class="knopf" href="#pruefen">Jetzt prüfen</a>{% endif %}
-      {% for a in hauptaktionen %}
-        {% if a.erlaubt %}
-        <form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion=a.name %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><button type="submit" class="knopf{% if a.name != 'freigeben' %} zweit{% endif %}">{{ a.text }}</button></form>
-        {% elif not schritt.planen %}
-        <span class="knopf" aria-disabled="true" title="{{ a.grund }}">{{ a.text }} – nicht möglich</span>
-        {% endif %}
-      {% endfor %}
-    </div>
-  </div>
-  {% for a in hauptaktionen %}{% if not a.erlaubt and a.grund and schritt.planen %}<p class="gedaempft klein">{{ a.text }} – nicht möglich: {{ a.grund }}</p>{% endif %}{% endfor %}
-  {% if pruefpunkte %}
-  <details class="freigabepruefung"{% if pruef_erfuellt < pruefpunkte|length %} open{% endif %}>
-    <summary>Freigabeprüfung</summary>
-    <ul class="pruefliste">
-    {% for p in pruefpunkte %}
-      <li>{% if p.erfuellt %}✔{% else %}✘{% endif %} {{ p.text }}{% if not p.erfuellt and p.hinweis %}<br><span class="gedaempft">{{ p.hinweis }}</span>{% endif %}
-        {% if p.arbeitsort_wahl %}{% include "steuerung/arbeitsort_wahl.html" %}{% endif %}
-        {% if p.vorgaenger_angebot %}<form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion='vorgaenger' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="vorgaenger" value="{{ p.vorgaenger_angebot.pk }}"><input type="hidden" name="grund" value="Überschneidung im Schreibumfang"><button type="submit" class="knopf zweit klein">{{ p.vorgaenger_angebot.nummer }} als Vorgänger eintragen</button></form>{% endif %}
-      </li>
-    {% endfor %}
-    </ul>
-  </details>
-  {% endif %}
-  {% if weitere_aktionen %}
+<div class="auftrag" id="auftrag-{{ auftrag.pk }}">
+<p class="zurueckzeile"><a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">← Zurück zum Board</a></p>
+<header class="box auftragskopf" aria-labelledby="titel-{{ auftrag.pk }}">
+  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span></p>
+  <h1 class="auftragstitel" id="titel-{{ auftrag.pk }}">{{ auftrag.titel }}</h1>
+  <div class="kopfknopf">{% include "steuerung/hauptknopf.html" with a=auftrag h=haupt ort="kopf" %}</div>
+  {% if weitere_aktionen or bearbeitbar %}
   <details class="weitere-aktionen">
     <summary>Weitere Aktionen</summary>
     <div class="weitere-liste">
-    {% for a in weitere_aktionen %}
-      {% if a.erlaubt %}
-      <form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion=a.name %}" class="aktion">
-        {% csrf_token %}
-        <input type="hidden" name="zurueck" value="{{ zurueck }}">
-        {% if a.begruendung %}<label>Begründung für „{{ a.text }}“<br><textarea name="grund" rows="2" required></textarea></label>{% endif %}
-        <button type="submit" class="knopf zweit klein{% if a.gefahr %} gefahr{% endif %}">{{ a.text }}</button>
-      </form>
-      {% else %}
-      <p><span class="knopf zweit klein" aria-disabled="true">{{ a.text }} – nicht möglich</span> <span class="gedaempft klein">{{ a.grund }}</span></p>
-      {% endif %}
-    {% endfor %}
+      {% if bearbeitbar %}<p><a class="knopf zweit klein" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Bearbeiten</a></p>{% endif %}
+      {% for a in weitere_aktionen %}
+        {% if a.erlaubt %}
+        <form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion=a.name %}" class="aktion">
+          {% csrf_token %}
+          <input type="hidden" name="zurueck" value="{{ zurueck }}">
+          {% if a.begruendung %}<label>Begründung für „{{ a.text }}“<br><textarea name="grund" rows="2" required></textarea></label>{% endif %}
+          <button type="submit" class="knopf zweit klein{% if a.gefahr %} gefahr{% endif %}">{{ a.text }}</button>
+        </form>
+        {% else %}
+        <p><span class="knopf zweit klein" aria-disabled="true">{{ a.text }} – nicht möglich</span> <span class="gedaempft klein">{{ a.grund }}</span></p>
+        {% endif %}
+      {% endfor %}
     </div>
   </details>
   {% endif %}
-</section>
+</header>
 
-{% if pruefbar %}
-<section class="box pruefbox" id="pruefen">
-  <h2>Prüfen und abnehmen</h2>
-  <div class="zwei">
-    <div>
-      <h3>Nachweise des Bearbeiters</h3>
-      <dl class="felder eng">
-        <dt>Eingereicht</dt><dd>{{ ergebnis.eingereicht_am|date:"d.m.Y H:i" }} von {{ ergebnis.eingereicht_von_name }}{% if ergebnis.bindung_id %} <span class="ki">KI</span>{% endif %}, Rev {{ ergebnis.revision_nr }}</dd>
-        <dt>Zusammenfassung</dt><dd>{{ ergebnis.zusammenfassung|linebreaksbr }}</dd>
-        <dt>Dateien</dt><dd>{% for d in ergebnis.dateiliste %}{% datei_link d rev.arbeitsort %}<br>{% endfor %}</dd>
-        <dt>Prüfungen</dt><dd>{% for p in ergebnis.pruefungsliste %}{{ p }}<br>{% endfor %}<span class="gedaempft">Angaben des Bearbeiters.</span></dd>
-        <dt>Lücken</dt><dd>{{ ergebnis.luecken|linebreaksbr|default:"keine genannt" }}</dd>
-      </dl>
-      {% if pruefberichte %}<h3>Prüfberichte anderer Chats</h3>{% for b in pruefberichte %}<p><strong>{{ b.akteur_name }}</strong> · {{ b.zeitpunkt|date:"d.m. H:i" }}<br>{{ b.text|linebreaksbr }}</p>{% endfor %}<p class="gedaempft">Hinweise, keine Abnahme.</p>{% endif %}
-    </div>
-    <form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion='pruefen' %}">
-      {% csrf_token %}
-      <input type="hidden" name="zurueck" value="{{ zurueck }}">
-      <h3>Abnahmekriterien</h3>
-      {% for k in kriterien %}
-      <fieldset>
-        <legend>{{ forloop.counter }}. {{ k.text }}</legend>
-        {% for wert, wort in bewertungen %}<label class="radio"><input type="radio" name="k{{ k.i }}" value="{{ wert }}" required> {{ wort }}</label> {% endfor %}
-        <br><input type="text" name="a{{ k.i }}" placeholder="Anmerkung (bei „nicht geprüft“ Pflicht)" size="40">
-      </fieldset>
-      {% endfor %}
-      <p><label><input type="checkbox" name="integration_offen" value="1"> Integrationsprüfung bleibt offen</label></p>
-      <p><label>Begründung <span class="gedaempft">(bei Nacharbeit Pflicht)</span><br><textarea name="begruendung" rows="2"></textarea></label></p>
-      <p><button type="submit" name="entscheidung" value="ABGENOMMEN" class="knopf">Abnehmen</button> <button type="submit" name="entscheidung" value="NACHARBEIT" class="knopf zweit">Nacharbeit anfordern</button></p>
-      <p class="gedaempft">Abnahme bindet Revision {{ ergebnis.revision_nr }} und die genannten Dateistände.</p>
-    </form>
-  </div>
+{% if auftrag.zustand == "ENTWURF" and pruef_offen %}
+<section class="box warn" id="freigabe" aria-labelledby="h-freigabe-{{ auftrag.pk }}">
+  <h2 id="h-freigabe-{{ auftrag.pk }}">Freigabe: was noch fehlt</h2>
+  <ul class="pruefliste">
+  {% for p in pruef_offen %}
+    <li>✘ {{ p.text }}{% if p.hinweis %}<br><span class="gedaempft">{{ p.hinweis }}</span>{% endif %}
+      {% if p.arbeitsort_wahl %}{% include "steuerung/arbeitsort_wahl.html" %}{% endif %}
+      {% if p.vorgaenger_angebot %}<form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion='vorgaenger' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="vorgaenger" value="{{ p.vorgaenger_angebot.pk }}"><input type="hidden" name="grund" value="Überschneidung im Schreibumfang"><button type="submit" class="knopf zweit klein">{{ p.vorgaenger_angebot.nummer }} als Vorgänger eintragen</button></form>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
 </section>
 {% endif %}
 
-<nav class="auftragsreiter" aria-label="Teile des Auftrags">
-  <a href="#a{{ auftrag.pk }}-auftrag" data-reiter="auftrag" aria-current="true">Auftrag</a>
-  <a href="#a{{ auftrag.pk }}-arbeit" data-reiter="arbeit">Arbeit &amp; Ergebnis <span class="zahl">{{ arbeit_anzahl }}</span></a>
-  <a href="#a{{ auftrag.pk }}-verlauf" data-reiter="verlauf">Verlauf <span class="zahl">{{ ereignisse|length }}</span></a>
-</nav>
-
-<section class="reiterteil" id="a{{ auftrag.pk }}-auftrag" data-teil="auftrag">
-  <div class="box">
+<section class="box" id="auftrag" aria-labelledby="h-auftrag-{{ auftrag.pk }}">
+  <h2 id="h-auftrag-{{ auftrag.pk }}">Auftrag</h2>
+  <dl class="felder">
+    <dt>Ziel</dt><dd>{{ rev.ziel|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
+    <dt>Nicht-Ziele</dt><dd>{{ rev.nicht_ziele|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
+    <dt>Arbeitsort</dt><dd>{% if rev.arbeitsort %}{{ rev.arbeitsort.name }}{% if rev.arbeitsort.pfad %} · <code>{{ rev.arbeitsort.pfad }}</code>{% endif %}{% if not rev.arbeitsort.bestaetigt %} <span class="status warn">Vorschlag</span>{% endif %}{% else %}<em>noch leer</em>{% endif %}</dd>
+    <dt>Schreibumfang</dt><dd>{% for m in rev.muster %}<code>{{ m }}</code> {% empty %}<em>noch leer</em>{% endfor %}</dd>
+    <dt>Kriterien</dt><dd>{% if rev.kriterien %}<ol class="kriterien">{% for k in rev.kriterien %}<li>{{ k }}</li>{% endfor %}</ol>{% else %}<em>noch leer</em>{% endif %}</dd>
+  </dl>
+  <details class="mehr">
+    <summary>Mehr Angaben</summary>
     <dl class="felder">
       <dt>Beschreibung</dt><dd>{{ rev.beschreibung|linebreaksbr|default:"–" }}</dd>
-      <dt>Ziel</dt><dd>{{ rev.ziel|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
-      <dt>Nicht-Ziele</dt><dd>{{ rev.nicht_ziele|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
-      <dt>Arbeitsort</dt><dd>{% if rev.arbeitsort %}{{ rev.arbeitsort.name }}{% if rev.arbeitsort.pfad %} · <code>{{ rev.arbeitsort.pfad }}</code>{% endif %}{% if not rev.arbeitsort.bestaetigt %} <span class="status warn">Vorschlag</span>{% endif %}{% else %}<em>noch leer</em>{% endif %}</dd>
-      <dt>Schreibumfang</dt><dd>{% for m in rev.muster %}<code>{{ m }}</code> {% empty %}<em>noch leer</em>{% endfor %}</dd>
-      <dt>Quellen / Verträge</dt><dd>{{ rev.quellen|linebreaksbr|default:"–" }}</dd>
+      <dt>Quellen</dt><dd>{{ rev.quellen|linebreaksbr|default:"–" }}</dd>
+      <dt>Bearbeiter</dt><dd>{% if auftrag.bearbeiter_name %}{% if auftrag.bearbeiter_bindung_id %}<span class="ki">KI</span> {% endif %}{{ auftrag.bearbeiter_name }} seit {{ auftrag.uebernommen_am|date:"d.m. H:i" }}{% elif auftrag.letzter_bearbeiter_name %}niemand (zuletzt {{ auftrag.letzter_bearbeiter_name }}){% else %}niemand{% endif %}</dd>
+      <dt>Priorität</dt><dd>{{ auftrag.prioritaet }}</dd>
       <dt>Vorgänger</dt><dd>
         {% for v in vorgaenger %}<a href="{% url 'auftrag_detail' auftrag_id=v.vorgaenger.pk %}">{{ v.vorgaenger.nummer }}</a> {{ v.vorgaenger.zustand|zustand }}{% if v.grund %} <span class="gedaempft">({{ v.grund }})</span>{% endif %}
           {% if bearbeitbar %}<form method="post" action="{% url 'auftrag_aktion' auftrag_id=auftrag.pk aktion='vorgaenger_entfernen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="vorgaenger" value="{{ v.vorgaenger.pk }}"><button type="submit" class="leise">entfernen</button></form>{% endif %}<br>
         {% empty %}keine{% endfor %}
         {% if nachfolger %}<span class="gedaempft">Nachfolger: {% for n in nachfolger %}<a href="{% url 'auftrag_detail' auftrag_id=n.auftrag.pk %}">{{ n.auftrag.nummer }}</a> {% endfor %}</span>{% endif %}
       </dd>
-      <dt>Abnahmekriterien</dt><dd>{% if rev.kriterien %}<ol class="kriterien">{% for k in rev.kriterien %}<li>{{ k }}</li>{% endfor %}</ol>{% else %}<em>noch leer</em>{% endif %}</dd>
       <dt>Revision</dt><dd>{{ rev.nummer }} · {{ rev.erstellt_am|date:"d.m.Y H:i" }} · {{ rev.erstellt_von_name }} · {{ rev.anlass }}{% if revisionen|length > 1 %} <span class="gedaempft">({{ revisionen|length }} Revisionen)</span>{% endif %}</dd>
     </dl>
-    {% if bearbeitbar %}<p class="knopfzeile"><a class="knopf zweit" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Planen</a> <a class="knopf zweit" href="{% url 'auftrag_teilen' auftrag_id=auftrag.pk %}">Teilauftrag anlegen</a></p>{% endif %}
-    {% if abgeleitete %}<p class="gedaempft">Abgeleitet: {% for t in abgeleitete %}<a href="{% url 'auftrag_detail' auftrag_id=t.pk %}">{{ t.nummer }}</a> {% endfor %}</p>{% endif %}
-  </div>
-  {% if vorschlaege %}
-  <div class="box">
-    <h2>Vorschläge von Bearbeitern (unbestätigt)</h2>
-    {% for v in vorschlaege %}
-    <div class="meldungseintrag">
-      <p><strong>{{ v.akteur_name }}</strong> · {{ v.zeitpunkt|date:"d.m.Y H:i" }} · zu Revision {{ v.revision_nr }}{% if v.historisch %} <span class="alt">(überholte Revision)</span>{% endif %}</p>
-      <p>{{ v.text|linebreaksbr }}</p>
-      <form method="post" action="{% url 'vorschlag_bewerten' auftrag_id=auftrag.pk meldung_id=v.pk wahl='uebernehmen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein">Übernehmen und bearbeiten</button></form>
-      <form method="post" action="{% url 'vorschlag_bewerten' auftrag_id=auftrag.pk meldung_id=v.pk wahl='ablehnen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><button type="submit" class="knopf zweit klein">Ablehnen</button></form>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+  </details>
 </section>
 
-<section class="reiterteil" id="a{{ auftrag.pk }}-arbeit" data-teil="arbeit">
-  {% if not pruefbar %}
-  <div class="box">
-    <h2>Ergebnis</h2>
-    {% if ergebnis %}
-      <dl class="felder">
-        <dt>Eingereicht</dt><dd>{{ ergebnis.eingereicht_am|date:"d.m.Y H:i" }} von {{ ergebnis.eingereicht_von_name }} zu Revision {{ ergebnis.revision_nr }}</dd>
-        <dt>Zusammenfassung</dt><dd>{{ ergebnis.zusammenfassung|linebreaksbr }}</dd>
-        <dt>Geänderte Dateien</dt><dd>{% for d in ergebnis.dateiliste %}{% datei_link d rev.arbeitsort %}<br>{% endfor %}</dd>
-        <dt>Bestandene Prüfungen</dt><dd>{% if ergebnis.ohne_tests %}<span class="status warn">ohne automatische Tests</span><br>{% endif %}{% for p in ergebnis.pruefungsliste %}{{ p }}<br>{% endfor %}<span class="gedaempft">Angaben des Bearbeiters, nicht vom Dienst geprüft.</span></dd>
-        {% if ergebnis.fehlgeschlagenliste %}<dt>Fehlgeschlagene Prüfungen</dt><dd>{% for p in ergebnis.fehlgeschlagenliste %}<span class="status bad">fehlgeschlagen</span> {{ p }}<br>{% endfor %}</dd>{% endif %}
-        <dt>Bekannte Lücken</dt><dd>{{ ergebnis.luecken|linebreaksbr|default:"keine genannt" }}</dd>
-      </dl>
-      {% if pruefung %}
-        <h3>Prüfung</h3>
-        <p>{{ pruefung.get_entscheidung_display }} · {{ pruefung.zeitpunkt|date:"d.m.Y H:i" }} · {{ pruefung.pruefer.get_username }}{% if pruefung.integration_offen %} · Integrationsprüfung offen{% endif %}</p>
-        {% if pruefung.begruendung %}<p>{{ pruefung.begruendung|linebreaksbr }}</p>{% endif %}
-        <ul class="pruefliste">{% for b in pruefung.bewertungen.all %}<li>{% if b.bewertung == "ERFUELLT" %}✔{% elif b.bewertung == "NICHT_ERFUELLT" %}✘{% else %}○{% endif %} {{ b.kriterium }} <span class="gedaempft">{{ b.get_bewertung_display }}{% if b.anmerkung %} – {{ b.anmerkung }}{% endif %}</span></li>{% endfor %}</ul>
-      {% endif %}
-      {% if ergebnisse|length > 1 %}<p class="gedaempft">{{ ergebnisse|length }} Einreichungen insgesamt; gezeigt wird die neueste.</p>{% endif %}
-    {% else %}
-      <p class="gedaempft">Noch keines. Erscheint hier, sobald der Bearbeiter einreicht.</p>
-    {% endif %}
-    {% if ist_bearbeiter and auftrag.zustand in "IN_ARBEIT BLOCKIERT" %}
-      <p><a class="knopf" href="{% url 'eigenes_ergebnis' auftrag_id=auftrag.pk %}">Mein Ergebnis einreichen</a></p>
-    {% endif %}
-  </div>
+<section class="box" id="ergebnis" aria-labelledby="h-ergebnis-{{ auftrag.pk }}">
+  <h2 id="h-ergebnis-{{ auftrag.pk }}">Ergebnis</h2>
+  {% if ergebnis %}
+  <dl class="felder">
+    <dt>Eingereicht</dt><dd>{{ ergebnis.eingereicht_am|date:"d.m.Y H:i" }} von {{ ergebnis.eingereicht_von_name }} zu Revision {{ ergebnis.revision_nr }}</dd>
+    <dt>Zusammenfassung</dt><dd>{{ ergebnis.zusammenfassung|linebreaksbr }}</dd>
+    <dt>Dateien</dt><dd>{% for d in ergebnis.dateiliste %}{% datei_link d rev.arbeitsort %}<br>{% endfor %}</dd>
+    <dt>Prüfungen</dt><dd>{% if ergebnis.ohne_tests %}<span class="status warn">ohne automatische Tests</span>{% else %}{% for p in ergebnis.pruefungsliste %}<span class="status ok">bestanden</span> {{ p }}<br>{% endfor %}{% for p in ergebnis.fehlgeschlagenliste %}<span class="status bad">fehlgeschlagen</span> {{ p }}<br>{% endfor %}<span class="gedaempft klein">Angaben des Chats.</span>{% endif %}</dd>
+    {% if ergebnis.luecken %}<dt>Bekannte Lücken</dt><dd>{{ ergebnis.luecken|linebreaksbr }}</dd>{% endif %}
+  </dl>
+  {% if ergebnisse|length > 1 %}<p class="gedaempft klein">{{ ergebnisse|length }} Einreichungen insgesamt; gezeigt wird die neueste.</p>{% endif %}
+  {% else %}
+  <p class="gedaempft">Noch keines. Erscheint hier, sobald der Chat einreicht.</p>
   {% endif %}
-  <div class="box">
-    <h2>Aktivität</h2>
-    {% if meldungen %}
-    <ul class="aktivitaet">
-    {% for m in meldungen %}
-      <li class="akt-{{ m.art|lower }}"><span class="aktzeit">{{ m.zeitpunkt|date:"d.m. H:i" }}</span> <span class="akttyp">{{ m.get_art_display }}</span> <strong>{{ m.akteur_name }}</strong>{% if m.bindung_id %} <span class="ki">KI</span>{% endif %}{% if m.historisch %} <span class="alt">(historisch)</span>{% endif %}{% if m.art == "VORSCHLAG" %} · {{ m.get_vorschlag_status_display }}{% endif %} · Rev {{ m.revision_nr }}<br>{{ m.text|linebreaksbr }}</li>
-    {% endfor %}
-    </ul>
-    {% else %}<p class="gedaempft">Noch keine Meldungen des Bearbeiters.</p>{% endif %}
-  </div>
+  {% if ist_bearbeiter and auftrag.zustand in "IN_ARBEIT BLOCKIERT" %}<p><a class="knopf zweit" href="{% url 'eigenes_ergebnis' auftrag_id=auftrag.pk %}">Mein Ergebnis einreichen</a></p>{% endif %}
 </section>
 
-<section class="reiterteil" id="a{{ auftrag.pk }}-verlauf" data-teil="verlauf">
-  <div class="box">
-    <h2>Verlauf dieses Auftrags</h2>
-    <div class="tabellenrahmen"><table class="klein"><tbody>
-    {% for e in ereignisse %}<tr><td>{{ e.zeitpunkt|date:"d.m. H:i" }}</td><td>{{ e.akteur_name }}</td><td>{{ e.ereignis }}{% if e.revision %} <span class="gedaempft">Rev {{ e.revision }}</span>{% endif %}{% if e.anlass %}<br><span class="gedaempft">{{ e.anlass }}</span>{% endif %}</td></tr>{% endfor %}
-    </tbody></table></div>
-  </div>
+<section class="box" id="verlauf" aria-labelledby="h-verlauf-{{ auftrag.pk }}">
+  <h2 id="h-verlauf-{{ auftrag.pk }}">Verlauf</h2>
+  {% if meldungen %}
+  <ul class="aktivitaet">
+  {% for m in meldungen %}
+    <li class="akt-{{ m.art|lower }}"><span class="aktzeit">{{ m.zeitpunkt|date:"d.m. H:i" }}</span> <span class="akttyp">{{ m.get_art_display }}</span> <strong>{{ m.akteur_name }}</strong>{% if m.bindung_id %} <span class="ki">KI</span>{% endif %}<br>{{ m.text|linebreaksbr }}</li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+  {% if ereignisse %}
+  <details class="mehr"{% if not meldungen %} open{% endif %}>
+    <summary>Änderungen am Auftrag ({{ ereignisse|length }})</summary>
+    <ul class="letzte">{% for e in ereignisse %}<li><span class="zeit">{{ e.zeitpunkt|date:"d.m. H:i" }}</span> <strong>{{ e.akteur_name }}</strong> {{ e.ereignis }}{% if e.anlass %} <span class="gedaempft">– {{ e.anlass }}</span>{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if not meldungen and not ereignisse %}<p class="gedaempft">Noch nichts geschehen.</p>{% endif %}
 </section>
 </div>

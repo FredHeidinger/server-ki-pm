@@ -18,10 +18,8 @@
   <p class="projektname-nav bereichslink">{{ aktives_projekt.name }}</p>
   {% with k=aktives_projekt.kennung %}
   <a class="bereichslink" href="{% url 'projekt_detail' kennung=k %}" {% if bereich == "ueberblick" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="puls" %} Überblick</a>
-  <a class="bereichslink" href="{% url 'akte_funktionen' kennung=k %}" {% if bereich == "funktionen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ziel" %} Funktionen &amp; Planung</a>
-  <a class="bereichslink" href="{% url 'projekt_auftraege' kennung=k %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Arbeitsaufträge</a>
-  <a class="bereichslink" href="{% url 'akte_betrieb' kennung=k %}" {% if bereich == "betrieb" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="server" %} Versionen &amp; Betrieb</a>
-  <a class="bereichslink" href="{% url 'akte_wissen' kennung=k %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="buch" %} Wissen &amp; Entscheidungen</a>
+  <a class="bereichslink" href="{% url 'projekt_auftraege' kennung=k %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Aufträge</a>
+  <a class="bereichslink" href="{% url 'akte_wissen' kennung=k %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="buch" %} Wissen</a>
   <a class="bereichslink" href="{% url 'projekt_verlauf' kennung=k %}" {% if bereich == "verlauf" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
   {% endwith %}
   {% else %}
@@ -39,10 +37,8 @@
         {% if aktives_projekt %}{% with p=aktives_projekt.kennung %}
         <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag&amp;projekt={{ p }}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
         <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue&amp;projekt={{ p }}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
-        <a role="menuitem" href="{% url 'funktion_neu' kennung=p %}"><strong>Funktion</strong><span>Eine Fähigkeit des Produkts</span></a>
-        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}"><strong>Unterlage</strong><span>Text, Datei oder Link</span></a>
-        <a role="menuitem" href="{% url 'entscheidung_neu' %}?projekt={{ p }}"><strong>Entscheidung</strong><span>Festlegung mit Begründung</span></a>
-        <a role="menuitem" href="{% url 'release_neu' kennung=p %}"><strong>Release</strong><span>Version mit Komponenten</span></a>
+        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=text"><strong>Text</strong><span>Notiz oder Beschreibung für die Chats</span></a>
+        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=link"><strong>Link</strong><span>Verweis auf eine Seite oder Datei</span></a>
         {% endwith %}{% else %}
         <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt; Module sind optional</span></a>
         {% endif %}
@@ -62,50 +58,11 @@
 {% endif %}
 {% block inhalt %}{% endblock %}
 </main>
-<aside id="panel" class="panel" hidden aria-label="Auftrag">
-  <div class="panelkopf"><a id="panel-seite" class="knopf zweit klein" href="#">Als Seite öffnen</a> <button type="button" id="panel-zu" class="knopf zweit klein" aria-label="Panel schließen">Schließen ×</button></div>
-  <div id="panel-inhalt"></div>
-</aside>
 </div>
 <script>
-// Seitenpanel: Links mit data-panel laden das Auftragsfragment rechts; ohne JavaScript öffnet die Seite.
+// Plus-Listen und Kopieren; alles andere ist ohne JavaScript bedienbar.
 (function () {
-  var panel = document.getElementById("panel");
-  var inhalt = document.getElementById("panel-inhalt");
-  var seite = document.getElementById("panel-seite");
-  // Reiter einer Auftragsansicht: ohne JavaScript stehen alle Teile untereinander (Anker).
-  function reiterZeigen(auftrag, name) {
-    auftrag.querySelectorAll(".reiterteil").forEach(function (t) { t.hidden = t.getAttribute("data-teil") !== name; });
-    auftrag.querySelectorAll("[data-reiter]").forEach(function (r) {
-      if (r.getAttribute("data-reiter") === name) { r.setAttribute("aria-current", "true"); } else { r.removeAttribute("aria-current"); }
-    });
-  }
-  function reiterStart(wurzel) {
-    wurzel.querySelectorAll(".auftrag").forEach(function (a) {
-      var ziel = location.hash ? a.querySelector('.reiterteil[id="' + location.hash.slice(1) + '"]') : null;
-      reiterZeigen(a, ziel ? ziel.getAttribute("data-teil") : "auftrag");
-    });
-  }
-  reiterStart(document);
-  function oeffnen(url, seiteUrl) {
-    fetch(url + (url.indexOf("?") > -1 ? "&" : "?") + "zurueck=" + encodeURIComponent(location.pathname + location.search), {credentials: "same-origin"})
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        inhalt.innerHTML = html;
-        reiterStart(inhalt);
-        seite.href = seiteUrl;
-        panel.hidden = false;
-        document.body.classList.add("mit-panel");
-        panel.focus();
-      })
-      .catch(function () { location.href = seiteUrl; });
-  }
   document.addEventListener("click", function (ev) {
-    var a = ev.target.closest("a[data-panel]");
-    if (a) { ev.preventDefault(); oeffnen(a.getAttribute("data-panel"), a.href); return; }
-    var reiter = ev.target.closest("[data-reiter]");
-    if (reiter) { ev.preventDefault(); reiterZeigen(reiter.closest(".auftrag"), reiter.getAttribute("data-reiter")); return; }
-    if (ev.target.closest("#panel-zu")) { panel.hidden = true; document.body.classList.remove("mit-panel"); inhalt.innerHTML = ""; }
     var plus = ev.target.closest(".liste-plus");
     if (plus) {
       var liste = plus.closest(".liste");
@@ -129,7 +86,6 @@
       navigator.clipboard.writeText(text).then(function () { kopie.textContent = "Kopiert"; setTimeout(function () { kopie.textContent = "Kopieren"; }, 1500); });
     }
   });
-  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !panel.hidden) { panel.hidden = true; document.body.classList.remove("mit-panel"); } });
 })();
 </script>
 </body>

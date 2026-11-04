@@ -1,28 +1,29 @@
-"""Transport zu GitHub über eine GitHub App. Nur der Dienst ruft ihn auf; Browser und MCP
-erhalten nie Zugangsdaten.
+"""Transport zu GitHub, nur lesend. Nur der Dienst ruft ihn auf; Browser und MCP erhalten nie
+Zugangsdaten.
 
-Die App authentisiert sich mit einem kurzlebigen JWT (RS256) und tauscht es je Installation
-gegen ein Installationstoken, das auf genau das verbundene Repository beschränkt wird. Lesen
-nutzt Paginierung (``Link``) und bedingte Anfragen (``ETag``/304). Fehler kommen als
-``GitHubFehler`` mit Status; Zeitüberschreitungen gelten als ungeklärter Ausgang.
+``GitHubLesen`` arbeitet mit Freds Lese-Schlüssel und kennt nur GET: Konto, Repositorys, Releases,
+Tags und Bereitstellungen. Der Schlüssel steht nur im Kopf der Anfrage, nie in Adresse, Meldung
+oder Log; bei einer Umleitung auf einen anderen Host geht er nicht mit. Fehler kommen als
+``GitHubFehler`` mit Status.
 
 Für Tests wird mit ``adapter_setzen`` eine Attrappe eingesetzt; sie beweist keine echte
-Schreibfähigkeit.
+Integration.
 """
 
-import base64
-import calendar
-import hashlib
+import http.client
 import json
 import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any
 
 from django.conf import settings
 
 API_VERSION = "2022-11-28"
+GESAMT_SEKUNDEN = 20  # je Abruf; der Serverprozess bricht eine Anfrage nach 60 s ab
+REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _test_adapter = None
 
 
@@ -34,250 +35,180 @@ class GitHubFehler(Exception):
         self.status = status
         self.warten = warten
 
-    @property
-    def unklar(self) -> bool:
-        return self.status == 0 or self.status >= 500
-
 
 def adapter_setzen(adapter) -> None:
     global _test_adapter
     _test_adapter = adapter
 
 
-def adapter():
-    """Eingesetzter Adapter oder echte App; ``None``, wenn GitHub nicht eingerichtet ist."""
-    if _test_adapter is not None:
-        return _test_adapter
-    if settings.KIPM_GITHUB_APP_ID and settings.KIPM_GITHUB_APP_SCHLUESSEL:
-        return GitHubApp(settings.KIPM_GITHUB_APP_ID, settings.KIPM_GITHUB_APP_SCHLUESSEL)
-    return None
+def adapter(schluessel: str) -> Any:
+    """Eingesetzter Adapter, sonst der Lesezugang mit diesem Schlüssel."""
+    return _test_adapter if _test_adapter is not None else GitHubLesen(schluessel)
 
 
-def app_jwt(app_id: str, schluessel_pem: str, jetzt: float | None = None) -> str:
-    """JWT für die App: ausgestellt 60 s zurückdatiert, höchstens 10 Minuten gültig."""
-    import jwt
+class _NurGleicherHost(urllib.request.HTTPRedirectHandler):
+    """Umgeleitet wird nur auf demselben Host; urllib gäbe den Schlüssel sonst weiter."""
 
-    jetzt = int(jetzt if jetzt is not None else time.time())
-    return jwt.encode(
-        {"iat": jetzt - 60, "exp": jetzt + 540, "iss": str(app_id)}, schluessel_pem, "RS256"
-    )
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(req.full_url).netloc:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-class GitHubApp:
-    def __init__(self, app_id: str, schluessel_pfad: str, api: str | None = None):
-        self.app_id = app_id
-        self.schluessel_pfad = schluessel_pfad
+_oeffner = urllib.request.build_opener(_NurGleicherHost)
+
+
+def _zahl(wert) -> int:
+    try:
+        return int(wert or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _anfrage(url, *, token, zeit=15) -> tuple[int, Any, Any]:
+    """Eine GET-Anfrage: (Status, Antwort, Kopfzeilen); jeder Fehlschlag wird ``GitHubFehler``."""
+    kopf = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": API_VERSION,
+        "User-Agent": "Server-KI-PM",
+        "Authorization": f"Bearer {token}",
+    }
+    anfrage = urllib.request.Request(url, method="GET", headers=kopf)
+    try:
+        with _oeffner.open(anfrage, timeout=zeit) as antwort:
+            inhalt = antwort.read()
+            return antwort.status, (json.loads(inhalt) if inhalt else None), antwort.headers
+    except urllib.error.HTTPError as fehler:
+        warten = _zahl(fehler.headers.get("Retry-After"))
+        if fehler.code in (403, 429) and fehler.headers.get("X-RateLimit-Remaining") == "0":
+            warten = max(warten, _zahl(fehler.headers.get("X-RateLimit-Reset")) - int(time.time()))
+        try:
+            text = json.loads(fehler.read() or b"{}").get("message", "")
+        except (ValueError, AttributeError, OSError, http.client.HTTPException):
+            text = ""
+        raise GitHubFehler(fehler.code, text or f"GitHub antwortet {fehler.code}", warten) from None
+    except ValueError:
+        raise GitHubFehler(502, "GitHub antwortet nicht lesbar") from None
+    except (TimeoutError, urllib.error.URLError, http.client.HTTPException, OSError) as fehler:
+        raise GitHubFehler(0, f"GitHub nicht erreichbar: {type(fehler).__name__}") from None
+
+
+class GitHubLesen:
+    """Lesezugang mit dem Lese-Schlüssel: nur GET, keine schreibende Methode."""
+
+    def __init__(self, schluessel: str, api: str | None = None, zeit: float | None = None):
+        self._schluessel = schluessel
         self.api = (api or settings.KIPM_GITHUB_API).rstrip("/")
-        self._tokens: dict = {}
+        self.zeit = zeit if zeit is not None else settings.KIPM_GITHUB_ZEIT
+        self._ende = time.monotonic() + GESAMT_SEKUNDEN
 
-    # --- Anfragen ---
+    def __repr__(self) -> str:
+        return "GitHubLesen()"
 
-    def _roh(self, methode, url, *, token, daten=None, etag="", zeit=15):
-        kopf = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": API_VERSION,
-            "User-Agent": "Server-KI-PM",
-            "Authorization": f"Bearer {token}",
-        }
-        if etag:
-            kopf["If-None-Match"] = etag
-        rumpf = None
-        if daten is not None:
-            rumpf = json.dumps(daten).encode("utf-8")
-            kopf["Content-Type"] = "application/json"
-        anfrage = urllib.request.Request(url, data=rumpf, method=methode, headers=kopf)
-        try:
-            with urllib.request.urlopen(anfrage, timeout=zeit) as antwort:  # noqa: S310
-                inhalt = antwort.read()
-                return antwort.status, (json.loads(inhalt) if inhalt else None), antwort.headers
-        except urllib.error.HTTPError as fehler:
-            if fehler.code == 304:
-                return 304, None, fehler.headers
-            warten = int(fehler.headers.get("Retry-After") or 0)
-            if fehler.code in (403, 429) and fehler.headers.get("X-RateLimit-Remaining") == "0":
-                warten = max(
-                    warten, int(fehler.headers.get("X-RateLimit-Reset", 0)) - int(time.time())
-                )
-            try:
-                text = json.loads(fehler.read() or b"{}").get("message", "")
-            except ValueError:
-                text = ""
-            raise GitHubFehler(
-                fehler.code, text or f"GitHub antwortet {fehler.code}", warten
-            ) from None
-        except (TimeoutError, urllib.error.URLError, OSError) as fehler:
-            raise GitHubFehler(0, f"GitHub nicht erreichbar: {type(fehler).__name__}") from None
+    def _holen(self, url: str):
+        if time.monotonic() > self._ende:
+            raise GitHubFehler(0, "GitHub nicht erreichbar: Gesamtzeit überschritten")
+        return _anfrage(url, token=self._schluessel, zeit=self.zeit)
 
-    def _app_token(self) -> str:
-        with open(self.schluessel_pfad, encoding="utf-8") as f:
-            return app_jwt(self.app_id, f.read())
-
-    def _token(self, ziel) -> str:
-        schluessel = (ziel.installation_id, ziel.github_id)
-        token, ablauf = self._tokens.get(schluessel, ("", 0))
-        if token and ablauf - 60 > time.time():
-            return token
-        _, daten, _ = self._roh(
-            "POST",
-            f"{self.api}/app/installations/{ziel.installation_id}/access_tokens",
-            token=self._app_token(),
-            daten={"repository_ids": [ziel.github_id]},
-        )
-        ablauf = calendar.timegm(time.strptime(daten["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))
-        self._tokens[schluessel] = (daten["token"], ablauf)
-        return daten["token"]
-
-    def _repo(self, ziel, pfad: str) -> str:
-        return f"{self.api}/repos/{ziel.name}{pfad}"
-
-    def _anfrage(self, ziel, methode, pfad, daten=None, etag=""):
-        return self._roh(
-            methode, self._repo(ziel, pfad), token=self._token(ziel), daten=daten, etag=etag
-        )
-
-    # --- Einrichtung ---
-
-    def repo_finden(self, name: str) -> dict:
-        """Repository und App-Installation zu ``besitzer/name``; stabile ID für die Zuordnung."""
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", name):
-            raise GitHubFehler(400, "Name muss besitzer/repository sein.")
-        _, inst, _ = self._roh(
-            "GET", f"{self.api}/repos/{name}/installation", token=self._app_token()
-        )
-        # Kurzlebiges Token der Installation, nur um die stabile Repository-ID zu erfahren.
-        _, daten, _ = self._roh(
-            "POST",
-            f"{self.api}/app/installations/{inst['id']}/access_tokens",
-            token=self._app_token(),
-        )
-        _, repo, _ = self._roh("GET", f"{self.api}/repos/{name}", token=daten["token"])
-        return {
-            "id": repo["id"],
-            "name": repo["full_name"],
-            "standardbranch": repo["default_branch"],
-            "installation_id": inst["id"],
-        }
-
-    def repo_lesen(self, ziel) -> dict:
-        _, repo, _ = self._roh(
-            "GET", f"{self.api}/repositories/{ziel.github_id}", token=self._token(ziel)
-        )
-        return {
-            "id": repo["id"],
-            "name": repo["full_name"],
-            "standardbranch": repo["default_branch"],
-        }
-
-    # --- Lesen ---
-
-    def seiten(self, ziel, pfad: str, parameter: dict, etag: str = "", max_seiten: int = 10):
-        """(Einträge, ETag der ersten Seite, Status, vollständig). 304 heißt unverändert."""
-        url = self._repo(ziel, pfad) + "?" + urllib.parse.urlencode({**parameter, "per_page": 100})
-        eintraege, erster_etag, erste = [], "", True
+    def _liste(self, pfad: str, max_seiten: int = 3) -> list[dict]:
+        url, eintraege = f"{self.api}{pfad}", []
+        trenner = "&" if "?" in url else "?"
+        url += f"{trenner}per_page=100"
         for _ in range(max_seiten):
-            status, daten, kopf = self._roh(
-                "GET", url, token=self._token(ziel), etag=etag if erste else ""
-            )
-            if erste:
-                erster_etag = kopf.get("ETag", "") if kopf else ""
-                if status == 304:
-                    return [], etag, 304, True
-                erste = False
-            eintraege.extend(
-                daten["check_runs"] if isinstance(daten, dict) and "check_runs" in daten else daten
-            )
-            weiter = re.search(r'<([^>]+)>;\s*rel="next"', (kopf.get("Link", "") if kopf else ""))
+            _, daten, kopf = self._holen(url)
+            if not isinstance(daten, list):
+                raise GitHubFehler(502, "GitHub antwortet nicht lesbar")
+            eintraege.extend(e for e in daten if isinstance(e, dict))
+            weiter = re.search(r'<([^>]+)>;\s*rel="next"', kopf.get("Link", "") if kopf else "")
             if not weiter:
-                return eintraege, erster_etag, 200, True
+                break
             url = weiter.group(1)
-        return eintraege, erster_etag, 200, False
-
-    def datei(self, ziel, pfad: str, ref: str) -> dict | None:
-        try:
-            _, daten, _ = self._anfrage(
-                ziel, "GET", f"/contents/{urllib.parse.quote(pfad)}?ref={urllib.parse.quote(ref)}"
-            )
-        except GitHubFehler as fehler:
-            if fehler.status == 404:
-                return None
-            raise
-        if not isinstance(daten, dict) or daten.get("type") != "file":
-            raise GitHubFehler(422, "Pfad ist keine normale Datei (Symlink, Submodul oder Ordner).")
-        return {"sha": daten["sha"], "inhalt": base64.b64decode(daten["content"]).decode("utf-8")}
-
-    def ref(self, ziel, branch: str) -> str | None:
-        try:
-            _, daten, _ = self._anfrage(ziel, "GET", f"/git/ref/heads/{urllib.parse.quote(branch)}")
-        except GitHubFehler as fehler:
-            if fehler.status == 404:
-                return None
-            raise
-        return daten["object"]["sha"]
-
-    def workflow_stand(self, ziel, ref: str) -> tuple[str, list[str]]:
-        """Hash über Namen und SHAs der Workflow-Dateien; leer, wenn es keine gibt."""
-        try:
-            _, daten, _ = self._anfrage(
-                ziel, "GET", f"/contents/.github/workflows?ref={urllib.parse.quote(ref)}"
-            )
-        except GitHubFehler as fehler:
-            if fehler.status == 404:
-                return "", []
-            raise
-        eintraege = sorted((e["name"], e["sha"]) for e in daten or [])
-        return hashlib.sha256(json.dumps(eintraege).encode()).hexdigest(), [n for n, _ in eintraege]
-
-    def issue(self, ziel, nummer: int) -> dict:
-        _, daten, _ = self._anfrage(ziel, "GET", f"/issues/{int(nummer)}")
-        return daten
-
-    def kommentare(self, ziel, nummer: int) -> list[dict]:
-        eintraege, _, _, _ = self.seiten(ziel, f"/issues/{int(nummer)}/comments", {}, max_seiten=5)
+            if not url.startswith(f"{self.api}/"):
+                raise GitHubFehler(502, "GitHub antwortet nicht lesbar")
         return eintraege
 
-    def issues_mit_marke(self, ziel, marke: str) -> list[dict]:
-        eintraege, _, _, _ = self.seiten(
-            ziel, "/issues", {"state": "all", "sort": "created", "direction": "desc"}, max_seiten=2
-        )
-        return [e for e in eintraege if marke in (e.get("body") or "")]
+    def _objekt(self, pfad: str) -> tuple[dict, object]:
+        _, daten, kopf = self._holen(f"{self.api}{pfad}")
+        if not isinstance(daten, dict):
+            raise GitHubFehler(502, "GitHub antwortet nicht lesbar")
+        return daten, kopf
 
-    def pr_fuer_branch(self, ziel, branch: str) -> dict | None:
-        besitzer = ziel.name.split("/")[0]
-        eintraege, _, _, _ = self.seiten(
-            ziel, "/pulls", {"state": "all", "head": f"{besitzer}:{branch}"}, max_seiten=1
-        )
-        return eintraege[0] if eintraege else None
-
-    # --- Schreiben (nur nach bestätigter Aktion) ---
-
-    def issue_anlegen(self, ziel, titel: str, text: str) -> dict:
-        _, daten, _ = self._anfrage(ziel, "POST", "/issues", {"title": titel, "body": text})
-        return daten
-
-    def kommentar(self, ziel, nummer: int, text: str) -> dict:
-        _, daten, _ = self._anfrage(ziel, "POST", f"/issues/{int(nummer)}/comments", {"body": text})
-        return daten
-
-    def issue_aendern(self, ziel, nummer: int, felder: dict) -> dict:
-        _, daten, _ = self._anfrage(ziel, "PATCH", f"/issues/{int(nummer)}", felder)
-        return daten
-
-    def branch_anlegen(self, ziel, branch: str, sha: str) -> None:
-        self._anfrage(ziel, "POST", "/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
-
-    def datei_schreiben(self, ziel, pfad, inhalt, branch, nachricht, sha=None) -> str:
-        daten = {
-            "message": nachricht,
-            "branch": branch,
-            "content": base64.b64encode(inhalt.encode("utf-8")).decode("ascii"),
+    @staticmethod
+    def _repo_daten(repo: dict) -> dict:
+        return {
+            "id": repo.get("id"),
+            "name": repo.get("full_name", ""),
+            "standardbranch": repo.get("default_branch", "main"),
         }
-        if sha:
-            daten["sha"] = sha
-        _, antwort, _ = self._anfrage(ziel, "PUT", f"/contents/{urllib.parse.quote(pfad)}", daten)
-        return antwort["commit"]["sha"]
 
-    def pr_anlegen(self, ziel, titel, head, base, text) -> dict:
-        _, daten, _ = self._anfrage(
-            ziel, "POST", "/pulls", {"title": titel, "head": head, "base": base, "body": text}
-        )
+    def _repo_pfad(self, name: str) -> str:
+        if not REPO_NAME.fullmatch(name or ""):
+            raise GitHubFehler(404, "Name muss besitzer/repository sein.")
+        return f"/repos/{name}"
+
+    def konto(self) -> dict:
+        """Angemeldetes Konto; ``bereiche`` sind die Rechte eines klassischen Schlüssels (bei
+        feingranularen Schlüsseln nennt GitHub keine)."""
+        daten, kopf = self._objekt("/user")
+        bereiche = (kopf.get("X-OAuth-Scopes", "") if kopf else "") or ""
+        return {
+            "login": daten.get("login", ""),
+            "bereiche": [b.strip() for b in bereiche.split(",") if b.strip()],
+        }
+
+    def repositorys(self) -> list[dict]:
+        return [
+            self._repo_daten(r) for r in self._liste("/user/repos?sort=full_name", max_seiten=10)
+        ]
+
+    def repository(self, name: str) -> dict:
+        daten = self._repo_daten(self._objekt(self._repo_pfad(name))[0])
+        if not isinstance(daten["id"], int):
+            raise GitHubFehler(502, "GitHub antwortet nicht lesbar")
         return daten
+
+    def neuestes_release(self, name: str) -> dict | None:
+        """Neuestes veröffentlichtes Release (ohne Entwürfe und Vorabversionen); ``None``, wenn es
+        keines gibt. Das Repository selbst prüft vorher ``repository``."""
+        try:
+            daten, _ = self._objekt(f"{self._repo_pfad(name)}/releases/latest")
+        except GitHubFehler as fehler:
+            if fehler.status == 404:
+                return None
+            raise
+        return {
+            "tag": daten.get("tag_name", ""),
+            "name": daten.get("name") or daten.get("tag_name", ""),
+            "url": daten.get("html_url", ""),
+        }
+
+    def tags(self, name: str) -> list[dict]:
+        return [
+            {"name": t.get("name") or "", "sha": (t.get("commit") or {}).get("sha") or ""}
+            for t in self._liste(f"{self._repo_pfad(name)}/tags")
+        ]
+
+    def bereitstellungen(self, name: str) -> list[dict]:
+        return [
+            {
+                "id": d.get("id"),
+                "umgebung": d.get("environment") or "",
+                "ref": (d.get("ref") or "").removeprefix("refs/tags/").removeprefix("refs/heads/"),
+                "sha": d.get("sha") or "",
+                "erstellt": d.get("created_at") or "",
+                "produktion": bool(d.get("production_environment")),
+            }
+            for d in self._liste(f"{self._repo_pfad(name)}/deployments")
+            if isinstance(d.get("id"), int)
+        ]
+
+    def bereitstellung_zustand(self, name: str, kennung: int) -> str:
+        """Jüngster Zustand einer Bereitstellung; leer, wenn GitHub keinen kennt."""
+        eintraege = self._liste(
+            f"{self._repo_pfad(name)}/deployments/{int(kennung)}/statuses", max_seiten=1
+        )
+        if not eintraege:
+            return ""
+        return max(eintraege, key=lambda e: (e.get("created_at", ""), e.get("id", 0))).get(
+            "state", ""
+        )

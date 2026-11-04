@@ -224,7 +224,6 @@ def test_assistent_plant_issues_und_arbeitspakete(client, owner, projekt, projek
         arbeitsort="repo",
         schreibumfang=["src/login/**"],
         abnahmekriterien=["Spinner verschwindet", "Fehlertext sichtbar"],
-        pruefer=owner.get_username(),
     )
     assert not fehler, daten
     assert daten["auftrag"]["fuer_freigabe_fehlt"] == []

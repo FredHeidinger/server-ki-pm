@@ -6,35 +6,23 @@ import pytest
 from django.urls import reverse
 
 from steuerung import dienst
-from steuerung.models import Auftrag, Entscheidung, Pruefung
+from steuerung.models import Auftrag, Meldung, Pruefung
 from tests.conftest import arbeitspaket
 
 pytestmark = pytest.mark.django_db
 
 
 def test_alle_bereiche_rendern(owner_client, projekt, freigegeben):
-    for name in ("start", "projekte", "wunsch_neu", "entscheidung_neu", "verbindungen"):
+    for name in ("start", "projekte", "wunsch_neu", "verbindungen"):
         assert owner_client.get(reverse(name)).status_code == 200, name
-    # Frühere projektübergreifende Listen führen verständlich zur Projektauswahl (P03).
-    for name in ("meine", "auftraege", "pruefung", "entscheidungen", "verlauf"):
-        antwort = owner_client.get(reverse(name))
-        assert antwort.status_code == 302 and antwort["Location"] == reverse("projekte"), name
     for name in (
         "projekt_detail",
-        "akte_funktionen",
         "projekt_auftraege",
-        "projekt_pruefung",
-        "akte_betrieb",
         "akte_wissen",
         "projekt_verlauf",
         "projekt_einstellungen",
         "akte_profil",
-        "akte_suche",
-        "akte_kontext",
-        "funktion_neu",
         "unterlage_neu",
-        "release_neu",
-        "hochladen",
     ):
         seite = owner_client.get(reverse(name, kwargs={"kennung": "synth-a"}))
         assert seite.status_code == 200, name
@@ -58,8 +46,8 @@ def test_wunsch_formular_und_auftragsseite(owner_client, projekt):
     )
     assert antwort.status_code == 302
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "noch nicht geplant" in seite and "Freigeben – nicht möglich" in seite
-    assert "Ziel vorhanden" in seite and "✘" in seite
+    # Ungeplant: kein Freigeben-Knopf, stattdessen ein Satz, was zu tun ist.
+    assert "Noch nicht geplant" in seite and "/aktion/freigeben/" not in seite
 
 
 def test_konkretisieren_und_freigeben_ueber_oberflaeche(owner_client, owner, projekt):
@@ -79,15 +67,14 @@ def test_konkretisieren_und_freigeben_ueber_oberflaeche(owner_client, owner, pro
             "schreibumfang": "src/**",
             "quellen": "",
             "abnahmekriterien": "K1\nK2",
-            "pruefer": owner.pk,
             "anlass": "konkretisiert",
         },
     )
     assert antwort.status_code == 302
     auftrag.refresh_from_db()
-    assert auftrag.revision_nr == 2 and auftrag.pruefer == owner
+    assert auftrag.revision_nr == 2
     seite = owner_client.get(antwort["Location"]).content.decode()
-    assert "geplant – freigabebereit" in seite
+    assert "/aktion/freigeben/" in seite and ">Freigeben</button>" in seite
     antwort = owner_client.post(
         reverse("auftrag_aktion", kwargs={"auftrag_id": auftrag.pk, "aktion": "freigeben"})
     )
@@ -121,16 +108,15 @@ def test_ergebnis_erledigt_ohne_abnahme_in_oberflaeche(
     seite = owner_client.get(
         reverse("auftrag_detail", kwargs={"auftrag_id": freigegeben.pk})
     ).content.decode()
-    assert "Erledigt" in seite and "erledigt mit Revision 2" in seite
-    # Abnahme-Knöpfe sind ausgeblendet; die frühere Prüfaktion greift nicht mehr.
+    assert "Erledigt" in seite and "pytest: grün" in seite
+    # Abnahme-Knöpfe gibt es nicht; die frühere Prüfaktion ist weg.
     assert "Prüfen und abnehmen" not in seite and "Abnehmen" not in seite
     assert "ohne automatische Tests" not in seite
     antwort = owner_client.post(
         reverse("auftrag_aktion", kwargs={"auftrag_id": freigegeben.pk, "aktion": "pruefen"}),
         {"k0": "ERFUELLT", "a0": "", "k1": "ERFUELLT", "a1": "", "entscheidung": "ABGENOMMEN"},
-        follow=True,
     )
-    assert "wartet nicht auf Prüfung" in antwort.content.decode()
+    assert antwort.status_code == 404
     freigegeben.refresh_from_db()
     assert freigegeben.zustand == Auftrag.ERLEDIGT and Pruefung.objects.count() == 0
     board = owner_client.get(
@@ -143,7 +129,7 @@ def test_ergebnis_erledigt_ohne_abnahme_in_oberflaeche(
 def test_eigenes_ergebnis_ohne_tests_und_mit_fehlschlag(
     owner_client, owner, akteur, projekt, zweiter_mensch
 ):
-    auftrag = arbeitspaket(akteur, projekt, pruefer=zweiter_mensch)
+    auftrag = arbeitspaket(akteur, projekt)
     dienst.auftrag_freigeben(akteur, auftrag)
     owner_client.post(
         reverse("auftrag_aktion", kwargs={"auftrag_id": auftrag.pk, "aktion": "selbst"})
@@ -167,9 +153,9 @@ def test_eigenes_ergebnis_ohne_tests_und_mit_fehlschlag(
         reverse("auftrag_detail", kwargs={"auftrag_id": auftrag.pk})
     ).content.decode()
     assert "Prüfung fehlgeschlagen: ruff: 2 Befunde" in seite
-    assert "Antworten und Blockade aufheben" in seite and "Fehlgeschlagene Prüfungen" in seite
+    assert ">Antworten</button>" in seite and "fehlgeschlagen</span> ruff" in seite
     wartet = owner_client.get(
-        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+        reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
     ).content.decode()
     assert "Wartet auf dich" in wartet and "Prüfung fehlgeschlagen" in wartet
     # Nachgebessert ohne automatische Tests: erledigt mit sichtbarem Vermerk.
@@ -202,42 +188,6 @@ def test_link_wird_einmal_angezeigt_und_ist_widerrufbar(owner_client):
     assert bindung.widerrufen_am is not None
 
 
-def test_entscheidung_ueber_oberflaeche(owner_client, projekt, projekt_b):
-    antwort = owner_client.post(
-        reverse("entscheidung_neu"),
-        {
-            "titel": "Fehlertext-Richtlinie",
-            "text": "Jeder Fehler nennt den nächsten Schritt.",
-            "verweis": "",
-            "projekte": [projekt.pk, projekt_b.pk],
-            "sofort_entscheiden": "on",
-        },
-    )
-    assert antwort.status_code == 302
-    e = Entscheidung.objects.get()
-    assert e.zustand == Entscheidung.ENTSCHIEDEN and e.stand == 1
-    owner_client.post(
-        reverse("entscheidung_aktion", kwargs={"entscheidung_id": e.pk, "aktion": "bestaetigen"}),
-        {"projekt": projekt.pk},
-    )
-    wissen_a = owner_client.get(
-        reverse("akte_wissen", kwargs={"kennung": "synth-a"})
-    ).content.decode()
-    wissen_b = owner_client.get(
-        reverse("akte_wissen", kwargs={"kennung": "synth-b"})
-    ).content.decode()
-    assert "für dieses Projekt übernommen" in wissen_a and "Übernahme offen" in wissen_b
-    antwort = owner_client.post(
-        reverse(
-            "entscheidung_aktion", kwargs={"entscheidung_id": e.pk, "aktion": "umsetzungsauftrag"}
-        ),
-        {"projekt": projekt_b.pk},
-    )
-    assert antwort.status_code == 302
-    auftrag = Auftrag.objects.get(projekt=projekt_b)
-    assert auftrag.entscheidung == e and auftrag.zustand == Auftrag.ENTWURF
-
-
 def test_nutzertexte_werden_nicht_ausgefuehrt(owner_client, owner, projekt, bindung):
     a = dienst.wunsch_erfassen(
         dienst.Akteur.aus_benutzer(owner),
@@ -245,11 +195,14 @@ def test_nutzertexte_werden_nicht_ausgefuehrt(owner_client, owner, projekt, bind
         titel="<script>x()</script>",
         beschreibung="<img src=x onerror=alert(1)>",
     )
-    dienst.vorschlag_einreichen(dienst.Akteur.aus_bindung(bindung), a, 1, "<b>fett</b>")
+    dienst.arbeitsort_setzen(dienst.Akteur.aus_benutzer(owner), a, projekt.arbeitsorte.first())
+    Meldung.objects.create(
+        auftrag=a, revision_nr=1, art=Meldung.FORTSCHRITT, text="<b>fett</b>", akteur_name="Chat"
+    )
     for url in (
-        reverse("auftraege"),
+        reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung}),
         reverse("auftrag_detail", kwargs={"auftrag_id": a.pk}),
-        reverse("verlauf"),
+        reverse("projekt_verlauf", kwargs={"kennung": projekt.kennung}),
     ):
         seite = owner_client.get(url).content.decode()
         assert "<script>x()</script>" not in seite and "<img src=x" not in seite
@@ -281,9 +234,7 @@ def test_anmeldung_wird_nach_fehlversuchen_begrenzt(client, owner):
 
 def test_verlauf_filter(owner_client, projekt, freigegeben):
     seite = owner_client.get(
-        reverse("projekt_verlauf", kwargs={"kennung": projekt.kennung})
-        + "?objekt=Auftrag&kennung="
-        + freigegeben.nummer
+        reverse("projekt_verlauf", kwargs={"kennung": projekt.kennung}) + "?art=Auftrag"
     ).content.decode()
     assert "Freigegeben" in seite and "Projekt registriert" not in seite
 
@@ -296,7 +247,8 @@ def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
     liste = owner_client.get(url + "?ansicht=liste").content.decode()
     assert "<table" in liste and freigegeben.nummer in liste
     auswahl = owner_client.get(reverse("projekte")).content.decode()
-    assert "projektwahl" in auswahl and projekt.name in auswahl and "Dringlichkeit" in auswahl
+    assert "projektwahl" in auswahl and projekt.name in auswahl
+    assert "1 offen · <span>0 wartet auf dich</span> · Version unbekannt" in auswahl
 
 
 def test_plus_listen_und_kuerzel_automatisch(owner_client):
@@ -371,13 +323,17 @@ def test_wartet_auf_dich_im_projekt(owner_client, akteur, projekt, projekt_b, fr
         titel="Fremdes Thema",
         beschreibung="B",
     )
+    geplant = arbeitspaket(akteur, projekt, titel="Geplant vom Chat", umfang="docs/**")
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
     dienst.rueckfrage_melden(chat, freigegeben, 2, "Welche Sprache für den Hinweis?")
-    url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
+    url = reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
     seite = owner_client.get(url).content.decode()
     teil = seite.split("Wartet auf dich")[1].split("</section>")[0]
-    assert "Neuer Auftrag" in teil and "Idee vom Chat" in teil
+    # Ungeplante Idee wartet auf einen Chat, nicht auf Fred; die geplante trägt „Freigeben“.
+    assert "Idee vom Chat" not in teil and "Geplant vom Chat" in teil
+    assert f"/auftraege/{geplant.pk}/aktion/freigeben/" in teil
     assert "Rückfrage" in teil and "Welche Sprache" in teil and "Fremdes Thema" not in seite
+    assert teil.index("Welche Sprache") < teil.index("Geplant vom Chat")
     antwort = owner_client.post(
         reverse("antwort", kwargs={"auftrag_id": freigegeben.pk}),
         {"text": "Deutsch", "zurueck": url},
@@ -392,26 +348,6 @@ def test_wartet_auf_dich_im_projekt(owner_client, akteur, projekt, projekt_b, fr
         .split("Wartet auf dich")[-1]
         .split("</section>")[0]
     )
-
-
-def test_panel_und_projektreiter(owner_client, projekt, freigegeben):
-    panel = owner_client.get(
-        reverse("auftrag_panel", kwargs={"auftrag_id": freigegeben.pk})
-    ).content.decode()
-    assert "<html" not in panel and freigegeben.titel in panel and "Aktionen" in panel
-    for name in (
-        "projekt_detail",
-        "akte_funktionen",
-        "projekt_auftraege",
-        "projekt_pruefung",
-        "akte_betrieb",
-        "akte_wissen",
-        "projekt_verlauf",
-        "projekt_einstellungen",
-    ):
-        seite = owner_client.get(reverse(name, kwargs={"kennung": projekt.kennung}))
-        assert seite.status_code == 200, name
-        assert 'class="reiter"' in seite.content.decode()
 
 
 def test_datei_link_mit_repository(akteur, projekt):
@@ -433,8 +369,10 @@ def test_neu_menue_issues_und_filter(owner_client, akteur, projekt):
     projektseite = owner_client.get(
         reverse("projekt_detail", kwargs={"kennung": projekt.kennung})
     ).content.decode()
-    for wort in ("Auftrag", "Issue", "Funktion", "Unterlage", "Entscheidung", "Release"):
+    for wort in ("Auftrag", "Issue", "Text", "Link"):
         assert f"<strong>{wort}</strong>" in projektseite
+    for wort in ("Funktion", "Unterlage", "Entscheidung", "Release"):
+        assert f"<strong>{wort}</strong>" not in projektseite
     assert f"art=issue&amp;projekt={projekt.kennung}" in projektseite
 
     formular = owner_client.get(reverse("wunsch_neu") + "?art=issue").content.decode()
@@ -474,7 +412,7 @@ def test_module_in_einstellungen_und_filter(owner_client, akteur, projekt):
     seite = owner_client.get(url).content.decode()
     assert 'id="module"' in seite and "Kern" in seite
     ueberblick = owner_client.get(reverse("projekt_detail", kwargs={"kennung": projekt.kennung}))
-    assert "Offen: 2 Aufträge · 1 Issues" in ueberblick.content.decode()
+    assert "Alle Aufträge (3 offen)" in ueberblick.content.decode()
 
     owner_client.post(
         reverse("modul_aendern", kwargs={"kennung": projekt.kennung, "modul": "kern"}),
@@ -496,16 +434,6 @@ def test_module_in_einstellungen_und_filter(owner_client, akteur, projekt):
         + "?ansicht=liste&modul=kern"
     ).content.decode()
     assert "Absturz" in liste and "Ohne Modul" not in liste
-
-
-def test_modul_ueber_neu_anlegen(owner_client, projekt):
-    seite = owner_client.get(reverse("modul_neu_seite")).content.decode()
-    assert "Modul anlegen" in seite
-    antwort = owner_client.post(
-        reverse("modul_neu_seite"), {"projekt": projekt.pk, "name": "Export"}
-    )
-    assert antwort.status_code == 302 and antwort["Location"].endswith("#module")
-    assert projekt.module.filter(kennung="export", name="Export").exists()
 
 
 def test_assistent_darf_module_pflegen(akteur, projekt):

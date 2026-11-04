@@ -142,27 +142,17 @@ def test_entscheidungen_ueber_api(akteur, projekt, projekt_b, bindung):
     c = api(bindung.klartext)
     v = post(
         c,
-        "/api/entscheidungen/vorschlagen/",
-        titel="Namensregel",
-        text="Alles klein",
+        "/api/entscheidungen/eintragen/",
+        entscheidung="Alles klein",
+        warum="Namensregel",
         anfrage_kennung="v",
     )
-    assert v.status_code == 201 and v.json()["entscheidung"]["zustand"] == "VORSCHLAG"
-    nummer = int(v.json()["entscheidung"]["nummer"][2:])
-    # Chat darf nicht entscheiden; Bestätigen vor Entscheidung schlägt fehl
-    b = post(c, f"/api/entscheidungen/{nummer}/bestaetigen/", anfrage_kennung="b1")
-    assert b.status_code == 409
-    from steuerung.models import Entscheidung
-
-    e = Entscheidung.objects.get(pk=nummer)
-    dienst.entscheidung_treffen(akteur, e)
-    b = post(c, f"/api/entscheidungen/{nummer}/bestaetigen/", anfrage_kennung="b2")
-    assert (
-        b.status_code == 200 and b.json()["entscheidung"]["bestaetigt"][0]["projekt"] == "synth-a"
-    )
-    nochmal = post(c, f"/api/entscheidungen/{nummer}/bestaetigen/", anfrage_kennung="b3")
-    assert nochmal.status_code == 409
-    assert c.get("/api/entscheidungen/").json()["entscheidungen"][0]["stand"] == 1
+    assert v.status_code == 201 and v.json()["entscheidung"]["zustand"] == "ENTSCHIEDEN"
+    eintrag = c.get("/api/entscheidungen/").json()["entscheidungen"][0]
+    assert eintrag["entscheidung"] == "Alles klein" and eintrag["warum"] == "Namensregel"
+    assert eintrag["stand"] == 1 and "betroffen" not in eintrag
+    # Frühere Wege gibt es nicht mehr.
+    assert post(c, "/api/entscheidungen/vorschlagen/", anfrage_kennung="x").status_code == 404
 
 
 def test_ungueltiges_json(freigegeben, bindung):

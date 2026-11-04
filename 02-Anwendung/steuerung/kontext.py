@@ -9,20 +9,14 @@ from django.http import HttpRequest
 
 from .models import Auftrag, OrdnerAnfrage, Projekt
 
+# Vier Bereiche je Projekt; die Projekteinstellungen sind eine Nebenaktion ohne eigenen Bereich.
 BEREICHE = {
     "": "ueberblick",
     "profil": "ueberblick",
-    "kontext": "ueberblick",
-    "gesehen": "ueberblick",
-    "funktionen": "funktionen",
-    "meilensteine": "funktionen",
+    "meilensteine": "ueberblick",
+    "version": "ueberblick",
     "auftraege": "auftraege",
-    "pruefung": "auftraege",
-    "betrieb": "betrieb",
-    "umgebung": "betrieb",
-    "github": "betrieb",
     "wissen": "wissen",
-    "entscheidungen": "wissen",
     "verlauf": "verlauf",
 }
 
@@ -36,10 +30,8 @@ def aktives_projekt(request: HttpRequest) -> tuple[Projekt | None, str]:
         auftrag = Auftrag.objects.select_related("projekt").filter(pk=int(teile[2])).first()
         return (auftrag.projekt if auftrag else None), "auftraege"
     kennung = request.GET.get("projekt", "")
-    if kennung and teile[1] in ("auftraege", "entscheidungen"):
-        return Projekt.objects.filter(kennung=kennung).first(), (
-            "auftraege" if teile[1] == "auftraege" else "wissen"
-        )
+    if kennung and teile[1] == "auftraege":
+        return Projekt.objects.filter(kennung=kennung).first(), "auftraege"
     return None, ""
 
 

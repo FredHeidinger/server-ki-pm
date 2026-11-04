@@ -27,9 +27,7 @@ svg { width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColo
 .seitenleiste a { display: flex; gap: 12px; align-items: center; min-height: 42px; padding: 9px 12px; margin: 2px 0; border-radius: 9px; text-decoration: none; color: var(--gedaempft); font-weight: 500; font-size: 14px; }
 .seitenleiste a:hover { background: var(--weich); color: var(--text); }
 .seitenleiste a[aria-current="page"] { background: var(--akzent-weich); color: var(--akzent); font-weight: 650; }
-.seitenleiste .punkt { width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin: 0 6px 0 7px; opacity: .6; }
-.seitenleiste .sym { width: 18px; text-align: center; opacity: .9; }
-.seitenleiste .legende-zustand { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px; }
+
 main { padding: 0 26px 48px; min-width: 0; }
 .kopfzeile { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--linie); margin-bottom: 20px; flex-wrap: wrap; }
 .kopfzeile form { display: flex; align-items: center; gap: 8px; margin: 0; }
@@ -73,19 +71,17 @@ form.inline { display: inline; }
 .stufe.freigabe { background: #fff4d6; color: #7a5a00; }
 .stufe.optional { background: var(--weich); color: var(--gedaempft); }
 
-/* Tabellen, Kacheln, Zustände */
+/* Tabellen, Zustände */
 table { width: 100%; border-collapse: collapse; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 10px; overflow: hidden; box-shadow: var(--schatten); }
 th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--linie); vertical-align: top; }
 thead th { background: var(--weich); font-weight: 600; font-size: 13px; }
 tbody th { font-weight: 600; }
 tr.modul td:first-child { padding-left: 28px; color: var(--gedaempft); }
 table.klein { font-size: 13px; box-shadow: none; }
-.kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-.kachel { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; text-decoration: none; color: var(--text); box-shadow: var(--schatten); }
-.kachel .zahl { font-size: 30px; font-weight: 700; line-height: 1.1; }
-.kachel.aktiv { border-color: var(--akzent); } .kachel.aktiv .zahl { color: var(--akzent); }
-.kachel.warnend { border-color: var(--fehler-linie); } .kachel.warnend .zahl { color: var(--fehler-linie); }
-a.kachel:hover { border-color: var(--akzent); }
+
+ 
+ 
+
 .leer { background: var(--flaeche); border: 1px dashed var(--linie); border-radius: 10px; padding: 16px; color: var(--gedaempft); }
 .leer.klein { padding: 8px; font-size: 13px; text-align: center; }
 .meldungen { list-style: none; padding: 0; margin: 0 0 16px; }
@@ -96,19 +92,14 @@ a.kachel:hover { border-color: var(--akzent); }
 .status { display: inline-block; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--linie); font-size: 12px; white-space: nowrap; background: var(--flaeche); }
 .status.ok { background: var(--ok-flaeche); border-color: var(--ok-linie); } .status.bad { background: var(--fehler-flaeche); border-color: var(--fehler-linie); }
 .status.warn { background: var(--warn-flaeche); border-color: var(--warn-linie); } .status.fertig { background: var(--ok-flaeche); } .status.aus { color: var(--gedaempft); }
-.alt { color: #8a5a00; }
 
 /* Projektkarten */
-.projektkarten { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-.projektkarte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 16px 18px; box-shadow: var(--schatten); }
+
 .projektkopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .projektkopf h3 { font-size: 17px; margin: 0; } .projektkopf a { text-decoration: none; color: var(--text); }
-.balken { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--weich); margin: 10px 0 8px; }
-.balken span { display: block; }
-.b-entwurf { background: var(--c-entwurf); } .b-freigegeben { background: var(--c-freigegeben); } .b-arbeit { background: var(--c-arbeit); } .b-pruefung { background: var(--c-pruefung); } .b-abgenommen { background: var(--c-abgenommen); }
-.legende { list-style: none; padding: 0; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--gedaempft); }
-.legende i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+
+    
+
 .chip { background: var(--weich); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
 .kleinmeta { font-size: 12px; color: var(--gedaempft); margin: 6px 0; }
 
@@ -117,9 +108,9 @@ a.kachel:hover { border-color: var(--akzent); }
 .spalte { background: var(--weich); border-radius: 12px; padding: 10px; min-height: 180px; border-top: 4px solid var(--linie); }
 .spalte h3 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: var(--gedaempft); margin: 2px 4px 10px; }
 .spalte .anzahl { background: var(--flaeche); border-radius: 10px; padding: 0 8px; font-size: 12px; }
-.spalte-entwurf { border-top-color: var(--c-entwurf); } .spalte-freigegeben { border-top-color: var(--c-freigegeben); } .spalte-arbeit { border-top-color: var(--c-arbeit); } .spalte-pruefung { border-top-color: var(--c-pruefung); } .spalte-abgenommen { border-top-color: var(--c-abgenommen); } .spalte-blockiert { border-top-color: var(--fehler-linie); } .spalte-erledigt { border-top-color: var(--c-abgenommen); }
+.spalte-entwurf { border-top-color: var(--c-entwurf); } .spalte-freigegeben { border-top-color: var(--c-freigegeben); } .spalte-arbeit { border-top-color: var(--c-arbeit); }   .spalte-blockiert { border-top-color: var(--fehler-linie); } .spalte-erledigt { border-top-color: var(--c-abgenommen); }
 .karte { background: var(--flaeche); border: 1px solid var(--linie); border-left-width: 4px; border-radius: 9px; padding: 11px 12px; margin-bottom: 9px; box-shadow: var(--schatten); }
-.karte.prio-hoch { border-left-color: var(--fehler-linie); } .karte.prio-mittel { border-left-color: var(--c-arbeit); } .karte.prio-niedrig { border-left-color: var(--c-entwurf); }
+  
 .karte:hover { border-color: var(--akzent); border-left-width: 4px; }
 .kartentitel { display: block; text-decoration: none; color: var(--text); font-weight: 600; font-size: 14px; line-height: 1.35; }
 .kartentitel .nr { color: var(--gedaempft); font-weight: 500; font-family: ui-monospace, Consolas, monospace; font-size: 12px; margin-right: 4px; }
@@ -127,35 +118,32 @@ a.kachel:hover { border-color: var(--akzent); }
 .kartenfuss { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; color: var(--gedaempft); margin-top: 10px; }
 .prio { padding: 0 7px; border-radius: 8px; background: var(--weich); }
 .prio.prio-hoch { background: var(--fehler-flaeche); color: #9f1d1d; }
+.karte.prio-hoch { border-left-color: var(--fehler-linie); } .karte.prio-mittel { border-left-color: var(--c-arbeit); } .karte.prio-niedrig { border-left-color: var(--c-entwurf); }
+
 .bearbeiter { margin-left: auto; }
 
 /* Detailseiten: Hauptspalte und Seitenspalte */
-.detail { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
-.seite .box { margin-bottom: 12px; }
-.seite h2 { margin-top: 0; }
-.seite .aktion { margin: 0 0 10px; }
-.seite .aktion textarea { width: 100%; }
-.seite .aktion .knopf, .seite .knopf { display: block; width: 100%; text-align: center; margin-top: 6px; }
+
 .box { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; box-shadow: var(--schatten); }
 .box.warn { background: var(--warn-flaeche); border-color: var(--warn-linie); }
 .box h2 { margin-top: 0; }
 .kopf { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; color: var(--gedaempft); }
 .kopf .id { font-weight: 700; font-size: 18px; color: var(--text); font-family: ui-monospace, Consolas, monospace; }
 .felder { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 7px 14px; margin: 0; }
-.felder.eng { grid-template-columns: 110px minmax(0, 1fr); }
+
 .felder dt { color: var(--gedaempft); } .felder dd { margin: 0; overflow-wrap: anywhere; }
 ol.kriterien { margin: 0; padding-left: 20px; }
 ul.pruefliste { list-style: none; padding: 0; margin: 0; } ul.pruefliste li { padding: 4px 0; }
 ul.liste-schlicht { padding-left: 18px; margin: 6px 0; }
-.zwei { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
 .drei { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; margin-top: 16px; }
 .zeile { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 10px; }
 .zeile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gedaempft); }
 .filterzeile { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
 .filterzeile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gedaempft); }
-.meldungseintrag { border-top: 1px solid var(--linie); padding-top: 8px; margin-top: 8px; }
+
 fieldset { border: 1px solid var(--linie); border-radius: 8px; margin: 8px 0; padding: 8px 12px; }
-label.radio { margin-right: 10px; }
+
 code.schluessel { display: block; font-size: 15px; padding: 8px; overflow-wrap: anywhere; user-select: all; }
 
 /* Formulare */
@@ -179,12 +167,12 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .anmeldekarte h1 { margin-top: 0; }
 
 @media (max-width: 1100px) { .drei { grid-template-columns: 1fr; } }
-@media (max-width: 1000px) { .detail { grid-template-columns: 1fr; } .zwei { grid-template-columns: 1fr; } }
+
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
   .seitenleiste { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 10px 12px; }
   .seitenleiste .marke { width: 100%; margin-bottom: 6px; }
-  .seitenleiste .legende-zustand { display: none; }
+  
   main { padding: 0 14px 32px; }
 }
 
@@ -196,7 +184,7 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .seitenleiste .gruppe.unten { margin-top: 28px; }
 .seitenleiste .gruppe.unten a { font-size: 14px; text-transform: none; letter-spacing: 0; color: #d1d5db; display: flex; gap: 10px; padding: 9px 11px; border-radius: 8px; }
 .seitenleiste .gruppe.unten a[aria-current="page"] { background: var(--akzent); color: #fff; }
-.seitenleiste .projektlink { font-size: 14px; }
+
 .zaehler { background: var(--akzent); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; margin-left: auto; }
 .brotkrumen { color: var(--gedaempft); font-size: 14px; }
 .brotkrumen a { color: var(--gedaempft); }
@@ -207,11 +195,11 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .reiter a[aria-current="page"] { color: var(--akzent); border-bottom-color: var(--akzent); }
 .umschalter-zeile { margin-bottom: 10px; }
 
-/* Posteingang */
+/* Wartet auf dich */
 .eingang { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .eintrag { background: var(--flaeche); border: 1px solid var(--linie); border-left: 4px solid var(--c-entwurf); border-radius: 10px; padding: 12px 14px; box-shadow: var(--schatten); }
-.eintrag-pruefung { border-left-color: var(--c-pruefung); } .eintrag-blockade { border-left-color: var(--fehler-linie); } .eintrag-klaerung { border-left-color: var(--fehler-linie); }
-.eintrag-vorschlag { border-left-color: var(--c-arbeit); } .eintrag-wunsch { border-left-color: var(--c-entwurf); } .eintrag-entscheidung { border-left-color: var(--c-freigegeben); }
+ .eintrag-blockade { border-left-color: var(--fehler-linie); } 
+  
 .eintragkopf { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--gedaempft); }
 .eintragart { font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
 .eintragtitel { margin: 4px 0; font-weight: 600; } .eintragtitel a { color: var(--text); text-decoration: none; }
@@ -230,21 +218,12 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .aktzeit { color: var(--gedaempft); font-size: 12px; margin-right: 6px; }
 .akttyp { font-weight: 600; margin-right: 6px; }
 .auftragstitel { margin-bottom: 12px; }
-.pruefbox { border-color: var(--c-pruefung); }
 
-/* Seitenpanel */
-.panel { position: fixed; top: 0; right: 0; height: 100vh; width: min(760px, 92vw); background: var(--hintergrund); border-left: 1px solid var(--linie); box-shadow: -8px 0 24px rgba(16,24,40,.12); overflow-y: auto; padding: 14px 20px 40px; z-index: 20; }
-.panel[hidden] { display: none; }
-.panelkopf { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
-.detail.panelbreit { grid-template-columns: 1fr; }
-body.mit-panel main { padding-right: 20px; }
 
 /* Verbindungen */
-.katalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 20px; }
-.katalogkarte { display: block; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 16px 18px; text-decoration: none; color: var(--text); box-shadow: var(--schatten); }
-.katalogkarte h3 { margin: 0 0 6px; font-size: 16px; } .katalogkarte p { color: var(--gedaempft); margin: 0 0 10px; font-size: 14px; }
-a.katalogkarte:hover { border-color: var(--akzent); }
-.katalogkarte.geplant { opacity: .7; border-style: dashed; }
+
+ 
+
 pre { background: #0f172a; color: #e5e7eb; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .archiv { margin-top: 14px; } .archiv summary { cursor: pointer; color: var(--gedaempft); font-size: 14px; margin-bottom: 8px; }
 td.aktionen { white-space: nowrap; }
@@ -267,7 +246,7 @@ td.aktionen { white-space: nowrap; }
 .stand { font-size: 12px; color: var(--gedaempft); } .stand.fertig { color: var(--ok-linie); font-weight: 600; }
 .trenner { width: 1px; height: 22px; background: var(--linie); margin: 0 4px; }
 
-/* Gestaltung nach ProjectPulse: Kopfzeile, Überschriften, Kennzahlen, Module */
+/* Kopfzeile, Überschriften, Module */
 .kopfzeile { border-bottom-color: var(--linie); padding: 14px 0; margin-bottom: 26px; }
 .avatar { width: 32px; height: 32px; display: grid; place-items: center; background: var(--akzent-weich); color: var(--akzent); border-radius: 50%; font-size: 11px; font-weight: 700; }
 .knopf { border-radius: 9px; font-weight: 600; }
@@ -276,33 +255,22 @@ td.aktionen { white-space: nowrap; }
 .knopf.zweit:hover { border-color: var(--akzent); color: var(--akzent); background: var(--flaeche); }
 .knopf.gefahr { color: var(--fehler-linie); }
 .oberzeile { text-transform: uppercase; font-size: 10px; letter-spacing: 1.4px; font-weight: 700; color: var(--gedaempft); margin: 0 0 8px; }
-.unterzeile { margin-top: -4px; }
+
 .box, table { border-radius: 11px; }
 .reiter { border-bottom-width: 1px; }
 .reiter a { font-size: 14px; }
 .spalte { background: var(--weich); border: 1px solid var(--linie); border-top-width: 3px; border-radius: 10px; }
 .karte { border-radius: 8px; }
 .umschalter.aktiv { background: var(--akzent-weich); color: var(--akzent); border-color: #d6cff9; }
-.kennzahlen { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 26px; }
-.kennzahl { display: flex; flex-direction: column; gap: 2px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 16px 18px; text-decoration: none; color: var(--text); box-shadow: var(--schatten); }
-.kennzahl strong { font-size: 26px; letter-spacing: -.5px; }
-.kennzahl span { color: var(--gedaempft); font-size: 13px; }
-.kennzahl:hover { border-color: var(--akzent); background: var(--akzent-weich); }
-.kennzahl.achtung strong { color: var(--fehler-linie); }
+
 .abschnitt { margin-bottom: 26px; scroll-margin-top: 16px; }
 .abschnittkopf h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
 .abschnittkopf .zahl { background: var(--akzent-weich); color: var(--akzent); border-radius: 6px; font-size: 12px; padding: 0 7px; }
-.modulraster { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin: 12px 0; }
-.modulkarte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; padding: 14px 16px; box-shadow: var(--schatten); }
-.modulkarte .modulkopf { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.modulkarte h3 { margin: 0 0 6px; font-size: 16px; }
-.modulkarte h3 a { color: var(--text); text-decoration: none; }
-.modulkarte h3 a:hover { color: var(--akzent); }
+
 .modulzahlen { font-size: 14px; margin: 0 0 8px; }
 .modulpflege summary { cursor: pointer; color: var(--gedaempft); font-size: 13px; }
 .modulpflege form { margin-top: 8px; }
-.modulkarte.neu { border-style: dashed; background: var(--weich); box-shadow: none; }
-.modulkarte.neu input { width: 100%; margin-bottom: 8px; }
+
 .letzte { list-style: none; padding: 0; margin: 0 0 10px; }
 .letzte li { padding: 7px 0; border-bottom: 1px solid var(--linie); font-size: 14px; }
 .letzte .zeit { color: var(--gedaempft); font-size: 12px; margin-right: 6px; }
@@ -310,7 +278,6 @@ td.aktionen { white-space: nowrap; }
 .seitenleiste .gruppe.unten a:hover { background: var(--weich); color: var(--text); }
 .seitenleiste .gruppe.unten a[aria-current="page"] { background: var(--akzent-weich); color: var(--akzent); }
 .unsichtbar { position: absolute; left: -9999px; }
-.modulfilter { flex-wrap: wrap; }
 
 /* Projektakte: Projektauswahl, Projektkopf, Bereiche */
 .projektwahl { list-style: none; padding: 0; margin: 18px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
@@ -325,15 +292,13 @@ td.aktionen { white-space: nowrap; }
 .projektsuche input { min-width: 0; width: 220px; max-width: 100%; }
 .seitenleiste .wechseln { font-size: 13px; }
 .projektname-nav { margin: 0 12px 6px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
-.standliste { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-.standliste li { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--linie); }
-.standliste li:last-child { border-bottom: 0; }
+
 .satz { font-size: 14px; }
 .quelle { font-size: 12px; color: var(--gedaempft); }
 .zweck { font-size: 15px; margin-top: 0; }
 .tabellenrahmen { overflow-x: auto; max-width: 100%; }
-.textansicht, .diff { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; background: var(--weich); padding: 12px; border-radius: 8px; font-size: 13px; }
-.kontexttext { width: 100%; font: 13px/1.45 ui-monospace, Consolas, monospace; }
+.textansicht { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; background: var(--weich); color: var(--text); padding: 12px; border-radius: 8px; font-size: 13px; }
+
 .repo { border-top: 1px solid var(--linie); padding-top: 10px; margin-top: 10px; }
 .abschnittkopf { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
 td, th { overflow-wrap: break-word; }
@@ -348,7 +313,7 @@ code { overflow-wrap: break-word; }
 
 /* Arbeitsort direkt am Auftrag (Freigabeprüfung) */
 .ortwahl { margin: 8px 0 4px 18px; display: flex; flex-direction: column; gap: 8px; }
-.ortwahl .knopf, .seite .ortwahl .knopf { display: inline-block; width: auto; margin-top: 0; }
+.ortwahl .knopf { display: inline-block; width: auto; margin-top: 0; }
 .ortwahl .vorschlag { background: var(--weich); border-radius: 8px; padding: 8px 10px; }
 .ortwahl .vorschlag p { margin: 0 0 6px; }
 .ortwahl .knopfzeile { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -406,26 +371,89 @@ code { overflow-wrap: break-word; }
 .modulzeile { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .modulzeile svg { width: 16px; height: 16px; vertical-align: -3px; }
 
-/* Auftragsansicht: eine Spalte, oben der nächste Schritt, darunter Reiter; Seite und Panel gleich */
+/* Auftragsansicht */
 .auftrag { max-width: 1000px; }
-.auftragsfakten { margin: -4px 0 14px; }
-.schritt-kopf { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.schritt-text { margin: 0; font-size: 16px; }
-.schritt-kopf p { margin: 2px 0 0; }
-.schritt-knoepfe { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.schritt details { margin-top: 10px; }
-.schritt details > summary { cursor: pointer; color: var(--gedaempft); font-size: 14px; }
+
 .weitere-liste { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .weitere-liste .aktion textarea { max-width: 520px; }
-.auftragsreiter { display: flex; gap: 2px; border-bottom: 1px solid var(--linie); margin: 4px 0 14px; flex-wrap: wrap; }
-.auftragsreiter a { padding: 8px 14px; text-decoration: none; color: var(--gedaempft); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; font-size: 14px; }
-.auftragsreiter a[aria-current="true"] { color: var(--akzent); border-bottom-color: var(--akzent); }
-.auftragsreiter .zahl { background: var(--akzent-weich); color: var(--akzent); border-radius: 6px; font-size: 12px; padding: 0 7px; }
-.reiterteil { scroll-margin-top: 16px; }
-.reiterteil[hidden] { display: none; }
+
 .knopfzeile { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 600px) { .felder { grid-template-columns: 105px minmax(0, 1fr); gap: 6px 10px; } }
 
-/* Stand je Modul */
-.modulstand td div + div { margin-top: 6px; }
-.modulstand-name { padding-left: calc(11px + var(--tiefe, 0) * 16px); white-space: nowrap; }
+
+/* Umbau 2/6: Projektkarten mit Zeile, ein Hauptknopf je Auftrag, Auftrag als ganze Seite */
+.projektwahl-karte { grid-template-rows: auto auto 1fr auto; min-height: 160px; }
+.projektwahl-zeile { font-size: 13px; color: var(--gedaempft); border-top: 1px solid var(--linie); padding-top: 8px; }
+.projektwahl-zeile .wartet { color: var(--fehler-linie); font-weight: 650; }
+.eintrag-freigabe { border-left-color: var(--c-freigegeben); }
+.eintragtitel .nr, .letzte .nr { color: var(--gedaempft); font-family: ui-monospace, Consolas, monospace; font-size: 12px; margin-right: 4px; }
+.hauptknopf { margin: 0; }
+div.hauptknopf { width: 100%; }
+.hauptknopf .frage { margin: 0 0 8px; overflow-wrap: anywhere; }
+.hinweissatz { margin: 0; font-size: 14px; }
+.karte .hauptknopf { display: block; margin-top: 10px; }
+.kartenantwort > summary { list-style: none; display: inline-block; }
+.kartenantwort > summary::-webkit-details-marker { display: none; }
+.kartenantwort[open] > summary { margin-bottom: 8px; }
+.kartenantwort .antwortzeile input[type="text"] { min-width: 0; width: 100%; }
+.kartenhinweis { margin: 8px 0 0; font-size: 12px; color: var(--gedaempft); font-style: italic; }
+.zurueckzeile { margin: -10px 0 10px; font-size: 14px; }
+.zurueckzeile a { text-decoration: none; }
+.auftragskopf h1 { margin: 2px 0 12px; overflow-wrap: anywhere; }
+.auftragskopf .kopf { margin: 0; }
+.kopfknopf { margin-bottom: 4px; }
+.auftragskopf .weitere-aktionen { margin-top: 12px; }
+.auftragskopf .weitere-aktionen > summary, details.mehr > summary { cursor: pointer; color: var(--gedaempft); font-size: 14px; }
+details.mehr { margin-top: 12px; }
+details.mehr > .felder, details.mehr > .letzte { margin-top: 10px; }
+.vorschlag { background: var(--weich); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+.versionszeile { margin: 0 0 4px; font-weight: 600; }
+.versionszeile, .versionsfehler, .abweichungen { overflow-wrap: anywhere; }
+.versionsfehler { margin: 0 0 6px; color: var(--fehler-linie); font-weight: 600; }
+.abweichungen { margin: 6px 0; padding-left: 18px; }
+.abweichungen li { margin-bottom: 4px; }
+.knopfzeile { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.github-schluessel, .github-anleitung { margin-top: 10px; }
+.github-schluessel > summary, .github-anleitung > summary { cursor: pointer; }
+#github select { max-width: 100%; min-width: 0; }
+.meilensteine { list-style: none; padding: 0; margin: 6px 0 12px; }
+.meilensteine > li { padding: 8px 0; border-bottom: 1px solid var(--linie); }
+.meilensteinzeile { display: flex; justify-content: space-between; align-items: center; gap: 4px 12px; flex-wrap: wrap; }
+.meilensteinzeile > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.meilenstein-neu { margin-top: 8px; }
+.meilenstein-neu summary { list-style: none; display: inline-block; cursor: pointer; }
+.meilenstein-neu summary::-webkit-details-marker { display: none; }
+.verlauf { list-style: none; padding: 0; margin: 0; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 11px; box-shadow: var(--schatten); }
+.verlauf li { display: grid; grid-template-columns: 140px 160px minmax(0, 1fr); gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--linie); font-size: 14px; }
+.verlauf li:last-child { border-bottom: 0; }
+.verlauf .zeit { color: var(--gedaempft); font-size: 13px; }
+.verlauf .wer { font-weight: 600; overflow-wrap: anywhere; }
+.verlauf .was { overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .verlauf li { grid-template-columns: 1fr; gap: 2px; }
+}
+@media (max-width: 600px) {
+  h1 { font-size: 23px; }
+  .kopfzeile { padding: 8px 0; margin-bottom: 14px; }
+  .seitenleiste { padding: 8px 12px; }
+  .seitenleiste .marke { padding-bottom: 4px; }
+  .seitenleiste a { min-height: 36px; padding: 6px 10px; }
+  .seitenleiste .gruppe.unten { margin: 0; }
+  .zurueckzeile { margin-top: -4px; }
+  .auftragskopf { padding: 12px; }
+  .antwortzeile .knopf { flex-shrink: 0; }
+}
+/* Tabellen ohne waagrechtes Scrollen: Nebenspalten weichen auf schmalen Bildschirmen */
+@media (max-width: 900px) { .nur-breit { display: none; } }
+.nur-schmal { display: none; }
+@media (max-width: 600px) {
+  .nur-mittel { display: none; }
+  .nur-schmal { display: block; }
+  td.aktionen { white-space: normal; }
+  td.aktionen .knopf, td.aktionen form { display: inline-block; margin: 2px 0; }
+  .filterzeile select { max-width: 100%; }
+}
+/* Board mit Modulbaum: alle fünf Spalten in einer Reihe ab etwa 1300 px */
+.mit-baum { grid-template-columns: 220px minmax(0, 1fr); }
+.board { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.letzte a, .eintragtitel a { text-decoration: none; }

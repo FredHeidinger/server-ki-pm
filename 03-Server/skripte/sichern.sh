@@ -2,8 +2,7 @@
 # Konsistente Sicherung: SQLite über die Backup-API (WAL-sicher), alle darin referenzierten
 # Unterlagendateien mit Manifest (SHA-256) und die Konfiguration.
 # Ergebnis: /var/backups/kipm/kipm-JJJJMMTT-HHMM.tar.gz; die letzten 14 bleiben erhalten.
-# Während der Sicherung sperrt eine Sperrdatei die Bereinigung der Ablage. Fehlt eine
-# referenzierte Datei oder weicht ihr Hash ab, bricht die Sicherung ab.
+# Fehlt eine referenzierte Datei oder weicht ihr Hash ab, bricht die Sicherung ab.
 # Die Sicherung gehört zusätzlich auf ein getrenntes Ziel (Storage Box, anderer Rechner); das ist
 # ein eigener Schritt mit eigener Freigabe und steht nicht in diesem Skript.
 set -euo pipefail
@@ -14,9 +13,7 @@ ZIEL=/var/backups/kipm
 STEMPEL=$(date +%Y%m%d-%H%M)
 ARBEIT=$(mktemp -d)
 
-# Die Ablage legt der Installer als kipm an; hier nur die Sperre, wenn es sie gibt.
-[ -d "$ABLAGE" ] && touch "$ABLAGE/.sicherung-laeuft"
-trap 'rm -rf "$ARBEIT"; rm -f "$ABLAGE/.sicherung-laeuft"' EXIT
+trap 'rm -rf "$ARBEIT"' EXIT
 
 /opt/kipm/venv/bin/python - "$DATEN/kipm.sqlite3" "$ARBEIT/kipm.sqlite3" "$ABLAGE" "$ARBEIT" <<'EOF'
 import hashlib, os, shutil, sqlite3, sys

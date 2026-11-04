@@ -12,10 +12,10 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 
-from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q
+from django.db.models import F, ProtectedError, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -24,17 +24,14 @@ from .models import (
     Arbeitsort,
     Auftrag,
     ChatBindung,
-    Entscheidung,
     Ereignis,
     Ergebnis,
-    Kriteriumsbewertung,
+    Meilenstein,
     Meldung,
     Modul,
     OrdnerAnfrage,
     Projekt,
-    Pruefung,
     Revision,
-    Uebernahmebestaetigung,
 )
 
 
@@ -365,7 +362,7 @@ def modul_aendern(
 def modul_archivieren(
     akteur: Akteur, modul: Modul, *, aktiv: bool, erwartete_revision: int | None = None
 ) -> Modul:
-    """Modul archivieren oder zurückholen; Aufträge, Funktionen und Unterlagen behalten ihr
+    """Modul archivieren oder zurückholen; Aufträge und Unterlagen behalten ihr
     Modul. Archivieren nur ohne aktive Untermodule, Zurückholen nur unter aktivem Elternmodul."""
     _planung_erforderlich(akteur, "Module archivieren")
     _projekt_sichtbar(akteur, modul.projekt)
@@ -412,7 +409,7 @@ def modul_teilbaum(modul: Modul) -> list[int]:
     return ergebnis
 
 
-ZAHLEN_LEER = {"funktionen": 0, "auftraege": 0, "issues": 0, "unterlagen": 0}
+ZAHLEN_LEER = {"auftraege": 0, "issues": 0, "unterlagen": 0}
 
 
 @dataclass
@@ -420,13 +417,13 @@ class Modulknoten:
     modul: Modul
     tiefe: int
     kinder: list["Modulknoten"]
-    zahlen: dict  # Funktionen, Aufträge, Issues, Unterlagen – einschließlich Untermodule
+    zahlen: dict  # Aufträge, Issues, Unterlagen – einschließlich Untermodule
 
 
 def modulbaum(projekt: Projekt) -> dict:
     """Aktive Module als Baum unter „Gesamtes Projekt“. Die Zahlen je Knoten schließen alle
     Untermodule ein, auch archivierte; „projektweit“ zählt, was keinem Modul zugeordnet ist."""
-    from .models import Funktion, Unterlage
+    from .models import Unterlage
 
     module = {m.pk: m for m in projekt.module.order_by("name")}
     eigene: dict[int | None, dict] = {}
@@ -434,12 +431,6 @@ def modulbaum(projekt: Projekt) -> dict:
     def zaehle(modul_id, art):
         eigene.setdefault(modul_id, dict(ZAHLEN_LEER))[art] += 1
 
-    for mid in (
-        Funktion.objects.filter(projekt=projekt)
-        .exclude(planung=Funktion.VERWORFEN)
-        .values_list("modul_id", flat=True)
-    ):
-        zaehle(mid, "funktionen")
     for mid, typ in (
         Auftrag.objects.filter(projekt=projekt)
         .exclude(zustand=Auftrag.ABGEBROCHEN)
@@ -706,13 +697,24 @@ def bindung_widerrufen(akteur: Akteur, bindung: ChatBindung, grund: str = "") ->
         )
 
 
+# Alle Tabellen, die einen Zugang vor dem Löschen schützen, auch die früherer Stufen.
+BINDUNG_VERWEISE = (
+    ("Auftrag", "bearbeiter_bindung"),
+    ("Auftrag", "letzter_bearbeiter_bindung"),
+    ("Meldung", "bindung"),
+    ("Ergebnis", "bindung"),
+    ("Installation", "bindung"),
+    ("Nachweis", "bindung"),
+    ("ExterneAktion", "bindung"),
+)
+
+
 def bindung_benutzt(bindung: ChatBindung) -> bool:
-    """Hängen Aufträge, Meldungen oder Ergebnisse an dem Zugang, bleibt er für den Verlauf."""
-    return (
-        bindung.auftraege.exists()
-        or bindung.meldungen.exists()
-        or bindung.ergebnisse.exists()
-        or Auftrag.objects.filter(letzter_bearbeiter_bindung=bindung).exists()
+    """Hängen Aufträge, Meldungen, Ergebnisse oder frühere Meldungen an dem Zugang, bleibt er für
+    den Verlauf."""
+    return any(
+        apps.get_model("steuerung", modell).objects.filter(**{feld: bindung}).exists()
+        for modell, feld in BINDUNG_VERWEISE
     )
 
 
@@ -724,22 +726,27 @@ def bindung_loeschen(akteur: Akteur, bindung: ChatBindung) -> None:
             f"„{bindung.name}“ hat schon an Aufträgen gearbeitet und bleibt für den Verlauf "
             "erhalten. Widerrufen schiebt ihn ins Archiv."
         )
-    with transaction.atomic():
-        _ereignis(
-            akteur,
-            projekt=bindung.projekt,
-            objekt_typ="Bindung",
-            objekt_kennung=bindung.name,
-            ereignis="Zugang gelöscht",
-        )
-        bindung.delete()
+    try:
+        with transaction.atomic():
+            _ereignis(
+                akteur,
+                projekt=bindung.projekt,
+                objekt_typ="Bindung",
+                objekt_kennung=bindung.name,
+                ereignis="Zugang gelöscht",
+            )
+            bindung.delete()
+    except ProtectedError as fehler:  # Der Chat hat gerade erst zu arbeiten begonnen.
+        raise DienstFehler(
+            f"„{bindung.name}“ hat gerade zu arbeiten begonnen und bleibt für den Verlauf erhalten."
+        ) from fehler
 
 
 # --- Ordner ohne Projekt -------------------------------------------------------------------
 
 
 def ordner_unbekannt_melden(bindung: ChatBindung, ordner: str) -> None:
-    """Unbekannten Arbeitsordner im Posteingang zur Zuordnung vorlegen (einmal je Ordner)."""
+    """Unbekannten Arbeitsordner unter „Konto & KI verbinden“ zur Zuordnung vorlegen (einmal je Ordner)."""
     norm = _ordner_normiert(ordner)
     if not norm:
         return
@@ -791,7 +798,7 @@ def bindung_pruefen(schluessel: str) -> ChatBindung | None:
 def auftrag_holen(akteur: Akteur, auftrag_id: int) -> Auftrag:
     """Auftrag für den Akteur laden; fremde Projekte sind für Chats nicht vorhanden."""
     auftrag = (
-        Auftrag.objects.select_related("projekt", "modul", "pruefer", "bearbeiter_bindung")
+        Auftrag.objects.select_related("projekt", "modul", "bearbeiter_bindung")
         .filter(pk=auftrag_id)
         .first()
     )
@@ -834,7 +841,7 @@ def auftraege_fuer_bindung(
 ):
     """Aufträge des Projekts (ohne Projekt: aller Projekte): standardmäßig alle offenen,
     wahlweise nur übernehmbare und eigene, oder einschließlich abgeschlossener."""
-    qs = Auftrag.objects.select_related("projekt", "modul")
+    qs = Auftrag.objects.select_related("projekt", "modul", "meilenstein")
     if projekt is not None:
         qs = qs.filter(projekt=projekt)
     if typ:
@@ -984,11 +991,6 @@ def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
         )
     else:
         punkte.append(Pruefpunkt(True, "Keine Überschneidung mit laufenden Aufträgen"))
-    punkte.append(
-        Pruefpunkt(
-            auftrag.pruefer_id is not None, "Prüfer festgelegt", "Ein Mensch, nicht der Bearbeiter."
-        )
-    )
     return punkte
 
 
@@ -1007,11 +1009,10 @@ def wunsch_erfassen(
     beschreibung: str,
     modul: Modul | None = None,
     prioritaet: str = "mittel",
-    abgeleitet_von: Auftrag | None = None,
-    entscheidung: Entscheidung | None = None,
     erzwingen: bool = False,
     typ: str = Auftrag.TYP_AUFTRAG,
     planung: dict | None = None,
+    meilenstein: Meilenstein | None = None,
 ) -> Auftrag:
     """Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; mit ``planung`` (Ziel,
     Nicht-Ziele, Arbeitsort, Schreibumfang, Quellen, Abnahmekriterien) gleich geplant, das dürfen
@@ -1031,6 +1032,8 @@ def wunsch_erfassen(
         raise DienstFehler("Der Titel darf nicht leer sein.")
     if modul is not None and modul.projekt_id != projekt.pk:
         raise DienstFehler("Das Modul gehört nicht zu diesem Projekt.")
+    if meilenstein is not None and meilenstein.projekt_id != projekt.pk:
+        raise DienstFehler("Der Meilenstein gehört nicht zu diesem Projekt.")
     if typ not in dict(Auftrag.TYPEN):
         raise DienstFehler("Die Art muss „auftrag“ oder „issue“ sein.")
     if not erzwingen:
@@ -1045,13 +1048,11 @@ def wunsch_erfassen(
         auftrag = Auftrag.objects.create(
             projekt=projekt,
             modul=modul,
+            meilenstein=meilenstein,
             titel=titel.strip(),
             prioritaet=prioritaet,
             typ=typ,
             revision_nr=1,
-            abgeleitet_von=abgeleitet_von,
-            entscheidung=entscheidung,
-            entscheidung_stand=entscheidung.stand if entscheidung else 0,
         )
         Revision.objects.create(
             auftrag=auftrag,
@@ -1068,10 +1069,8 @@ def wunsch_erfassen(
         )
         wort = "Issue" if typ == Auftrag.TYP_ISSUE else "Auftrag"
         anlass = "geplant" if planung else ""
-        if abgeleitet_von is not None:
-            anlass = f"abgeleitet aus {abgeleitet_von.nummer}"
-        if entscheidung is not None:
-            anlass = f"Umsetzungsauftrag zu {entscheidung.nummer} Stand {entscheidung.stand}"
+        if meilenstein is not None:
+            anlass = "; ".join(t for t in (anlass, f"Meilenstein {meilenstein.nummer}") if t)
         _ereignis(
             akteur,
             projekt=projekt,
@@ -1098,8 +1097,8 @@ def auftrag_anlegen(
     typ: str = Auftrag.TYP_AUFTRAG,
     erzwingen: bool = False,
     planung: dict | None = None,
-    pruefer=None,
     freigeben: bool = False,
+    meilenstein: Meilenstein | None = None,
 ) -> Auftrag:
     """Auftrag in einem Schritt anlegen, planen und auf Anweisung freigeben. Alles oder nichts:
     scheitert die Freigabeprüfung, wird auch nichts angelegt."""
@@ -1114,9 +1113,8 @@ def auftrag_anlegen(
             erzwingen=erzwingen,
             typ=typ,
             planung=planung,
+            meilenstein=meilenstein,
         )
-        if pruefer is not None:
-            pruefer_festlegen(akteur, auftrag, pruefer)
         if freigeben:
             auftrag_freigeben(akteur, auftrag)
     auftrag.refresh_from_db()
@@ -1213,6 +1211,33 @@ def auftrag_bearbeiten(
     return rev
 
 
+def meilenstein_zuordnen(akteur: Akteur, auftrag: Auftrag, meilenstein: Meilenstein | None) -> None:
+    """Auftrag einem Meilenstein des eigenen Projekts zuordnen oder ihn lösen. In jedem Zustand
+    möglich; ändert weder Revision noch Freigabe noch die Zeit „zuletzt erledigt“."""
+    _planung_erforderlich(akteur, "Meilensteine zuordnen")
+    _projekt_sichtbar(akteur, auftrag.projekt)
+    if meilenstein is not None and meilenstein.projekt_id != auftrag.projekt_id:
+        raise DienstFehler("Der Meilenstein gehört nicht zu diesem Projekt.")
+    with transaction.atomic():
+        auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        neu = meilenstein.pk if meilenstein is not None else None
+        if auftrag.meilenstein_id == neu:
+            return
+        auftrag.meilenstein = meilenstein
+        auftrag.save(update_fields=["meilenstein"])
+        _ereignis(
+            akteur,
+            projekt=auftrag.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=auftrag.nummer,
+            ereignis=f"Meilenstein {meilenstein.nummer} zugeordnet"
+            if meilenstein is not None
+            else "Meilenstein gelöst",
+            anlass=meilenstein.name if meilenstein is not None else "",
+            revision=str(auftrag.revision_nr),
+        )
+
+
 def vorgaenger_eintragen(
     akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag, grund: str = ""
 ) -> None:
@@ -1268,24 +1293,6 @@ def vorgaenger_entfernen(akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag) 
 # --- Aufträge: Zustandswechsel durch Menschen ----------------------------------------------
 
 
-def pruefer_festlegen(akteur: Akteur, auftrag: Auftrag, pruefer) -> None:
-    _planung_erforderlich(akteur, "Prüfer festlegen")
-    if not pruefer.is_active:
-        raise DienstFehler("Der Prüfer muss ein aktives Benutzerkonto sein.")
-    with transaction.atomic():
-        auftrag.pruefer = pruefer
-        auftrag.save(update_fields=["pruefer", "aktualisiert_am"])
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Prüfer festgelegt",
-            anlass=pruefer.get_username(),
-            revision=str(auftrag.revision_nr),
-        )
-
-
 IM_CHAT_FREIGEGEBEN = "freigegeben auf Freds Anweisung im Chat"
 
 
@@ -1312,9 +1319,7 @@ def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
             ereignis="Freigegeben",
-            anlass=IM_CHAT_FREIGEGEBEN
-            if akteur.bindung is not None
-            else f"Prüfer {auftrag.pruefer.get_username()}",
+            anlass=IM_CHAT_FREIGEGEBEN if akteur.bindung is not None else "",
             revision=str(auftrag.revision_nr),
         )
 
@@ -1337,33 +1342,6 @@ def freigabe_zuruecknehmen(akteur: Akteur, auftrag: Auftrag, grund: str = "") ->
             objekt_kennung=auftrag.nummer,
             ereignis="Freigabe zurückgenommen",
             anlass=grund,
-            revision=str(auftrag.revision_nr),
-        )
-
-
-def auftrag_pausieren(akteur: Akteur, auftrag: Auftrag, grund: str = "") -> None:
-    """Den Zustand „Pausiert“ gibt es im Ablauf ohne Abnahme nicht mehr."""
-    _owner_erforderlich(akteur, "Aufträge pausieren")
-    raise Konflikt("Pausieren gibt es nicht mehr: Freigabe zurücknehmen oder abbrechen.")
-
-
-def auftrag_fortsetzen(akteur: Akteur, auftrag: Auftrag) -> None:
-    """Nur für pausierte Aufträge aus der Zeit vor Migration 0008."""
-    _owner_erforderlich(akteur, "Aufträge fortsetzen")
-    with transaction.atomic():
-        auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if auftrag.zustand != Auftrag.PAUSIERT:
-            raise Konflikt("Nur ein pausierter Auftrag kann fortgesetzt werden.")
-        auftrag.zustand = auftrag.zustand_vor_pause or Auftrag.ENTWURF
-        auftrag.zustand_vor_pause = ""
-        auftrag.save(update_fields=["zustand", "zustand_vor_pause", "aktualisiert_am"])
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Fortgesetzt",
-            anlass=f"wieder {auftrag.get_zustand_display()}",
             revision=str(auftrag.revision_nr),
         )
 
@@ -1415,43 +1393,6 @@ def bearbeitung_unklar(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
         )
 
 
-def hindernis_aufheben(akteur: Akteur, auftrag: Auftrag, grund: str = "") -> None:
-    _owner_erforderlich(akteur, "Hindernisse aufheben")
-    with transaction.atomic():
-        auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if auftrag.zustand != Auftrag.BLOCKIERT:
-            raise Konflikt("Der Auftrag ist nicht blockiert.")
-        auftrag.zustand = Auftrag.IN_ARBEIT
-        auftrag.save(update_fields=["zustand", "aktualisiert_am"])
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Hindernis aufgehoben",
-            anlass=grund,
-            revision=str(auftrag.revision_nr),
-        )
-
-
-def vorschlag_bewerten(akteur: Akteur, meldung: Meldung, *, uebernommen: bool) -> None:
-    _owner_erforderlich(akteur, "Vorschläge bewerten")
-    if meldung.art != Meldung.VORSCHLAG or meldung.vorschlag_status != Meldung.OFFEN:
-        raise DienstFehler("Dieser Vorschlag ist nicht offen.")
-    with transaction.atomic():
-        meldung.vorschlag_status = Meldung.UEBERNOMMEN if uebernommen else Meldung.ABGELEHNT
-        meldung.save(update_fields=["vorschlag_status"])
-        _ereignis(
-            akteur,
-            projekt=meldung.auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=meldung.auftrag.nummer,
-            ereignis="Vorschlag übernommen" if uebernommen else "Vorschlag abgelehnt",
-            anlass=f"von {meldung.akteur_name}: {meldung.text[:120]}",
-            revision=str(meldung.auftrag.revision_nr),
-        )
-
-
 # --- Aufträge: Bearbeiter (Chat oder Mensch) -----------------------------------------------
 
 
@@ -1481,10 +1422,6 @@ def auftrag_uebernehmen(akteur: Akteur, auftrag: Auftrag, revision_nr: int) -> A
             akteur.projekt is None or akteur.projekt.pk != aktuell.projekt_id
         ):
             raise KeinZugriff("Nicht gefunden.")
-        if akteur.benutzer is not None and aktuell.pruefer_id == akteur.benutzer.pk:
-            raise Konflikt(
-                "Der Prüfer darf den Auftrag nicht selbst bearbeiten. Zuerst den Prüfer ändern."
-            )
         geaendert = Auftrag.objects.filter(
             pk=aktuell.pk,
             zustand=Auftrag.FREIGEGEBEN,
@@ -1662,68 +1599,6 @@ def hindernis_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: s
     return meldung
 
 
-def vorschlag_einreichen(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
-    """Vorschlag zu einem sichtbaren Auftrag; wird erst durch den Owner wirksam."""
-    _projekt_sichtbar(akteur, auftrag.projekt)
-    if not text.strip():
-        raise DienstFehler("Der Text darf nicht leer sein.")
-    if auftrag.ist_endzustand:
-        raise Konflikt("Zu einem abgeschlossenen Auftrag sind keine Vorschläge mehr möglich.")
-    with transaction.atomic():
-        meldung = Meldung.objects.create(
-            auftrag=auftrag,
-            revision_nr=revision_nr,
-            art=Meldung.VORSCHLAG,
-            text=text.strip(),
-            akteur_name=akteur.name,
-            bindung=akteur.bindung,
-            historisch=revision_nr != auftrag.revision_nr,
-        )
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Vorschlag eingereicht",
-            anlass=text.strip()[:200],
-            revision=str(revision_nr),
-        )
-    return meldung
-
-
-def pruefbericht_einreichen(
-    akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str
-) -> Meldung:
-    """Prüfbericht eines anderen Chats; ersetzt keine Abnahme."""
-    _projekt_sichtbar(akteur, auftrag.projekt)
-    if akteur.ist_bearbeiter_von(auftrag):
-        raise KeinZugriff(
-            "Der Bearbeiter darf keinen Prüfbericht zu seinem eigenen Auftrag abgeben."
-        )
-    if not text.strip():
-        raise DienstFehler("Der Text darf nicht leer sein.")
-    with transaction.atomic():
-        meldung = Meldung.objects.create(
-            auftrag=auftrag,
-            revision_nr=revision_nr,
-            art=Meldung.PRUEFBERICHT,
-            text=text.strip(),
-            akteur_name=akteur.name,
-            bindung=akteur.bindung,
-            historisch=revision_nr != auftrag.revision_nr,
-        )
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Prüfbericht eingereicht",
-            anlass=text.strip()[:200],
-            revision=str(revision_nr),
-        )
-    return meldung
-
-
 def ergebnis_einreichen(
     akteur: Akteur,
     auftrag: Auftrag,
@@ -1735,7 +1610,7 @@ def ergebnis_einreichen(
     fehlgeschlagen: str = "",
     luecken: str = "",
 ) -> Ergebnis:
-    """Ergebnis mit Nachweisen einreichen; die technischen Prüfungen schließen ab, es gibt keine
+    """Ergebnis einreichen; die technischen Prüfungen schließen ab, es gibt keine
     Nutzerabnahme. Alle bestanden → Erledigt; eine fehlgeschlagen → Blockiert mit dem Grund als
     Fehlermeldung, der Bearbeiter bleibt; keine Prüfungen → Erledigt „ohne automatische Tests“."""
     _projekt_sichtbar(akteur, auftrag.projekt)
@@ -1800,419 +1675,22 @@ def ergebnis_einreichen(
     return ergebnis
 
 
-# --- Prüfung ---------------------------------------------------------------------------
+# --- Wartet auf dich ------------------------------------------------------------------------
 
 
-def ergebnis_pruefen(
-    akteur: Akteur,
-    ergebnis: Ergebnis,
-    *,
-    bewertungen: list[tuple[str, str]],
-    entscheidung: str,
-    begruendung: str = "",
-    integration_offen: bool = False,
-) -> Pruefung:
-    """Abnahme oder Nacharbeit. Nur Menschen; Prüfer darf nicht der Einreicher sein."""
-    _mensch_erforderlich(akteur, "Prüfen")
-    assert akteur.benutzer is not None
-    auftrag = ergebnis.auftrag
-    if auftrag.pruefer_id != akteur.benutzer.pk and not akteur.ist_owner:
-        raise KeinZugriff("Prüfen darf nur der festgelegte Prüfer oder der Owner.")
-    if ergebnis.benutzer_id is not None and ergebnis.benutzer_id == akteur.benutzer.pk:
-        raise KeinZugriff("Selbstabnahme ist nicht erlaubt: Prüfer und Einreicher sind identisch.")
-    if entscheidung not in (Pruefung.ABGENOMMEN, Pruefung.NACHARBEIT):
-        raise DienstFehler("Entscheidung muss Abnahme oder Nacharbeit sein.")
-    kriterien = auftrag.revisionen.get(nummer=ergebnis.revision_nr).kriterien
-    if len(bewertungen) != len(kriterien):
-        raise DienstFehler("Jedes Abnahmekriterium braucht eine Bewertung.")
-    for (bewertung, anmerkung), kriterium in zip(bewertungen, kriterien, strict=True):
-        if bewertung not in (
-            Kriteriumsbewertung.ERFUELLT,
-            Kriteriumsbewertung.NICHT_ERFUELLT,
-            Kriteriumsbewertung.NICHT_GEPRUEFT,
-        ):
-            raise DienstFehler(f"Ungültige Bewertung für „{kriterium}“.")
-        if entscheidung == Pruefung.ABGENOMMEN:
-            if bewertung == Kriteriumsbewertung.NICHT_ERFUELLT:
-                raise Konflikt(f"Abnahme nicht möglich: „{kriterium}“ ist nicht erfüllt.")
-            if bewertung == Kriteriumsbewertung.NICHT_GEPRUEFT and not anmerkung.strip():
-                raise DienstFehler(f"„{kriterium}“ ist nicht geprüft; das braucht eine Begründung.")
-    if entscheidung == Pruefung.NACHARBEIT and not begruendung.strip():
-        raise DienstFehler("Nacharbeit braucht eine Begründung.")
-    with transaction.atomic():
-        aktuell = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if aktuell.zustand != Auftrag.ZUR_PRUEFUNG:
-            raise Konflikt("Dieser Auftrag wartet nicht auf Prüfung.")
-        if aktuell.revision_nr != ergebnis.revision_nr:
-            raise Konflikt("Das Ergebnis gehört zu einer überholten Revision.")
-        neuestes = aktuell.ergebnisse.first()
-        if neuestes is None or neuestes.pk != ergebnis.pk:
-            raise Konflikt("Nur das zuletzt eingereichte Ergebnis kann geprüft werden.")
-        pruefung = Pruefung.objects.create(
-            ergebnis=ergebnis,
-            pruefer=akteur.benutzer,
-            entscheidung=entscheidung,
-            begruendung=begruendung.strip(),
-            integration_offen=integration_offen,
-        )
-        for pos, ((bewertung, anmerkung), kriterium) in enumerate(
-            zip(bewertungen, kriterien, strict=True), start=1
-        ):
-            Kriteriumsbewertung.objects.create(
-                pruefung=pruefung,
-                position=pos,
-                kriterium=kriterium,
-                bewertung=bewertung,
-                anmerkung=anmerkung.strip(),
-            )
-        if entscheidung == Pruefung.ABGENOMMEN:
-            aktuell.zustand = Auftrag.ABGENOMMEN
-            aktuell.abgenommene_revision = ergebnis.revision_nr
-            _bearbeiter_abloesen(aktuell)
-            ereignis = "Abgenommen" + (" (Integrationsprüfung offen)" if integration_offen else "")
-        else:
-            aktuell.zustand = Auftrag.NACHARBEIT
-            ereignis = "Nacharbeit angefordert"
-        aktuell.save()
-        _ereignis(
-            akteur,
-            projekt=aktuell.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=aktuell.nummer,
-            ereignis=ereignis,
-            anlass=begruendung.strip()
-            or f"Dateistand: {ergebnis.dateiliste[0] if ergebnis.dateiliste else '–'}",
-            revision=str(ergebnis.revision_nr),
-        )
-    return pruefung
-
-
-# --- Entscheidungen --------------------------------------------------------------------
-
-
-def entscheidung_vorschlagen(
-    akteur: Akteur, *, titel: str, text: str, projekte: list[Projekt], verweis: str = ""
-) -> Entscheidung:
-    if not titel.strip() or not text.strip():
-        raise DienstFehler("Titel und Text sind erforderlich.")
-    if not projekte:
-        raise DienstFehler("Mindestens ein betroffenes Projekt ist anzugeben.")
-    if akteur.bindung is not None and (
-        akteur.projekt is None or akteur.projekt.pk not in {p.pk for p in projekte}
-    ):
-        raise KeinZugriff(
-            "Ein Chat kann nur Entscheidungen vorschlagen, die sein Projekt betreffen."
-        )
-    with transaction.atomic():
-        entscheidung = Entscheidung.objects.create(
-            titel=titel.strip(),
-            text=text.strip(),
-            verweis=verweis.strip(),
-            vorgeschlagen_von_name=akteur.name,
-        )
-        entscheidung.betroffene_projekte.set(projekte)
-        _ereignis(
-            akteur,
-            projekt=None,
-            objekt_typ="Entscheidung",
-            objekt_kennung=entscheidung.nummer,
-            ereignis="Entscheidung vorgeschlagen",
-            anlass=", ".join(p.kennung for p in projekte),
-        )
-    return entscheidung
-
-
-def entscheidung_treffen(akteur: Akteur, entscheidung: Entscheidung, *, text: str = "") -> None:
-    """Entscheiden darf nur ein Mensch (Owner). Jeder neue Stand verlangt neue Bestätigungen."""
-    _owner_erforderlich(akteur, "Entscheiden")
-    if entscheidung.zustand == Entscheidung.ZURUECKGEZOGEN:
-        raise Konflikt("Eine zurückgezogene Entscheidung kann nicht mehr entschieden werden.")
-    with transaction.atomic():
-        entscheidung.zustand = Entscheidung.ENTSCHIEDEN
-        entscheidung.stand += 1
-        if text.strip():
-            entscheidung.text = text.strip()
-        entscheidung.entschieden_von = akteur.benutzer
-        entscheidung.entschieden_am = timezone.now()
-        entscheidung.save()
-        _ereignis(
-            akteur,
-            projekt=None,
-            objekt_typ="Entscheidung",
-            objekt_kennung=entscheidung.nummer,
-            ereignis="Entschieden",
-            anlass=f"Stand {entscheidung.stand}",
-            revision=f"Stand {entscheidung.stand}",
-        )
-
-
-def entscheidung_zurueckziehen(akteur: Akteur, entscheidung: Entscheidung, grund: str) -> None:
-    _owner_erforderlich(akteur, "Entscheidungen zurückziehen")
-    if not grund.strip():
-        raise DienstFehler("Zurückziehen braucht eine Begründung.")
-    with transaction.atomic():
-        entscheidung.zustand = Entscheidung.ZURUECKGEZOGEN
-        entscheidung.save(update_fields=["zustand"])
-        _ereignis(
-            akteur,
-            projekt=None,
-            objekt_typ="Entscheidung",
-            objekt_kennung=entscheidung.nummer,
-            ereignis="Zurückgezogen",
-            anlass=grund.strip(),
-            revision=f"Stand {entscheidung.stand}",
-        )
-
-
-def uebernahme_bestaetigen(akteur: Akteur, entscheidung: Entscheidung, projekt: Projekt) -> None:
-    """Chat bestätigt für sein Projekt, der Owner für jedes betroffene Projekt."""
-    if entscheidung.zustand != Entscheidung.ENTSCHIEDEN:
-        raise Konflikt("Nur eine entschiedene Entscheidung kann übernommen werden.")
-    if akteur.bindung is not None and (akteur.projekt is None or akteur.projekt.pk != projekt.pk):
-        raise KeinZugriff("Ein Chat kann nur für sein eigenes Projekt bestätigen.")
-    if akteur.bindung is None and not akteur.ist_owner:
-        raise KeinZugriff("Bestätigen dürfen Chat-Bindungen oder der Owner.")
-    if not entscheidung.betroffene_projekte.filter(pk=projekt.pk).exists():
-        raise DienstFehler(f"{projekt.name} ist von dieser Entscheidung nicht betroffen.")
-    try:
-        with transaction.atomic():
-            Uebernahmebestaetigung.objects.create(
-                entscheidung=entscheidung,
-                projekt=projekt,
-                stand=entscheidung.stand,
-                bestaetigt_von_name=akteur.name,
-            )
-            _ereignis(
-                akteur,
-                projekt=projekt,
-                objekt_typ="Entscheidung",
-                objekt_kennung=entscheidung.nummer,
-                ereignis="Übernahme bestätigt",
-                anlass=f"für {projekt.kennung}",
-                revision=f"Stand {entscheidung.stand}",
-            )
-    except IntegrityError as fehler:
-        raise Konflikt(
-            f"Stand {entscheidung.stand} ist für {projekt.name} bereits bestätigt."
-        ) from fehler
-
-
-def umsetzungsauftrag_anlegen(
-    akteur: Akteur, entscheidung: Entscheidung, projekt: Projekt
-) -> Auftrag:
-    _owner_erforderlich(akteur, "Umsetzungsaufträge anlegen")
-    if entscheidung.zustand != Entscheidung.ENTSCHIEDEN:
-        raise Konflikt("Umsetzungsaufträge gibt es nur zu entschiedenen Entscheidungen.")
-    if not entscheidung.betroffene_projekte.filter(pk=projekt.pk).exists():
-        raise DienstFehler(f"{projekt.name} ist von dieser Entscheidung nicht betroffen.")
-    return wunsch_erfassen(
-        akteur,
-        projekt,
-        titel=f"Umsetzung {entscheidung.nummer}: {entscheidung.titel}"[:200],
-        beschreibung=entscheidung.text,
-        entscheidung=entscheidung,
-    )
-
-
-# --- Posteingang und Meine Aufträge --------------------------------------------------------
-
-
-def posteingang(benutzer) -> list[dict]:
-    """Alles, was jetzt eine menschliche Entscheidung braucht, als konkrete Einträge."""
-    eintraege: list[dict] = []
-    offen = Auftrag.objects.exclude(zustand__in=Auftrag.ENDZUSTAENDE).select_related(
-        "projekt", "modul", "pruefer"
-    )
-    for a in offen.filter(zustand=Auftrag.ZUR_PRUEFUNG):
-        e = a.ergebnisse.first()
-        if e is None:
-            continue
-        selbst = e.benutzer_id == benutzer.pk
-        eintraege.append(
-            {
-                "art": "pruefung",
-                "auftrag": a,
-                "ergebnis": e,
-                "zeit": e.eingereicht_am,
-                "titel": f"{a.nummer} wartet auf Prüfung"
-                + (" (eigene Arbeit, prüft ein anderer)" if selbst else ""),
-                "text": e.zusammenfassung,
-                "von": e.eingereicht_von_name,
-                "selbst": selbst,
-            }
-        )
-    for m in (
-        Meldung.objects.filter(
-            auftrag__zustand=Auftrag.BLOCKIERT, art__in=Meldung.BLOCKIERENDE, historisch=False
-        )
-        .select_related("auftrag", "auftrag__projekt")
-        .order_by("-zeitpunkt")
-    ):
-        if any(x["art"] == "blockade" and x["auftrag"].pk == m.auftrag_id for x in eintraege):
-            continue
-        eintraege.append(
-            {
-                "art": "blockade",
-                "auftrag": m.auftrag,
-                "meldung": m,
-                "zeit": m.zeitpunkt,
-                "titel": f"{m.auftrag.nummer} {m.get_art_display()}: {m.auftrag.titel}",
-                "text": m.text,
-                "von": m.akteur_name,
-            }
-        )
-    for a in offen.filter(zustand=Auftrag.KLAERUNG_ERFORDERLICH):
-        eintraege.append(
-            {
-                "art": "klaerung",
-                "auftrag": a,
-                "zeit": a.aktualisiert_am,
-                "titel": f"{a.nummer} braucht Klärung: {a.titel}",
-                "text": f"Übernahme von {a.letzter_bearbeiter_name or '–'} erloschen; neu freigeben oder abbrechen.",
-                "von": "",
-            }
-        )
-    for m in (
-        Meldung.objects.filter(art=Meldung.VORSCHLAG, vorschlag_status=Meldung.OFFEN)
-        .exclude(auftrag__zustand__in=Auftrag.ENDZUSTAENDE)
-        .select_related("auftrag", "auftrag__projekt")
-    ):
-        eintraege.append(
-            {
-                "art": "vorschlag",
-                "auftrag": m.auftrag,
-                "meldung": m,
-                "zeit": m.zeitpunkt,
-                "titel": f"Vorschlag zu {m.auftrag.nummer}: {m.auftrag.titel}",
-                "text": m.text,
-                "von": m.akteur_name,
-            }
-        )
-    for a in offen.filter(zustand=Auftrag.ENTWURF):
-        rev = a.revisionen.filter(nummer=1).first()
-        if rev is None or rev.erstellt_von_name == benutzer.get_username():
-            continue
-        eintraege.append(
-            {
-                "art": "wunsch",
-                "auftrag": a,
-                "zeit": a.angelegt_am,
-                "titel": f"{a.nummer} {a.titel}",
-                "text": rev.beschreibung,
-                "von": rev.erstellt_von_name,
-            }
-        )
-    for e in Entscheidung.objects.filter(zustand=Entscheidung.VORSCHLAG):
-        eintraege.append(
-            {
-                "art": "entscheidung",
-                "entscheidung": e,
-                "zeit": e.vorgeschlagen_am,
-                "titel": f"Entscheidung {e.nummer} vorgeschlagen: {e.titel}",
-                "text": e.text,
-                "von": e.vorgeschlagen_von_name,
-            }
-        )
-    for o in OrdnerAnfrage.objects.select_related("bindung"):
-        eintraege.append(
-            {
-                "art": "ordner",
-                "anfrage": o,
-                "zeit": o.angelegt_am,
-                "titel": f"Neuer Arbeitsordner: {o.ordner}",
-                "text": "Ein Chat arbeitet in diesem Ordner. Zu welchem Projekt gehört er?",
-                "von": o.bindung.name,
-            }
-        )
-    eintraege.sort(key=lambda x: x["zeit"] or timezone.now())
-    return eintraege
-
-
-def meine_auftraege(benutzer):
-    """Aufträge, die der Mensch selbst bearbeitet oder als Prüfer offen hat."""
-    return (
-        Auftrag.objects.filter(
-            Q(bearbeiter_benutzer=benutzer) | Q(pruefer=benutzer, zustand=Auftrag.ZUR_PRUEFUNG)
-        )
-        .exclude(zustand__in=Auftrag.ENDZUSTAENDE)
-        .select_related("projekt", "modul")
-        .order_by("prioritaet", "id")
-    )
-
-
-# --- Übersicht ---------------------------------------------------------------------------
-
-
-def kacheln(projekt: Projekt | None) -> dict[str, int]:
-    auftraege = Auftrag.objects.all()
-    entscheidungen = Entscheidung.objects.filter(zustand=Entscheidung.VORSCHLAG)
-    if projekt is not None:
-        auftraege = auftraege.filter(projekt=projekt)
-        entscheidungen = entscheidungen.filter(betroffene_projekte=projekt)
-    wuensche = sum(
-        1
-        for a in auftraege.filter(zustand=Auftrag.ENTWURF).prefetch_related("revisionen")
-        if a.aktuelle_revision.ist_wunsch
-    )
-    return {
-        "zur_pruefung": auftraege.filter(zustand=Auftrag.ZUR_PRUEFUNG).count(),
-        "wuensche": wuensche,
-        "blockiert": auftraege.filter(zustand=Auftrag.BLOCKIERT).count(),
-        "entscheidungen": entscheidungen.distinct().count(),
-        "klaerung": auftraege.filter(zustand=Auftrag.KLAERUNG_ERFORDERLICH).count(),
-    }
-
-
-def projektzeilen(projekte, *, mit_modulen: bool = True) -> list[dict]:
-    """Je Projekt und Modul: Auftragszahlen je Zustand, zuletzt gemeldet, zuletzt geprüft."""
-    zaehlzustaende = [
-        ("entwurf", Auftrag.ENTWURF),
-        ("freigegeben", Auftrag.FREIGEGEBEN),
-        ("in_arbeit", (Auftrag.IN_ARBEIT, Auftrag.NACHARBEIT, Auftrag.BLOCKIERT)),
-        ("zur_pruefung", Auftrag.ZUR_PRUEFUNG),
-        ("abgenommen", Auftrag.ABGENOMMEN),
-    ]
-    grenze = timezone.now() - timedelta(days=7)
-
-    def zeile(name, kennung, auftraege, ist_modul=False):
-        zahlen = {}
-        for schluessel, zustand in zaehlzustaende:
-            z = zustand if isinstance(zustand, tuple) else (zustand,)
-            zahlen[schluessel] = auftraege.filter(zustand__in=z).count()
-        gemeldet = (
-            auftraege.exclude(zuletzt_gemeldet_am=None)
-            .order_by("-zuletzt_gemeldet_am")
-            .values_list("zuletzt_gemeldet_am", "bearbeiter_name", "letzter_bearbeiter_name")
-            .first()
-        )
-        geprueft = (
-            Pruefung.objects.filter(ergebnis__auftrag__in=auftraege)
-            .select_related("pruefer")
-            .order_by("-zeitpunkt")
-            .first()
-        )
-        zahlen["offen"] = sum(v for k, v in zahlen.items() if k != "abgenommen")
-        return {
-            "name": name,
-            "kennung": kennung,
-            "ist_modul": ist_modul,
-            **zahlen,
-            "gemeldet_am": gemeldet[0] if gemeldet else None,
-            "gemeldet_von": (gemeldet[1] or gemeldet[2]) if gemeldet else "",
-            "gemeldet_alt": bool(gemeldet and gemeldet[0] < grenze),
-            "geprueft_am": geprueft.zeitpunkt if geprueft else None,
-            "geprueft_von": geprueft.pruefer.get_username() if geprueft else "",
-        }
-
-    ergebnis = []
-    for projekt in projekte:
-        alle = Auftrag.objects.filter(projekt=projekt)
-        ergebnis.append(zeile(projekt.name, projekt.kennung, alle))
-        if mit_modulen:
-            for modul in projekt.module.filter(aktiv=True):
-                ergebnis.append(zeile(modul.name, str(modul), alle.filter(modul=modul), True))
-    return ergebnis
-
-
-def menschen():
-    return get_user_model().objects.filter(is_active=True).order_by("username")
+def wartet_auf_dich(projekt: Projekt) -> list[Auftrag]:
+    """Was in diesem Projekt auf Fred wartet: blockierte Aufträge (Rückfrage, Hindernis, Fehler)
+    und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort fehlt. Entwürfe in Planung
+    warten auf einen Chat, nicht auf ihn."""
+    offen = projekt.auftraege.filter(
+        zustand__in=(Auftrag.BLOCKIERT, Auftrag.ENTWURF)
+    ).select_related("projekt", "modul")
+    blockiert, entwuerfe = [], []
+    for a in offen.order_by("-aktualisiert_am", "-id"):
+        if a.zustand == Auftrag.BLOCKIERT:
+            blockiert.append(a)
+        elif not a.aktuelle_revision.ist_wunsch:
+            offene = [p for p in freigabepruefung(a) if not p.erfuellt]
+            if all(p.arbeitsort_wahl for p in offene):
+                entwuerfe.append(a)
+    return blockiert + entwuerfe

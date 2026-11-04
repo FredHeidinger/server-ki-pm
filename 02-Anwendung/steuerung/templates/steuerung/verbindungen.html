@@ -45,6 +45,42 @@
 </section>
 {% endif %}
 
+<section id="github" class="box{% if github.fehler %} warn{% endif %}" aria-labelledby="h-github">
+  <h2 id="h-github">GitHub verbinden</h2>
+  <p class="gedaempft">Damit zeigt jedes Projekt seine Version aus GitHub. KI-PM liest dort nur Releases und Bereitstellungen und ändert nichts. Der Schlüssel wird verschlüsselt gespeichert und nie wieder angezeigt; KI-Zugänge kommen nicht an ihn heran.</p>
+  {% if not github.owner %}
+    <p>{% if github.verbunden %}GitHub ist verbunden.{% else %}GitHub ist nicht verbunden.{% endif %} Verwalten darf das nur der Owner.</p>
+  {% elif github.verbunden %}
+    {% if github.fehler %}<p class="versionsfehler" role="alert">{{ github.fehler }}</p>{% endif %}
+    {% if github.konto %}<p class="versionszeile">verbunden als {{ github.konto }}, {{ github.anzahl }} Repositor{{ github.anzahl|pluralize:"y,ys" }} lesbar</p>{% if github.geprueft_am %}<p class="gedaempft klein">Zuletzt geprüft {{ github.geprueft_am|date:"d.m. H:i" }}.</p>{% endif %}{% endif %}
+    {% if github.hinweis %}<p class="box warn klein">{{ github.hinweis }}</p>{% endif %}
+    <div class="knopfzeile">
+      <form method="post" action="{% url 'github_pruefen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf klein">Prüfen</button></form>
+      <form method="post" action="{% url 'github_trennen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Trennen</button></form>
+    </div>
+    <details{% if not github.konto %} open{% endif %} class="github-schluessel"><summary>Schlüssel ersetzen</summary>
+      <form method="post" action="{% url 'github_verbinden' %}" class="formular klein" autocomplete="off">{% csrf_token %}
+        {% include "steuerung/formular_felder.html" with form=github_form %}
+        <button type="submit" class="knopf zweit klein">Speichern und prüfen</button>
+      </form>
+    </details>
+  {% else %}
+    <form method="post" action="{% url 'github_verbinden' %}" class="formular klein" autocomplete="off">{% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=github_form %}
+      <button type="submit" class="knopf">Speichern und prüfen</button>
+    </form>
+  {% endif %}
+  {% if github.owner %}<details class="github-anleitung"><summary>So bekommst du einen Lese-Schlüssel</summary>
+    <ol class="anleitung">
+      <li>Bei GitHub anmelden und <a href="https://github.com/settings/personal-access-tokens/new" rel="noopener" target="_blank">„New fine-grained token“ öffnen</a>.</li>
+      <li>Einen Namen eintragen (z. B. <strong>KI-PM lesen</strong>) und ein Ablaufdatum wählen.</li>
+      <li>Bei <strong>Repository access</strong> die Repositorys wählen, die KI-PM lesen soll.</li>
+      <li>Bei <strong>Permissions</strong> unter „Repositories“ nur <strong>Contents</strong> und <strong>Deployments</strong> auf <strong>Read-only</strong> stellen.</li>
+      <li><strong>Generate token</strong> klicken, den Schlüssel kopieren und oben einfügen. Danach steht dort „verbunden als …“.</li>
+    </ol>
+  </details>{% endif %}
+</section>
+
 <section id="ordner" class="box{% if ordneranfragen %} warn{% endif %}">
   <h2>Neue Arbeitsordner</h2>
   <p class="gedaempft">Hier entsteht nur dann ein Eintrag, wenn eine KI aus einem Ordner arbeitet, den noch kein Arbeitsort eines Projekts abdeckt. Ordnest du ihn einem Projekt zu, wird er dort ein Arbeitsort, und die KI weiß künftig das Projekt.</p>

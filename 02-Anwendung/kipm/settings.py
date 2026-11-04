@@ -119,27 +119,12 @@ def _zahl(name: str, standard: int) -> int:
 
 
 MIB = 1024 * 1024
-# Private Dateiablage für Unterlagen; nie unter STATIC_ROOT, nie direkt ausgeliefert.
+# Früher hochgeladene Dateien; nie unter STATIC_ROOT, nie direkt ausgeliefert.
 KIPM_ABLAGE_DIR = Path(os.environ.get("KIPM_ABLAGE_DIR", DATEN_DIR / "ablage"))
-KIPM_UPLOADS_AKTIV = os.environ.get("KIPM_UPLOADS_AKTIV", "1" if DEBUG else "0") == "1"
-KIPM_UPLOAD_MAX = _zahl("KIPM_UPLOAD_MAX", 25 * MIB)
-KIPM_UPLOAD_DATEIEN = _zahl("KIPM_UPLOAD_DATEIEN", 5)
-KIPM_PROJEKT_QUOTE = _zahl("KIPM_PROJEKT_QUOTE", 2048 * MIB)
-KIPM_BILD_MAX_PIXEL = _zahl("KIPM_BILD_MAX_PIXEL", 40_000_000)
-KIPM_OFFICE_MAX_ENTPACKT = _zahl("KIPM_OFFICE_MAX_ENTPACKT", 200 * MIB)
-KIPM_OFFICE_MAX_EINTRAEGE = _zahl("KIPM_OFFICE_MAX_EINTRAEGE", 2000)
-KIPM_EXTRAKT_SEKUNDEN = _zahl("KIPM_EXTRAKT_SEKUNDEN", 60)
-KIPM_EXTRAKT_MIB = _zahl("KIPM_EXTRAKT_MIB", 512)
-# Schadsoftwareprüfung: "" = keine (Uploads bleiben in Quarantäne), "clamdscan" = ClamAV-Dienst,
-# "test" = Testadapter ohne echte Prüfung (nur lokal, sichtbar gekennzeichnet).
-KIPM_SCANNER = os.environ.get("KIPM_SCANNER", "")
-FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * MIB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * MIB
-# GitHub App: ID und Pfad zur privaten Schlüsseldatei, nie im Repository oder in der Umgebungsdatei
-# selbst. Ohne beides ist GitHub nicht verbunden.
-KIPM_GITHUB_APP_ID = os.environ.get("KIPM_GITHUB_APP_ID", "")
-KIPM_GITHUB_APP_SCHLUESSEL = os.environ.get("KIPM_GITHUB_APP_SCHLUESSEL", "")
 KIPM_GITHUB_API = os.environ.get("KIPM_GITHUB_API", "https://api.github.com")
+# Sekunden je GitHub-Anfrage; die Seiten warten darauf, deshalb knapp.
+KIPM_GITHUB_ZEIT = _zahl("KIPM_GITHUB_ZEIT", 8)
 KIPM_KONTEXT_BUDGET = _zahl("KIPM_KONTEXT_BUDGET", 12_000)
 
 if os.environ.get("KIPM_HINTER_PROXY") == "1":

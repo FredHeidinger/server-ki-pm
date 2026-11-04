@@ -8,11 +8,6 @@ pytestmark = pytest.mark.django_db
     "name",
     [
         "start",
-        "meine",
-        "auftraege",
-        "pruefung",
-        "entscheidungen",
-        "verlauf",
         "projekte",
         "projekt_neu",
         "verbindungen",

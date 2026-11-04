@@ -1,11 +1,8 @@
 """Oberfläche. Views rufen nur den Dienst und rendern; keine Geschäftsregeln hier.
 
-Aufbau: Projektauswahl als Einstieg, je Projekt sechs Bereiche (Akte in ``views_akte``),
-Verbindungen als technische Verwaltung. Frühere projektübergreifende Listen führen zur Auswahl. Auftragsdetails erscheinen als
-Seitenpanel (Fragment) oder als eigene Seite.
+Aufbau: Projektauswahl als Einstieg, je Projekt vier Bereiche (Akte in ``views_akte``),
+Verbindungen als technische Verwaltung. Aufträge erscheinen als ganze Seite.
 """
-
-from datetime import timedelta
 
 from django.conf import settings
 from django.contrib import messages
@@ -18,17 +15,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import dienst
+from . import abgleich, dienst
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
     EigenesErgebnisForm,
-    EntscheidenForm,
-    EntscheidungForm,
+    GitHubSchluesselForm,
     ModulForm,
-    ModulNeuForm,
     ProjektForm,
     WunschForm,
     listen_zusammenfuehren,
@@ -38,10 +34,7 @@ from .models import (
     Arbeitsort,
     Auftrag,
     ChatBindung,
-    Entscheidung,
     Ereignis,
-    Ergebnis,
-    Kriteriumsbewertung,
     Meldung,
     Modul,
     OrdnerAnfrage,
@@ -97,28 +90,11 @@ def _fehler_anzeigen(request: HttpRequest, fehler: Exception) -> None:
 
 
 def _zurueck(request: HttpRequest, standard: str) -> HttpResponse:
-    """Nach einer Aktion dorthin zurück, wo der Nutzer war (Panel in Liste oder Board)."""
+    """Nach einer Aktion dorthin zurück, wo der Nutzer war (Überblick oder Auftrag)."""
     ziel = request.POST.get("zurueck") or request.GET.get("zurueck") or ""
     if ziel.startswith("/") and not ziel.startswith("//"):
         return redirect(ziel)
     return redirect(standard)
-
-
-# --- Persönliche Ebene ---------------------------------------------------------------------
-
-
-def _ins_projekt(request: HttpRequest, was: str) -> HttpResponse:
-    """Frühere projektübergreifende Seiten führen verständlich zur Projektauswahl, statt still
-    ein Projekt zu wählen."""
-    messages.info(
-        request, f"{was} findest du jetzt im jeweiligen Projekt. Bitte ein Projekt wählen."
-    )
-    return redirect("projekte")
-
-
-@login_required
-def meine(request: HttpRequest) -> HttpResponse:
-    return _ins_projekt(request, "Deine Aufträge")
 
 
 # --- Projekte -------------------------------------------------------------------------------
@@ -133,10 +109,20 @@ def projekte(request: HttpRequest) -> HttpResponse:
         projekte_qs = projekte_qs.filter(
             Q(name__icontains=suche) | Q(beschreibung__icontains=suche) | Q(zweck__icontains=suche)
         )
+    projekte_liste = list(projekte_qs)
+    abgleich.versionen_auffrischen(projekte_liste)
+    for p in projekte_liste:
+        p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
+        p.wartet = len(dienst.wartet_auf_dich(p))
+        p.version = abgleich.version_anzeige(p)["zustand"]
     return render(
         request,
         "steuerung/projekte.html",
-        {"projekte": projekte_qs, "suche": suche, "ordneranfragen": OrdnerAnfrage.objects.count()},
+        {
+            "projekte": projekte_liste,
+            "suche": suche,
+            "ordneranfragen": OrdnerAnfrage.objects.count(),
+        },
     )
 
 
@@ -203,24 +189,66 @@ def _reifegrad(auftrag: Auftrag) -> str:
     return "geplant – freigabebereit" if dienst.freigabefaehig(auftrag) else "in Planung"
 
 
+def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
+    """Der eine Knopf, der den Auftrag jetzt weiterbringt; gleich in „Wartet auf dich“, auf der
+    Board-Karte und im Auftragskopf. Ohne möglichen Knopf ein Satz: warum und was zu tun ist
+    (``kurz`` für die Karte)."""
+    z = auftrag.zustand
+    if z == Auftrag.BLOCKIERT:
+        frage = auftrag.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
+        return {"art": "antworten", "text": "Antworten", "frage": frage}
+    if z == Auftrag.ENTWURF:
+        if auftrag.aktuelle_revision.ist_wunsch:
+            satz = (
+                "Noch nicht geplant: Sag einem Chat „Plane "
+                f"{auftrag.nummer}“, dann kannst du ihn hier freigeben."
+            )
+            return {"art": "hinweis", "satz": satz, "kurz": "noch nicht geplant"}
+        if pruefpunkte is None:
+            pruefpunkte = dienst.freigabepruefung(auftrag)
+        offen = [p for p in pruefpunkte if not p.erfuellt]
+        if not offen:
+            return {"art": "freigeben", "text": "Freigeben"}
+        if all(p.arbeitsort_wahl for p in offen):
+            satz = "Freigeben geht erst mit Arbeitsort: Arbeitsort unten wählen, dann freigeben."
+            return {"art": "hinweis", "satz": satz, "kurz": "Arbeitsort fehlt", "ort": True}
+        gruende = ", ".join(p.text for p in offen)
+        satz = f"Freigeben noch nicht möglich ({gruende}). Was fehlt, steht unten unter „Freigabe“."
+        return {"art": "hinweis", "satz": satz, "kurz": "Freigabe noch nicht möglich"}
+    if z == Auftrag.FREIGEGEBEN:
+        satz = "Freigegeben: Ein Chat übernimmt ihn mit „weiter“. Für dich ist nichts zu tun."
+    elif z == Auftrag.IN_ARBEIT:
+        satz = (
+            f"In Arbeit bei {auftrag.bearbeiter_name or 'einem Chat'}. Für dich ist nichts zu tun."
+        )
+    elif z == Auftrag.ERLEDIGT:
+        satz = "Erledigt. Passt etwas nicht, lege über „+ Neu“ ein Issue an."
+    else:
+        satz = "Abgebrochen. Für dich ist nichts zu tun."
+    return {"art": "hinweis", "satz": satz, "kurz": ""}
+
+
+def wartet_eintraege(projekt: Projekt) -> list[dict]:
+    """Einträge für „Wartet auf dich“: Auftrag mit seinem Hauptknopf."""
+    return [{"a": a, "h": hauptaktion(a)} for a in dienst.wartet_auf_dich(projekt)]
+
+
 def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> HttpResponse:
-    """Board oder Liste mit Filtern; gemeinsam für projektübergreifend und je Projekt."""
+    """Board oder Liste mit Filtern."""
     ansicht = "liste" if request.GET.get("ansicht") == "liste" else "board"
     kontext["ansicht"] = ansicht
-    kontext["zeige_projekt"] = kontext.get("projekt") is None
     art = request.GET.get("art", "")
     if art in dict(Auftrag.TYPEN):
         liste = liste.filter(typ=art)
     kontext["art"] = art
-    if kontext.get("projekt") is not None:
-        filter_, auswahl = modulwahl(kontext["projekt"], request.GET.get("modul", ""))
-        if filter_:
-            liste = liste.filter(**filter_)
-        kontext.update(auswahl)
+    filter_, auswahl = modulwahl(kontext["projekt"], request.GET.get("modul", ""))
+    if filter_:
+        liste = liste.filter(**filter_)
+    kontext.update(auswahl)
     if ansicht == "board":
         alle = list(liste)
         for a in alle:
-            a.stand = _reifegrad(a)
+            a.haupt = hauptaktion(a)
         kontext["spalten"] = _spalten(alle)
         kontext["abgebrochen"] = sum(1 for a in alle if a.zustand == Auftrag.ABGEBROCHEN)
         return render(request, vorlage, kontext)
@@ -259,88 +287,23 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
 
 
 @login_required
-def auftraege(request: HttpRequest) -> HttpResponse:
-    return _ins_projekt(request, "Aufträge und Issues")
-
-
-@login_required
 def projekt_auftraege(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
     liste = projekt.auftraege.select_related("projekt", "modul").prefetch_related("revisionen")
     kontext = _projekt_kontext(projekt, "auftraege")
-    # Was in diesem Projekt auf eine menschliche Entscheidung wartet; nie projektübergreifend.
-    kontext["eintraege"] = [
-        e
-        for e in dienst.posteingang(request.user)
-        if e.get("auftrag") is not None and e["auftrag"].projekt_id == projekt.pk
-    ]
     return _auftragsliste(request, liste, "steuerung/projekt_auftraege.html", kontext)
 
 
-def _pruefzeilen(liste, benutzer) -> list[dict]:
-    zeilen = []
-    for a in liste:
-        e = a.ergebnisse.first()
-        if e is not None:
-            zeilen.append({"a": a, "e": e, "selbst": e.benutzer_id == benutzer.pk})
-    zeilen.sort(key=lambda z: z["e"].eingereicht_am)
-    return zeilen
-
-
-@login_required
-def pruefung(request: HttpRequest) -> HttpResponse:
-    return _ins_projekt(request, "Prüfungen")
-
-
-@login_required
-def projekt_pruefung(request: HttpRequest, kennung: str) -> HttpResponse:
-    projekt = _projekt(kennung)
-    liste = projekt.auftraege.filter(zustand=Auftrag.ZUR_PRUEFUNG).select_related(
-        "projekt", "modul", "pruefer"
-    )
-    kontext = _projekt_kontext(projekt, "pruefung")
-    kontext["zeilen"] = _pruefzeilen(liste, request.user)
-    return render(request, "steuerung/projekt_pruefung.html", kontext)
-
-
-@login_required
-def entscheidungen(request: HttpRequest) -> HttpResponse:
-    return _ins_projekt(request, "Entscheidungen")
-
-
-@login_required
-def projekt_entscheidungen(request: HttpRequest, kennung: str) -> HttpResponse:
-    projekt = _projekt(kennung)
-    return redirect(reverse("akte_wissen", kwargs={"kennung": projekt.kennung}) + "#entscheidungen")
-
-
 def _verlauf(request: HttpRequest, ereignisse, vorlage: str, kontext: dict) -> HttpResponse:
-    objekt = request.GET.get("objekt", "")
-    if objekt:
-        ereignisse = ereignisse.filter(objekt_typ=objekt)
-    akteur = request.GET.get("akteur", "")
-    if akteur:
-        ereignisse = ereignisse.filter(akteur_name=akteur)
-    tage = request.GET.get("tage", "")
-    if tage.isdigit():
-        ereignisse = ereignisse.filter(zeitpunkt__gte=timezone.now() - timedelta(days=int(tage)))
-    kennung = request.GET.get("kennung", "").strip()
-    if kennung:
-        ereignisse = ereignisse.filter(objekt_kennung__iexact=kennung)
-    kontext.update(
-        {
-            "ereignisse": ereignisse[:300],
-            "filter": {"objekt": objekt, "akteur": akteur, "tage": tage, "kennung": kennung},
-            "akteure": sorted(set(Ereignis.objects.values_list("akteur_name", flat=True))),
-            "objekte": sorted(set(Ereignis.objects.values_list("objekt_typ", flat=True))),
-        }
-    )
+    """Neuestes oben (Modellreihenfolge), wann · wer · was, ein Filter nach Art."""
+    arten = sorted(set(ereignisse.values_list("objekt_typ", flat=True)))
+    art = request.GET.get("art", "")
+    if art in arten:
+        ereignisse = ereignisse.filter(objekt_typ=art)
+    else:
+        art = ""
+    kontext.update({"ereignisse": ereignisse[:300], "art": art, "arten": arten})
     return render(request, vorlage, kontext)
-
-
-@login_required
-def verlauf(request: HttpRequest) -> HttpResponse:
-    return _ins_projekt(request, "Der Verlauf")
 
 
 @login_required
@@ -421,28 +384,6 @@ def modul_archivieren(request: HttpRequest, kennung: str, modul: str) -> HttpRes
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
     return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#module")
-
-
-@login_required
-def modul_neu_seite(request: HttpRequest) -> HttpResponse:
-    """„+ Neu → Modul“ ohne aktuelles Projekt: Projekt wählen und Modul anlegen."""
-    projekt = Projekt.objects.filter(kennung=request.GET.get("projekt", "")).first()
-    form = ModulNeuForm(request.POST or None, projekt=projekt)
-    if request.method == "POST" and form.is_valid():
-        d = form.cleaned_data
-        try:
-            dienst.modul_anlegen(
-                _akteur(request), d["projekt"], kennung=slugify(d["name"]), name=d["name"]
-            )
-        except dienst.DienstFehler as fehler:
-            form.add_error(None, str(fehler))
-        else:
-            messages.success(request, f"Modul „{d['name']}“ angelegt.")
-            return redirect(
-                reverse("projekt_einstellungen", kwargs={"kennung": d["projekt"].kennung})
-                + "#module"
-            )
-    return render(request, "steuerung/modul_neu.html", {"form": form})
 
 
 @login_required
@@ -533,7 +474,7 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
             wort = "Issue" if auftrag.typ == Auftrag.TYP_ISSUE else "Auftrag"
             messages.success(
                 request,
-                f"{wort} {auftrag.nummer} ist angelegt. Als Nächstes planen: Ziel, Umfang, Abnahme.",
+                f"{wort} {auftrag.nummer} ist angelegt. Als Nächstes planen: Ziel, Umfang, Kriterien.",
             )
             return redirect("auftrag_detail", auftrag_id=auftrag.pk)
     titel = "Issue anlegen" if art == Auftrag.TYP_ISSUE else "Auftrag anlegen"
@@ -545,7 +486,10 @@ def wunsch_neu(request: HttpRequest) -> HttpResponse:
 def _auftrag_oder_404(auftrag_id: int) -> Auftrag:
     auftrag = (
         Auftrag.objects.select_related(
-            "projekt", "modul", "pruefer", "bearbeiter_bindung", "abgeleitet_von", "entscheidung"
+            "projekt",
+            "modul",
+            "meilenstein",
+            "bearbeiter_bindung",
         )
         .filter(pk=auftrag_id)
         .first()
@@ -555,14 +499,14 @@ def _auftrag_oder_404(auftrag_id: int) -> Auftrag:
     return auftrag
 
 
-def _aktionen(auftrag: Auftrag, benutzer) -> tuple[list[dict], bool, list]:
+def _aktionen(auftrag: Auftrag) -> tuple[list[dict], bool, list]:
     """Welche Aktionen gerade erlaubt sind, und warum nicht. Reihenfolge ist die Anzeige."""
     z = auftrag.zustand
     pruefpunkte = dienst.freigabepruefung(auftrag) if z == Auftrag.ENTWURF else []
     offen = [p.text for p in pruefpunkte if not p.erfuellt]
     aktionen: list[dict] = []
 
-    def a(name, text, erlaubt, grund="", gefahr=False, begruendung=False):
+    def a(name, text, erlaubt=True, grund="", gefahr=False, begruendung=False):
         aktionen.append(
             {
                 "name": name,
@@ -578,122 +522,48 @@ def _aktionen(auftrag: Auftrag, benutzer) -> tuple[list[dict], bool, list]:
     if z == Auftrag.ENTWURF:
         a("freigeben", "Freigeben", not offen, "; ".join(offen))
     if z == Auftrag.FREIGEGEBEN:
-        a(
-            "selbst",
-            "Ich bearbeite das selbst",
-            auftrag.pruefer_id != benutzer.pk,
-            "Du bist der Prüfer; zuerst den Prüfer ändern.",
-        )
-        a("zuruecknehmen", "Freigabe zurücknehmen", True)
-    if z == Auftrag.BLOCKIERT:
-        a("hindernis_aufheben", "Blockade aufheben, weiter", True)
+        a("selbst", "Ich bearbeite das selbst")
+        a("zuruecknehmen", "Freigabe zurücknehmen")
     if z in Auftrag.BEARBEITER_ZUSTAENDE:
-        a("unklar", "Bearbeitung ist unklar", True, "", True, True)
+        a("unklar", "Bearbeitung ist unklar", gefahr=True, begruendung=True)
     if not auftrag.ist_endzustand:
-        a("abbrechen", "Abbrechen", True, "", True, True)
+        a("abbrechen", "Abbrechen", gefahr=True, begruendung=True)
     return aktionen, bearbeitbar, pruefpunkte
 
 
-HAUPTAKTIONEN = ("freigeben", "selbst", "hindernis_aufheben")
-
-
-def _naechster_schritt(auftrag: Auftrag, pruefpunkte, ergebnis) -> dict:
-    """Was jetzt zu tun ist, in einem Satz; die Hauptaktion steht daneben."""
-    z = auftrag.zustand
-    offen = [p for p in pruefpunkte if not p.erfuellt]
-    if z == Auftrag.ENTWURF:
-        if auftrag.aktuelle_revision.ist_wunsch:
-            return {"text": "Planen: Ziel, Umfang und Abnahmekriterien festlegen", "planen": True}
-        if offen:
-            nur_ort = all(p.arbeitsort_wahl for p in offen)
-            return {
-                "text": "Arbeitsort festlegen, dann freigeben"
-                if nur_ort
-                else "Fertig planen: " + ", ".join(p.text for p in offen),
-                "planen": not nur_ort,
-            }
-        return {"text": "Bereit zur Freigabe"}
-    if z == Auftrag.FREIGEGEBEN:
-        return {"text": "Freigegeben; wartet auf Übernahme durch einen Bearbeiter"}
-    if z == Auftrag.IN_ARBEIT:
-        return {
-            "text": f"In Arbeit bei {auftrag.bearbeiter_name or 'einem Bearbeiter'}; nichts zu tun"
-        }
-    if z == Auftrag.BLOCKIERT:
-        return {"text": "Blockiert: Rückfrage, Hindernis oder Fehler beantworten"}
-    if z == Auftrag.ERLEDIGT and ergebnis is not None and ergebnis.ohne_tests:
-        return {"text": "Erledigt, ohne automatische Tests"}
-    return {"text": f"Abgeschlossen: {auftrag.get_zustand_display()}"}
-
-
 def _auftrag_kontext(request: HttpRequest, auftrag: Auftrag) -> dict:
-    aktionen, bearbeitbar, pruefpunkte = _aktionen(auftrag, request.user)
+    """Auftrag als ganze Seite: Kopf mit dem einen Hauptknopf, dann Auftrag, Ergebnis, Verlauf;
+    Bearbeiten und Abbrechen unter „Weitere Aktionen“."""
+    aktionen, bearbeitbar, pruefpunkte = _aktionen(auftrag)
     ergebnis = auftrag.ergebnisse.first()
-    rev = auftrag.aktuelle_revision
-    pruefbar = (
-        ergebnis is not None
-        and auftrag.zustand == Auftrag.ZUR_PRUEFUNG
-        and ergebnis.benutzer_id != request.user.pk
-        and not ergebnis.pruefungen.exists()
-    )
     return {
         "auftrag": auftrag,
-        "rev": rev,
-        "reifegrad": _reifegrad(auftrag),
+        "rev": auftrag.aktuelle_revision,
+        "haupt": hauptaktion(auftrag, pruefpunkte),
         "pruefpunkte": pruefpunkte,
-        "aktionen": aktionen,
+        "pruef_offen": [p for p in pruefpunkte if not p.erfuellt],
         "bearbeitbar": bearbeitbar,
+        "weitere_aktionen": [a for a in aktionen if a["name"] != "freigeben"],
         "vorgaenger": auftrag.abhaengigkeiten.select_related("vorgaenger"),
         "nachfolger": auftrag.nachfolger.select_related("auftrag"),
         "meldungen": auftrag.meldungen.all()[:30],
-        "vorschlaege": auftrag.meldungen.filter(
-            art=Meldung.VORSCHLAG, vorschlag_status=Meldung.OFFEN
-        ),
-        "offene_blockade": auftrag.meldungen.filter(
-            art__in=Meldung.BLOCKIERENDE, historisch=False
-        ).first()
-        if auftrag.zustand == Auftrag.BLOCKIERT
-        else None,
         "ergebnis": ergebnis,
         "ergebnisse": auftrag.ergebnisse.all(),
-        "pruefung": ergebnis.pruefungen.select_related("pruefer").first() if ergebnis else None,
-        "pruefbar": pruefbar,
-        "eigenes_ergebnis": ergebnis is not None and ergebnis.benutzer_id == request.user.pk,
-        "kriterien": [{"i": i, "text": k} for i, k in enumerate(rev.kriterien)] if pruefbar else [],
-        "bewertungen": Kriteriumsbewertung.BEWERTUNGEN,
-        "pruefberichte": auftrag.meldungen.filter(art=Meldung.PRUEFBERICHT)[:5],
-        "ereignisse": Ereignis.objects.filter(objekt_typ="Auftrag", objekt_kennung=auftrag.nummer)[
-            :50
-        ],
+        "ereignisse": Ereignis.objects.filter(
+            projekt=auftrag.projekt, objekt_typ="Auftrag", objekt_kennung=auftrag.nummer
+        )[:50],
         "ist_bearbeiter": auftrag.bearbeiter_benutzer_id == request.user.pk,
         "revisionen": auftrag.revisionen.all(),
-        "abgeleitete": auftrag.abgeleitete.all(),
         "zurueck": request.GET.get("zurueck", ""),
         "arbeitsorte": auftrag.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True),
         "arbeitsort_form": ArbeitsortForm(prefix="ort"),
-        "schritt": _naechster_schritt(auftrag, pruefpunkte, ergebnis),
-        "hauptaktionen": [a for a in aktionen if a["name"] in HAUPTAKTIONEN],
-        "weitere_aktionen": [a for a in aktionen if a["name"] not in HAUPTAKTIONEN],
-        "pruef_erfuellt": sum(1 for p in pruefpunkte if p.erfuellt),
-        "arbeit_anzahl": auftrag.meldungen.count() + auftrag.ergebnisse.count(),
     }
 
 
 @login_required
 def auftrag_detail(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     auftrag = _auftrag_oder_404(auftrag_id)
-    kontext = _auftrag_kontext(request, auftrag)
-    kontext["als_panel"] = False
-    return render(request, "steuerung/auftrag_detail.html", kontext)
-
-
-@login_required
-def auftrag_panel(request: HttpRequest, auftrag_id: int) -> HttpResponse:
-    """Fragment für das Seitenpanel; ohne JavaScript führt der Link auf die volle Seite."""
-    auftrag = _auftrag_oder_404(auftrag_id)
-    kontext = _auftrag_kontext(request, auftrag)
-    kontext["als_panel"] = True
-    return render(request, "steuerung/auftrag_inhalt.html", kontext)
+    return render(request, "steuerung/auftrag_detail.html", _auftrag_kontext(request, auftrag))
 
 
 @login_required
@@ -704,6 +574,7 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         "titel": auftrag.titel,
         "prioritaet": auftrag.prioritaet,
         "modul": auftrag.modul,
+        "meilenstein": auftrag.meilenstein,
         "beschreibung": rev.beschreibung,
         "ziel": rev.ziel,
         "nicht_ziele": rev.nicht_ziele,
@@ -711,7 +582,6 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         "schreibumfang": rev.schreibumfang,
         "quellen": rev.quellen,
         "abnahmekriterien": rev.abnahmekriterien,
-        "pruefer": auftrag.pruefer or request.user,
     }
     form = ArbeitspaketForm(
         listen_zusammenfuehren(request.POST, "schreibumfang", "abnahmekriterien")
@@ -719,7 +589,6 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         else None,
         initial=anfang,
         auftrag=auftrag,
-        menschen=dienst.menschen(),
     )
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
@@ -740,8 +609,8 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
                 modul=d["modul"],
                 anlass=d["anlass"],
             )
-            if d["pruefer"] is not None and d["pruefer"].pk != auftrag.pruefer_id:
-                dienst.pruefer_festlegen(akteur, auftrag, d["pruefer"])
+            if "meilenstein" in d:
+                dienst.meilenstein_zuordnen(akteur, auftrag, d["meilenstein"])
         except dienst.DienstFehler as fehler:
             form.add_error(None, str(fehler))
         else:
@@ -783,21 +652,12 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
         elif aktion == "zuruecknehmen":
             dienst.freigabe_zuruecknehmen(akteur, auftrag, grund)
             messages.success(request, "Freigabe zurückgenommen.")
-        elif aktion == "pausieren":
-            dienst.auftrag_pausieren(akteur, auftrag, grund)
-            messages.success(request, "Pausiert.")
-        elif aktion == "fortsetzen":
-            dienst.auftrag_fortsetzen(akteur, auftrag)
-            messages.success(request, "Fortgesetzt.")
         elif aktion == "abbrechen":
             dienst.auftrag_abbrechen(akteur, auftrag, grund)
             messages.success(request, "Abgebrochen.")
         elif aktion == "unklar":
             dienst.bearbeitung_unklar(akteur, auftrag, grund)
             messages.success(request, "Die Übernahme ist beendet; der Auftrag ist wieder Entwurf.")
-        elif aktion == "hindernis_aufheben":
-            dienst.hindernis_aufheben(akteur, auftrag, grund)
-            messages.success(request, "Blockade aufgehoben.")
         elif aktion == "selbst":
             dienst.auftrag_uebernehmen(akteur, auftrag, auftrag.revision_nr)
             messages.success(
@@ -812,8 +672,6 @@ def auftrag_aktion(request: HttpRequest, auftrag_id: int, aktion: str) -> HttpRe
             vorgaenger = get_object_or_404(Auftrag, pk=request.POST.get("vorgaenger"))
             dienst.vorgaenger_entfernen(akteur, auftrag, vorgaenger)
             messages.success(request, "Vorgänger entfernt.")
-        elif aktion == "pruefen":
-            _pruefen(request, auftrag, akteur)
         else:
             raise Http404
     except dienst.DienstFehler as fehler:
@@ -882,27 +740,6 @@ def auftrag_arbeitsort(request: HttpRequest, auftrag_id: int, wahl: str) -> Http
     return _zurueck(request, f"/auftraege/{auftrag.pk}/")
 
 
-def _pruefen(request: HttpRequest, auftrag: Auftrag, akteur: dienst.Akteur) -> None:
-    ergebnis = auftrag.ergebnisse.first()
-    if ergebnis is None:
-        raise dienst.DienstFehler("Kein Ergebnis zum Prüfen.")
-    kriterien = auftrag.revisionen.get(nummer=ergebnis.revision_nr).kriterien
-    bewertungen = [
-        (request.POST.get(f"k{i}", ""), request.POST.get(f"a{i}", ""))
-        for i in range(len(kriterien))
-    ]
-    dienst.ergebnis_pruefen(
-        akteur,
-        ergebnis,
-        bewertungen=bewertungen,
-        entscheidung=request.POST.get("entscheidung", ""),
-        begruendung=request.POST.get("begruendung", ""),
-        integration_offen=request.POST.get("integration_offen") == "1",
-    )
-    auftrag.refresh_from_db()
-    messages.success(request, f"{auftrag.nummer}: {auftrag.get_zustand_display()}.")
-
-
 @login_required
 @require_POST
 def antwort(request: HttpRequest, auftrag_id: int) -> HttpResponse:
@@ -916,32 +753,6 @@ def antwort(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     except dienst.DienstFehler as fehler:
         _fehler_anzeigen(request, fehler)
     return _zurueck(request, f"/auftraege/{auftrag.pk}/")
-
-
-@login_required
-def auftrag_teilen(request: HttpRequest, auftrag_id: int) -> HttpResponse:
-    auftrag = _auftrag_oder_404(auftrag_id)
-    form = WunschForm(request.POST or None, projekt=auftrag.projekt)
-    form.fields["projekt"].queryset = Projekt.objects.filter(pk=auftrag.projekt_id)
-    if request.method == "POST" and form.is_valid():
-        d = form.cleaned_data
-        try:
-            neu = dienst.wunsch_erfassen(
-                _akteur(request),
-                auftrag.projekt,
-                titel=d["titel"],
-                beschreibung=d["beschreibung"],
-                modul=d["modul"],
-                prioritaet=d["prioritaet"],
-                abgeleitet_von=auftrag,
-                erzwingen=d["erzwingen"],
-            )
-        except dienst.DienstFehler as fehler:
-            form.add_error(None, str(fehler))
-        else:
-            messages.success(request, f"{neu.nummer} ist aus {auftrag.nummer} abgeleitet.")
-            return redirect("auftrag_detail", auftrag_id=neu.pk)
-    return render(request, "steuerung/auftrag_teilen.html", {"auftrag": auftrag, "form": form})
 
 
 @login_required
@@ -968,133 +779,6 @@ def eigenes_ergebnis(request: HttpRequest, auftrag_id: int) -> HttpResponse:
             )
             return redirect("auftrag_detail", auftrag_id=auftrag.pk)
     return render(request, "steuerung/eigenes_ergebnis.html", {"auftrag": auftrag, "form": form})
-
-
-@login_required
-@require_POST
-def vorschlag_bewerten(
-    request: HttpRequest, auftrag_id: int, meldung_id: int, wahl: str
-) -> HttpResponse:
-    meldung = get_object_or_404(Meldung, pk=meldung_id, auftrag_id=auftrag_id)
-    try:
-        dienst.vorschlag_bewerten(_akteur(request), meldung, uebernommen=(wahl == "uebernehmen"))
-        if wahl == "uebernehmen":
-            messages.success(
-                request,
-                "Vorschlag als übernommen markiert. Trage die Änderung jetzt über „Bearbeiten“ "
-                "in eine neue Revision ein.",
-            )
-            return redirect("auftrag_bearbeiten", auftrag_id=auftrag_id)
-        messages.success(request, "Vorschlag abgelehnt.")
-    except dienst.DienstFehler as fehler:
-        _fehler_anzeigen(request, fehler)
-    return _zurueck(request, f"/auftraege/{auftrag_id}/")
-
-
-@login_required
-def pruefung_detail(request: HttpRequest, ergebnis_id: int) -> HttpResponse:
-    """Prüfung eines bestimmten Ergebnisses; die Seite ist der Auftrag mit geöffnetem Prüfteil."""
-    ergebnis = get_object_or_404(Ergebnis, pk=ergebnis_id)
-    auftrag = _auftrag_oder_404(ergebnis.auftrag_id)
-    if request.method == "POST":
-        try:
-            _pruefen(request, auftrag, _akteur(request))
-        except dienst.DienstFehler as fehler:
-            _fehler_anzeigen(request, fehler)
-            kontext = _auftrag_kontext(request, auftrag)
-            kontext["als_panel"] = False
-            return render(request, "steuerung/auftrag_detail.html", kontext)
-        return redirect("auftrag_detail", auftrag_id=auftrag.pk)
-    return redirect("auftrag_detail", auftrag_id=auftrag.pk)
-
-
-# --- Entscheidungen ----------------------------------------------------------------------
-
-
-@login_required
-def entscheidung_neu(request: HttpRequest) -> HttpResponse:
-    projekt = Projekt.objects.filter(kennung=request.GET.get("projekt", "")).first()
-    form = EntscheidungForm(
-        request.POST or None, initial={"projekte": [projekt.pk]} if projekt else None
-    )
-    if request.method == "POST" and form.is_valid():
-        d = form.cleaned_data
-        akteur = _akteur(request)
-        try:
-            e = dienst.entscheidung_vorschlagen(
-                akteur,
-                titel=d["titel"],
-                text=d["text"],
-                verweis=d["verweis"],
-                projekte=list(d["projekte"]),
-            )
-            if d["sofort_entscheiden"]:
-                dienst.entscheidung_treffen(akteur, e)
-        except dienst.DienstFehler as fehler:
-            form.add_error(None, str(fehler))
-        else:
-            messages.success(request, f"{e.nummer} ist angelegt.")
-            return redirect("entscheidung_detail", entscheidung_id=e.pk)
-    return render(request, "steuerung/entscheidung_neu.html", {"form": form})
-
-
-@login_required
-def entscheidung_detail(request: HttpRequest, entscheidung_id: int) -> HttpResponse:
-    e = get_object_or_404(
-        Entscheidung.objects.prefetch_related("betroffene_projekte"), pk=entscheidung_id
-    )
-    bestaetigungen = {
-        b.projekt_id: b for b in e.bestaetigungen.select_related("projekt") if b.stand == e.stand
-    }
-    projekte_liste = [(p, bestaetigungen.get(p.pk)) for p in e.betroffene_projekte.all()]
-    return render(
-        request,
-        "steuerung/entscheidung_detail.html",
-        {
-            "e": e,
-            "projekte": projekte_liste,
-            "auftraege": e.auftraege.select_related("projekt"),
-            "entscheiden_form": EntscheidenForm(initial={"text": ""}),
-            "ereignisse": Ereignis.objects.filter(
-                objekt_typ="Entscheidung", objekt_kennung=e.nummer
-            )[:30],
-        },
-    )
-
-
-@login_required
-@require_POST
-def entscheidung_aktion(request: HttpRequest, entscheidung_id: int, aktion: str) -> HttpResponse:
-    e = get_object_or_404(Entscheidung, pk=entscheidung_id)
-    akteur = _akteur(request)
-    try:
-        if aktion == "entscheiden":
-            dienst.entscheidung_treffen(akteur, e, text=request.POST.get("text", ""))
-            messages.success(
-                request,
-                f"{e.nummer} ist entschieden (Stand {e.stand}). "
-                "Betroffene Projekte müssen die Übernahme bestätigen.",
-            )
-        elif aktion == "zurueckziehen":
-            dienst.entscheidung_zurueckziehen(akteur, e, request.POST.get("grund", ""))
-            messages.success(request, "Zurückgezogen.")
-        elif aktion == "bestaetigen":
-            projekt = get_object_or_404(Projekt, pk=request.POST.get("projekt"))
-            dienst.uebernahme_bestaetigen(akteur, e, projekt)
-            messages.success(request, f"Übernahme für {projekt.name} bestätigt.")
-        elif aktion == "umsetzungsauftrag":
-            projekt = get_object_or_404(Projekt, pk=request.POST.get("projekt"))
-            auftrag = dienst.umsetzungsauftrag_anlegen(akteur, e, projekt)
-            messages.success(
-                request,
-                f"Umsetzungsauftrag {auftrag.nummer} für {projekt.name} ist als Entwurf angelegt.",
-            )
-            return redirect("auftrag_detail", auftrag_id=auftrag.pk)
-        else:
-            raise Http404
-    except dienst.DienstFehler as fehler:
-        _fehler_anzeigen(request, fehler)
-    return _zurueck(request, f"/entscheidungen/{e.pk}/")
 
 
 # --- Verbindungen --------------------------------------------------------------------------
@@ -1168,9 +852,57 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
             "eigenes_zertifikat": not settings.KIPM_OEFFENTLICHE_URL,
             "ordneranfragen": OrdnerAnfrage.objects.select_related("bindung"),
             "projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
+            "github": abgleich.zugang_anzeige(_akteur(request)),
+            "github_form": GitHubSchluesselForm(prefix="g"),
             **_zugaenge(ChatBindung.objects.all()),
         },
     )
+
+
+def _github_ergebnis(request: HttpRequest, fn, *args) -> None:
+    """Prüfergebnis als eine Meldung; der Stand bleibt zusätzlich in „GitHub verbinden“ sichtbar."""
+    try:
+        zugang = fn(_akteur(request), *args)
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+        return
+    if zugang.fehler:
+        messages.error(request, zugang.fehler)
+    else:
+        anzahl = len(zugang.repositorys)
+        wort = "Repository" if anzahl == 1 else "Repositorys"
+        messages.success(request, f"Verbunden als {zugang.konto}, {anzahl} {wort} lesbar.")
+
+
+@sensitive_post_parameters("g-schluessel")
+@login_required
+@require_POST
+def github_verbinden(request: HttpRequest) -> HttpResponse:
+    form = GitHubSchluesselForm(request.POST, prefix="g")
+    if form.is_valid():
+        _github_ergebnis(request, abgleich.github_verbinden, form.cleaned_data["schluessel"])
+    else:
+        messages.error(request, "Bitte den Lese-Schlüssel einfügen.")
+    return redirect(reverse("verbindungen") + "#github")
+
+
+@login_required
+@require_POST
+def github_pruefen(request: HttpRequest) -> HttpResponse:
+    _github_ergebnis(request, abgleich.github_pruefen)
+    return redirect(reverse("verbindungen") + "#github")
+
+
+@login_required
+@require_POST
+def github_trennen(request: HttpRequest) -> HttpResponse:
+    try:
+        abgleich.github_trennen(_akteur(request))
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    else:
+        messages.success(request, "GitHub ist getrennt; der Schlüssel ist gelöscht.")
+    return redirect(reverse("verbindungen") + "#github")
 
 
 @login_required

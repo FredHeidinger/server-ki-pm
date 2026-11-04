@@ -6,11 +6,11 @@
     {% for a in spalte.karten %}
     <article class="karte prio-{{ a.prioritaet }}{% if a.typ == 'issue' %} ist-issue{% endif %}">
       {% if a.typ == "issue" %}<span class="issue">Issue</span>{% endif %}
-      <a class="kartentitel" href="{% url 'auftrag_detail' auftrag_id=a.pk %}" data-panel="{% url 'auftrag_panel' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a>
-      <p class="kartenmeta">{% if zeige_projekt %}{{ a.projekt.name }}{% if a.modul %} · {{ a.modul.name }}{% endif %}{% elif a.modul %}{{ a.modul.name }}{% else %}ohne Modul{% endif %}</p>
+      <a class="kartentitel" href="{% url 'auftrag_detail' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a>
+      <p class="kartenmeta">{% if a.modul %}{{ a.modul.name }}{% else %}ohne Modul{% endif %}</p>
+      {% include "steuerung/hauptknopf.html" with h=a.haupt ort="karte" zurueck=request.get_full_path %}
       <div class="kartenfuss">
         {% if a.zustand != spalte.hauptzustand %}{{ a.zustand|zustand }}{% endif %}
-        {% if a.stand %}<span class="stand{% if a.stand|slice:':7' == 'geplant' %} fertig{% endif %}">{{ a.stand }}</span>{% endif %}
         <span class="prio prio-{{ a.prioritaet }}" title="Priorität">{{ a.prioritaet }}</span>
         {% if a.bearbeiter_name %}<span class="bearbeiter" title="Bearbeiter">{% if a.bearbeiter_bindung_id %}<span class="ki">KI</span>{% else %}👤{% endif %} {{ a.bearbeiter_name }}</span>{% endif %}
       </div>

@@ -1,13 +1,13 @@
 {% comment %}Zugangsliste; erwartet bindungen (gültig) und archiv (widerrufen oder abgelaufen).{% endcomment %}
 {% if bindungen %}
 <table class="klein">
-  <thead><tr><th scope="col">Programm</th><th scope="col">Zuletzt verwendet</th><th scope="col">Gültig bis</th><th scope="col"></th></tr></thead>
+  <thead><tr><th scope="col">Programm</th><th scope="col">Zuletzt verwendet</th><th scope="col" class="nur-mittel">Gültig bis</th><th scope="col"></th></tr></thead>
   <tbody>
   {% for b in bindungen %}
   <tr>
     <td>{{ b.name }} <span class="kuerzel">{{ b.praefix }}</span>{% if b.projekt %}<br><span class="gedaempft">alter Schlüssel nur für {{ b.projekt.name }}</span>{% endif %}</td>
     <td>{% if b.zuletzt_aktiv %}{{ b.zuletzt_aktiv|date:"d.m.Y H:i" }}{% if b.letztes_projekt %} · {{ b.letztes_projekt.name }}{% endif %}{% else %}noch nie{% endif %}</td>
-    <td>{{ b.gueltig_bis|date:"d.m.Y" }}</td>
+    <td class="nur-mittel">{{ b.gueltig_bis|date:"d.m.Y" }}</td>
     <td class="aktionen">
       <a class="knopf zweit klein" href="{% url 'zugang_pruefen' bindung_id=b.pk %}">Prüfen</a>
       {% if b.loeschbar %}

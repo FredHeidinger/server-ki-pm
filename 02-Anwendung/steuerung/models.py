@@ -2,6 +2,10 @@
 
 Jede fachliche Änderung läuft über ``steuerung.dienst`` und schreibt dort im selben
 Commit ein ``Ereignis``. Die Modelle selbst enthalten keine Geschäftsregeln.
+
+Tabellen früherer Stufen (Pruefung, Kriteriumsbewertung, Uebernahmebestaetigung, Funktion, Umgebung,
+Release, ReleaseKomponente, Installation, Nachweis, Unterlagenzuordnung, Abrufstand, ExternesObjekt,
+ExterneAktion, Besuchsmarke) bleiben mit ihren Daten stehen; kein Code liest oder schreibt sie.
 """
 
 from django.conf import settings
@@ -171,13 +175,6 @@ class Auftrag(models.Model):
     BLOCKIERT = "BLOCKIERT"
     ERLEDIGT = "ERLEDIGT"
     ABGEBROCHEN = "ABGEBROCHEN"
-    # Frühere Zustände des Ablaufs mit Nutzerabnahme. Migration 0008 überführt sie; kein Ablauf
-    # erreicht sie mehr.
-    ZUR_PRUEFUNG = "ZUR_PRUEFUNG"
-    NACHARBEIT = "NACHARBEIT"
-    ABGENOMMEN = "ABGENOMMEN"
-    KLAERUNG_ERFORDERLICH = "KLAERUNG_ERFORDERLICH"
-    PAUSIERT = "PAUSIERT"
     ZUSTAENDE = [
         (ENTWURF, "Entwurf"),
         (FREIGEGEBEN, "Freigegeben"),
@@ -200,6 +197,9 @@ class Auftrag(models.Model):
     projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="auftraege")
     modul = models.ForeignKey(
         Modul, null=True, blank=True, on_delete=models.PROTECT, related_name="auftraege"
+    )
+    meilenstein = models.ForeignKey(
+        "Meilenstein", null=True, blank=True, on_delete=models.PROTECT, related_name="auftraege"
     )
     titel = models.CharField("Titel", max_length=200)
     zustand = models.CharField("Zustand", max_length=24, choices=ZUSTAENDE, default=ENTWURF)
@@ -477,6 +477,7 @@ class Entscheidung(models.Model):
 
     titel = models.CharField("Titel", max_length=200)
     text = models.TextField("Vorschlag / Entscheidung")
+    warum = models.TextField("Warum", blank=True)
     verweis = models.CharField("Verweis auf Dokument mit Revision", max_length=300, blank=True)
     zustand = models.CharField(max_length=16, choices=ZUSTAENDE, default=VORSCHLAG)
     stand = models.PositiveIntegerField("Stand", default=0)
@@ -595,6 +596,10 @@ class Objektversion(models.Model):
 
 
 class Meilenstein(models.Model):
+    """Name und Datum (``termin``); der Fortschritt wird aus den Aufträgen gezählt. Nummer ist
+    ``M-<id>``. Ziel, Zielversion, Zustand und Funktionen werden nicht mehr gesetzt (fallen mit
+    A-8 weg)."""
+
     GEPLANT, IN_ARBEIT, ERREICHT, ZURUECKGESTELLT = (
         "geplant",
         "in_arbeit",
@@ -618,6 +623,10 @@ class Meilenstein(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+    @property
+    def nummer(self) -> str:
+        return f"M-{self.pk}"
 
 
 class Funktion(models.Model):
@@ -665,10 +674,6 @@ class Funktion(models.Model):
     @property
     def kennung(self) -> str:
         return f"F-{self.nummer}"
-
-    @property
-    def kriterienliste(self) -> list[str]:
-        return [z.strip() for z in self.kriterien.splitlines() if z.strip()]
 
 
 class Umgebung(models.Model):
@@ -1040,13 +1045,36 @@ class RepoVerbindung(models.Model):
     def aktiv(self) -> bool:
         return self.widerrufen_am is None
 
-    @property
-    def aktionsliste(self) -> list[str]:
-        return [z.strip() for z in self.aktionen.splitlines() if z.strip()]
 
-    @property
-    def pfadmuster(self) -> list[str]:
-        return [z.strip() for z in self.erlaubte_pfade.splitlines() if z.strip()]
+class GitHubZugang(models.Model):
+    """Freds Lese-Schlüssel für GitHub, höchstens eine Zeile. Der Schlüssel liegt nur verschlüsselt
+    vor; Anzeigen bekommen ausschließlich ``abgleich.zugang_anzeige``, nie diese Zeile."""
+
+    schluessel = models.TextField("Schlüssel, verschlüsselt", editable=False)
+    konto = models.CharField(max_length=100, blank=True)
+    repositorys = models.JSONField(default=list, blank=True)
+    hinweis = models.CharField(max_length=300, blank=True)
+    fehler = models.CharField(max_length=300, blank=True)
+    abgelehnt = models.BooleanField(default=False)
+    gespeichert_am = models.DateTimeField(auto_now_add=True)
+    geprueft_am = models.DateTimeField(null=True, blank=True)
+
+
+class VersionStand(models.Model):
+    """Zuletzt bei GitHub gelesener Versionsstand eines Projekts; GitHub bleibt führend."""
+
+    AKTUELL = "aktuell"
+    NICHT_AKTUELL = "nicht aktuell"
+    UNBEKANNT = "unbekannt"
+
+    projekt = models.OneToOneField(Projekt, on_delete=models.CASCADE, related_name="versionsstand")
+    neueste = models.CharField(max_length=200, blank=True)
+    umgebungen = models.JSONField(default=list, blank=True)
+    abweichungen = models.JSONField(default=list, blank=True)
+    zustand = models.CharField(max_length=20, default=UNBEKANNT)
+    fehler = models.CharField(max_length=300, blank=True)
+    abgerufen_am = models.DateTimeField()
+    gelesen_am = models.DateTimeField(null=True, blank=True)
 
 
 class Abrufstand(models.Model):

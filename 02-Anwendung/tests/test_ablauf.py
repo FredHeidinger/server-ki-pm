@@ -45,7 +45,6 @@ def test_anlegen_planen_und_freigeben_in_einem_aufruf(client, owner, projekt, pc
         projekt=projekt.kennung,
         titel="Login hängt",
         text="Spinner bleibt stehen",
-        pruefer=owner.get_username(),
         freigeben=True,
         **GEPLANT,
     )
@@ -66,7 +65,6 @@ def test_anlegen_planen_und_freigeben_in_einem_aufruf(client, owner, projekt, pc
         projekt=projekt.kennung,
         titel="Später",
         text="noch nicht",
-        pruefer=owner.get_username(),
         **(GEPLANT | {"schreibumfang": ["docs/**"]}),
     )
     assert not fehler and daten["auftrag"]["zustand"] == Auftrag.ENTWURF
@@ -83,7 +81,6 @@ def test_freigabe_mit_fehlender_planung_wird_abgewiesen(client, owner, projekt, 
         projekt=projekt.kennung,
         titel="Halb geplant",
         text="x",
-        pruefer=owner.get_username(),
         freigeben=True,
         **{k: v for k, v in GEPLANT.items() if k != "abnahmekriterien"},
     )
@@ -104,7 +101,6 @@ def test_freigabe_mit_ueberschneidendem_umfang_wird_abgewiesen(
         projekt=projekt.kennung,
         titel="Login-Vorlage",
         text="x",
-        pruefer=owner.get_username(),
         freigeben=True,
         **(GEPLANT | {"schreibumfang": ["src/auth/login.py"]}),
     )
@@ -116,7 +112,6 @@ def test_freigabe_mit_ueberschneidendem_umfang_wird_abgewiesen(
         projekt,
         titel="Login-Vorlage",
         planung=_planung(projekt, "src/auth"),
-        pruefer=owner,
     )
     fehler, daten = _werkzeug(
         client, pc_zugang.klartext, "kipm_planen", auftrag=entwurf.nummer, freigeben=True
@@ -135,7 +130,6 @@ def test_freigabe_durch_projektfremden_zugang_wird_abgewiesen(
         projekt,
         titel="Geplant",
         planung=_planung(projekt, "x/**"),
-        pruefer=owner,
     )
     assert dienst.freigabefaehig(entwurf)
     # Schlüssel eines anderen Projekts: der Auftrag existiert für ihn nicht.
@@ -181,7 +175,6 @@ def test_freigabe_durch_widerrufenen_zugang_wird_abgewiesen(
         projekt,
         titel="Geplant",
         planung=_planung(projekt, "x/**"),
-        pruefer=owner,
     )
     dienst.bindung_widerrufen(akteur, pc_zugang)
     pc_zugang.refresh_from_db()
@@ -222,7 +215,6 @@ def test_gleiche_abschlussregel_ueber_http_und_mcp(client, owner, akteur, projek
             projekt,
             titel=titel,
             planung=_planung(projekt, umfang),
-            pruefer=owner,
             freigeben=True,
         )
         assert a.zustand == Auftrag.FREIGEGEBEN
@@ -396,15 +388,3 @@ def test_anlegen_prueft_planung_und_freigabe_nur_aus_entwurf(
         dienst.auftrag_anlegen(akteur, projekt, titel="X", planung={"bearbeiter": "jemand"})
     with pytest.raises(dienst.Konflikt, match="aus dem Zustand „Freigegeben“"):
         dienst.auftrag_freigeben(akteur, freigegeben)
-    fehler, daten = _werkzeug(
-        client,
-        pc_zugang.klartext,
-        "kipm_auftrag_anlegen",
-        projekt=projekt.kennung,
-        titel="Mit falschem Prüfer",
-        text="x",
-        pruefer="gibt-es-nicht",
-        **GEPLANT,
-    )
-    assert fehler and "gibt-es-nicht" in daten["fehler"]
-    assert not Auftrag.objects.filter(titel="Mit falschem Prüfer").exists()

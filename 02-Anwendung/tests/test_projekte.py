@@ -92,10 +92,7 @@ def test_projektseiten_grenzen_auf_das_projekt_ein(owner_client, owner):
     verlauf_b = owner_client.get(
         reverse("projekt_verlauf", kwargs={"kennung": "synth-b"})
     ).content.decode()
-    assert "<code>synth-b</code>" in verlauf_b and "<code>synth-a</code>" not in verlauf_b
-    # Der frühere projektübergreifende Verlauf führt verständlich zur Projektauswahl.
-    alle = owner_client.get(reverse("verlauf"), follow=True).content.decode()
-    assert "im jeweiligen Projekt" in alle
+    assert "Projekt synth-b" in verlauf_b and "Projekt synth-a" not in verlauf_b
     auswahl = owner_client.get(reverse("projekte")).content.decode()
     assert "Synthetisches A" in auswahl and "Synthetisches B" in auswahl
 

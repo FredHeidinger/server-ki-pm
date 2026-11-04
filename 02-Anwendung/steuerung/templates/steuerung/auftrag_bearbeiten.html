@@ -4,7 +4,7 @@
 <p><a href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">← {{ auftrag.nummer }}</a></p>
 <h1>{{ auftrag.nummer }} planen</h1>
 {% if folge %}<div class="box warn"><strong>Folge:</strong> {{ folge }}</div>{% endif %}
-<p class="gedaempft">Für die Freigabe braucht es Ziel, Nicht-Ziele, Arbeitsort mit Schreibumfang, mindestens ein Abnahmekriterium und einen Prüfer. Unvollständig speichern geht; jede Speicherung wird als neue Revision im Verlauf festgehalten.</p>
+<p class="gedaempft">Für die Freigabe braucht es Ziel, Nicht-Ziele, Arbeitsort mit Schreibumfang und mindestens ein Abnahmekriterium. Unvollständig speichern geht; jede Speicherung wird als neue Revision im Verlauf festgehalten.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}
   {% include "steuerung/formular_felder.html" %}

@@ -4,9 +4,8 @@ version = "0.1.0"
 description = "Server-KI-PM: zentrale Auftragssteuerung für Softwareprojekte mit KI-Chats"
 requires-python = ">=3.13"
 dependencies = [
+    "cryptography>=43",
     "django>=5.2,<5.3",
-    "pyjwt[crypto]>=2.9",
-    "pypdf>=5",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +39,6 @@ select = ["E", "F", "I", "B", "UP", "DJ"]
 "steuerung/akte.py" = ["E501"]
 "steuerung/abgleich.py" = ["E501"]
 "steuerung/views_akte.py" = ["E501"]
-"steuerung/extrakt.py" = ["E501"]
 "steuerung/github.py" = ["E501"]
 "steuerung/ablage.py" = ["E501"]
 "kipm/settings.py" = ["E501"]

@@ -1,32 +1,60 @@
 {% extends "steuerung/projekt_grund.html" %}
-{% block titel %}{{ projekt.name }} – Wissen &amp; Entscheidungen{% endblock %}
+{% block titel %}{{ projekt.name }} – Wissen{% endblock %}
 {% block projektinhalt %}
-{% if pruefbeduerftig %}
-<section class="box warn"><h2>Prüfbedürftige Aufträge</h2><ul class="liste-schlicht">{% for p in pruefbeduerftig %}<li><a href="{% url 'auftrag_detail' auftrag_id=p.auftrag.pk %}">{{ p.auftrag.nummer }} {{ p.auftrag.titel }}</a>: gebunden an {{ p.unterlage.kennung }} Version {{ p.gebunden }}, neue Grundlage Version {{ p.neu }}. Arbeitsumfang ändern heißt: neue Revision mit Freigabe.</li>{% endfor %}</ul></section>
-{% endif %}
-<section class="abschnitt" aria-labelledby="h-unterlagen">
-  <div class="abschnittkopf"><h2 id="h-unterlagen">Unterlagen <span class="zahl">{{ zeilen|length }}</span></h2>
-    <div><a class="knopf klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=text">+ Text schreiben</a> <a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=datei">Datei hochladen</a> <a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=link">Link hinterlegen</a></div></div>
-  <p class="gedaempft">Projekttexte, Dateien und Links mit Versionen. Neue Inhalte sind zunächst Entwürfe; „Grundlage“ legst du ausdrücklich je Version fest. Für KI verfügbar ist nur, was du freigibst.</p>
-  {% if zeilen %}
+<p class="gedaempft">Alles hier lesen die Chats dieses Projekts automatisch mit; eine Freigabe ist nicht nötig. Jede Änderung steht im Verlauf.</p>
+
+{% if not zeigen_archiv %}
+<section id="entscheidungen" class="abschnitt" aria-labelledby="h-ent">
+  <div class="abschnittkopf"><h2 id="h-ent">Entscheidungen <span class="zahl">{{ entscheidungen|length }}</span></h2><a class="knopf zweit klein" href="{% url 'wissen_entscheidung_neu' kennung=projekt.kennung %}">+ Entscheidung</a></div>
+  {% if entscheidungen %}
   <div class="tabellenrahmen"><table>
-    <thead><tr><th scope="col">Unterlage</th><th scope="col">Art</th><th scope="col">Aktuelle Version</th><th scope="col">Geltende Grundlage</th><th scope="col">KI</th></tr></thead>
-    <tbody>{% for z in zeilen %}<tr>
-      <th scope="row"><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.u.nummer %}">{{ z.u.kennung }} {{ z.u.titel }}</a>{% if z.u.beschreibung %}<br><span class="gedaempft">{{ z.u.beschreibung|truncatechars:90 }}</span>{% endif %}</th>
-      <td>{{ z.u.get_art_display }}</td>
-      <td>{% if z.v %}Version {{ z.v.nummer }} · {{ z.v.get_rolle_display }}{% if z.v.blob %} · <span class="status {% if z.v.pruefung == 'sauber' %}ok{% elif z.v.pruefung == 'abgewiesen' %}aus{% else %}warn{% endif %}">{{ z.v.get_pruefung_display }}</span>{% endif %}{% if z.v.uri and not z.v.quellversion %} · <span class="status warn">veränderliche Quelle</span>{% endif %}{% endif %}</td>
-      <td>{% if z.grundlage %}Version {{ z.grundlage.nummer }}{% else %}<span class="gedaempft">keine</span>{% endif %}</td>
-      <td>{% if z.u.ki_freigegeben %}<span class="status ok">freigegeben</span>{% else %}<span class="status">nicht freigegeben</span>{% endif %}</td>
+    <thead><tr><th scope="col">Entscheidung</th><th scope="col" class="nur-mittel">Warum</th><th scope="col">Seit</th><th scope="col"><span class="unsichtbar">Aktion</span></th></tr></thead>
+    <tbody>{% for e in entscheidungen %}<tr>
+      <th scope="row">{{ e.text|linebreaksbr }}{% if e.zustand != "ENTSCHIEDEN" %} <span class="status warn">nur Vorschlag</span>{% endif %}{% if e.warum %}<span class="nur-schmal gedaempft">Warum: {{ e.warum|linebreaksbr }}</span>{% endif %}</th>
+      <td class="nur-mittel">{% if e.warum %}{{ e.warum|linebreaksbr }}{% else %}<span class="gedaempft">–</span>{% endif %}</td>
+      <td>{% if e.entschieden_am %}{{ e.entschieden_am|date:"d.m.Y" }}{% else %}{{ e.vorgeschlagen_am|date:"d.m.Y" }}{% endif %}</td>
+      <td><a href="{% url 'wissen_entscheidung' kennung=projekt.kennung nummer=e.pk %}">Bearbeiten</a></td>
     </tr>{% endfor %}</tbody>
   </table></div>
-  {% else %}<div class="leer">{% if zeigen_archiv %}Keine archivierte Unterlage.{% else %}Noch keine Unterlagen. Hier entstehen Projekttexte, hochgeladene Dateien und Links, die Aufträge und Funktionen begründen.{% endif %}</div>{% endif %}
-  <p class="kleinmeta">{% if zeigen_archiv %}<a href="?">Aktuelle Unterlagen</a>{% else %}<a href="?archiv=1">Archiv</a>{% endif %}</p>
+  {% else %}<div class="leer">Noch keine Entscheidung. Legt Fred im Chat etwas fest, trägt der Chat es hier ein.</div>{% endif %}
+</section>
+{% endif %}
+
+<section id="texte" class="abschnitt" aria-labelledby="h-texte">
+  <div class="abschnittkopf"><h2 id="h-texte">Texte <span class="zahl">{{ texte|length }}</span></h2><a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=text">+ Text</a></div>
+  {% if texte %}
+  <div class="tabellenrahmen"><table>
+    <thead><tr><th scope="col">Titel</th><th scope="col">Letzte Änderung</th><th scope="col" class="nur-mittel">Fassungen</th></tr></thead>
+    <tbody>{% for z in texte %}<tr>
+      <th scope="row"><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.u.nummer %}">{{ z.u.titel }}</a>{% if z.u.beschreibung %}<br><span class="gedaempft">{{ z.u.beschreibung|truncatechars:90 }}</span>{% endif %}</th>
+      <td>{% if z.v %}{{ z.v.zeitpunkt|date:"d.m.Y H:i" }}<br><span class="gedaempft">{{ z.v.autor_name }}</span>{% endif %}</td>
+      <td class="nur-mittel">{{ z.fassungen }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="leer">{% if zeigen_archiv %}Kein archivierter Text.{% else %}Noch keine Texte. Hier stehen Notizen und Beschreibungen für die Chats.{% endif %}</div>{% endif %}
 </section>
 
-<section id="entscheidungen" class="abschnitt" aria-labelledby="h-ent">
-  <div class="abschnittkopf"><h2 id="h-ent">Entscheidungen <span class="zahl">{{ entscheidungen|length }}</span></h2><a class="knopf zweit klein" href="{% url 'entscheidung_neu' %}?projekt={{ projekt.kennung }}">+ Entscheidung</a></div>
-  {% if entscheidungen %}
-  <ul class="liste-schlicht">{% for z in entscheidungen %}<li><a href="{% url 'entscheidung_detail' entscheidung_id=z.e.pk %}">{{ z.e.nummer }} {{ z.e.titel }}</a> · <span class="status">{{ z.e.get_zustand_display }}</span>{% if z.e.zustand == "ENTSCHIEDEN" %} · Stand {{ z.e.stand }} · {% if z.uebernommen %}<span class="status ok">für dieses Projekt übernommen</span>{% else %}<span class="status warn">Übernahme offen</span>{% endif %}{% endif %}{% if z.weitere %} <span class="gedaempft">· betrifft weitere Projekte</span>{% endif %}</li>{% endfor %}</ul>
-  {% else %}<div class="leer">Noch keine Entscheidung für dieses Projekt.</div>{% endif %}
+<section id="links" class="abschnitt" aria-labelledby="h-links">
+  <div class="abschnittkopf"><h2 id="h-links">Links <span class="zahl">{{ links|length }}</span></h2><a class="knopf zweit klein" href="{% url 'unterlage_neu' kennung=projekt.kennung %}?art=link">+ Link</a></div>
+  {% if links %}
+  <div class="tabellenrahmen"><table>
+    <thead><tr><th scope="col">Titel</th><th scope="col" class="nur-breit">Adresse</th><th scope="col">Letzte Änderung</th></tr></thead>
+    <tbody>{% for z in links %}<tr>
+      <th scope="row"><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.u.nummer %}">{{ z.u.titel }}</a></th>
+      <td class="nur-breit">{% if z.v.uri %}<a href="{{ z.v.uri }}" rel="noreferrer">{{ z.v.uri|truncatechars:60 }}</a>{% endif %}</td>
+      <td>{% if z.v %}{{ z.v.zeitpunkt|date:"d.m.Y" }}{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="leer">{% if zeigen_archiv %}Kein archivierter Link.{% else %}Noch keine Links.{% endif %}</div>{% endif %}
 </section>
+
+{% if dateien %}
+<section id="dateien" class="abschnitt" aria-labelledby="h-dateien">
+  <h2 id="h-dateien">Früher hochgeladene Dateien <span class="zahl">{{ dateien|length }}</span></h2>
+  <p class="gedaempft">Neue Dateien lassen sich nicht mehr hochladen; vorhandene bleiben erhalten.</p>
+  <ul class="liste-schlicht">{% for z in dateien %}<li><a href="{% url 'unterlage_detail' kennung=projekt.kennung nummer=z.u.nummer %}">{{ z.u.titel }}</a>{% if z.v %} <span class="gedaempft">· {{ z.v.zeitpunkt|date:"d.m.Y" }}</span>{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<p class="kleinmeta">{% if zeigen_archiv %}<a href="?">Zurück zum Wissen</a>{% else %}<a href="?archiv=1">Archivierte Texte und Links</a>{% endif %}</p>
 {% endblock %}

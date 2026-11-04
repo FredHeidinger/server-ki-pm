@@ -7,6 +7,13 @@ from steuerung.models import Auftrag
 PASSWORT = "nur-fuer-tests-123456"
 
 
+@pytest.fixture(autouse=True)
+def _kein_echtes_github(settings):
+    """Tests rufen GitHub nie an: ohne Attrappe oder Nachbildung läuft der Abruf ins Leere."""
+    settings.KIPM_GITHUB_API = "http://127.0.0.1:9"
+    settings.KIPM_GITHUB_ZEIT = 1
+
+
 @pytest.fixture
 def owner(db):
     return get_user_model().objects.create_superuser(
@@ -16,8 +23,8 @@ def owner(db):
 
 @pytest.fixture
 def zweiter_mensch(db):
-    """Zweites menschliches Konto als Prüfer (normales Konto, kein Owner)."""
-    return get_user_model().objects.create_user(username="pruefer-test", password=PASSWORT)
+    """Zweites menschliches Konto (normales Konto, kein Owner)."""
+    return get_user_model().objects.create_user(username="zweiter-test", password=PASSWORT)
 
 
 @pytest.fixture
@@ -61,9 +68,7 @@ def bindung_b(akteur, projekt_b):
     return b
 
 
-def arbeitspaket(
-    akteur, projekt, titel="Anmeldefehler verständlich melden", umfang="src/auth/**", pruefer=None
-):
+def arbeitspaket(akteur, projekt, titel="Anmeldefehler verständlich melden", umfang="src/auth/**"):
     """Wunsch anlegen und zum freigabefähigen Arbeitspaket konkretisieren."""
     auftrag = dienst.wunsch_erfassen(
         akteur, projekt, titel=titel, beschreibung="Bitte verständlicher."
@@ -82,7 +87,6 @@ def arbeitspaket(
         prioritaet="hoch",
         modul=projekt.module.first(),
     )
-    dienst.pruefer_festlegen(akteur, auftrag, pruefer or akteur.benutzer)
     auftrag.refresh_from_db()
     return auftrag
 

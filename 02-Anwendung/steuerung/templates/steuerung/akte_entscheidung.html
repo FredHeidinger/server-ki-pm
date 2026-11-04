@@ -1,0 +1,25 @@
+{% extends "steuerung/projekt_grund.html" %}
+{% block titel %}{% if e %}{{ e.nummer }} bearbeiten{% else %}Neue Entscheidung{% endif %}{% endblock %}
+{% block projektinhalt %}
+<p class="oberzeile"><a href="{% url 'akte_wissen' kennung=projekt.kennung %}">Zurück zum Wissen</a></p>
+<section class="box">
+  <h2>{% if e %}Entscheidung {{ e.nummer }} bearbeiten{% else %}Neue Entscheidung{% endif %}</h2>
+  <p class="gedaempft">{% if e %}Seit {% if e.entschieden_am %}{{ e.entschieden_am|date:"d.m.Y" }}{% else %}{{ e.vorgeschlagen_am|date:"d.m.Y" }} (bisher nur Vorschlag; Speichern macht sie verbindlich){% endif %} · eingetragen von {{ e.vorgeschlagen_von_name }}. {% endif %}Gilt ab dem Speichern für alle Chats dieses Projekts und steht im Verlauf.</p>
+  <form method="post" class="formular">
+    {% csrf_token %}
+    {% include "steuerung/formular_felder.html" with form=form %}
+    <button type="submit" class="knopf">Speichern</button>
+    <a href="{% url 'akte_wissen' kennung=projekt.kennung %}">Abbrechen</a>
+  </form>
+</section>
+{% if e %}
+<details class="box">
+  <summary>Weitere Aktionen</summary>
+  <form method="post" class="formular klein">
+    {% csrf_token %}<input type="hidden" name="stand" value="{{ e.stand }}"><input type="hidden" name="zurueckziehen" value="1">
+    <p class="hilfe">Zurückziehen nimmt die Entscheidung aus dem Wissen und aus dem Kontext neuer Chats; im Verlauf bleibt sie sichtbar.</p>
+    <button type="submit" class="knopf zweit klein">Entscheidung zurückziehen</button>
+  </form>
+</details>
+{% endif %}
+{% endblock %}

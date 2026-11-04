@@ -1,23 +1,67 @@
 """Bestandszahlen für die Probemigration in installieren.sh (nur Standardbibliothek).
 
-``zaehlen <db>``: Integrität prüfen und Zeilenzahlen der Kerntabellen ausgeben.
-``vergleichen "<vorher>" "<nachher>"``: Exit 0, wenn nichts verloren ging. Der Verlauf
-(``ereignis``) ist nur anhängend und darf wachsen, etwa wenn eine Migration eine Umstellung
-festhält; alle anderen Zahlen müssen gleich bleiben. Sonst Exit 4 mit der betroffenen Tabelle.
+``zaehlen <db>``: Integrität prüfen und Zeilenzahlen aller Bestandstabellen ausgeben; auch die
+Tabellen früherer Stufen, die kein Code mehr nutzt, deren Daten aber bleiben. Eine Tabelle, die es
+in der Datenbank noch nicht gibt, zählt 0. ``vergleichen "<vorher>" "<nachher>"``: Exit 0, wenn
+nichts verloren ging. Verlauf (``ereignis``) und Meldungen (``meldung``) sind nur anhängend und
+dürfen wachsen, etwa wenn eine Migration eine Umstellung festhält (0008); alle anderen Zahlen müssen
+gleich bleiben. Sonst Exit 4 mit der betroffenen Tabelle.
 """
 
 import sqlite3
 import sys
 
-TABELLEN = ("projekt", "auftrag", "revision", "ergebnis", "pruefung", "ereignis", "chatbindung")
-NUR_ANHAENGEND = {"ereignis"}
+TABELLEN = (
+    "projekt",
+    "modul",
+    "arbeitsort",
+    "chatbindung",
+    "ordneranfrage",
+    "anfragekennung",
+    "auftrag",
+    "revision",
+    "abhaengigkeit",
+    "meldung",
+    "ergebnis",
+    "pruefung",
+    "kriteriumsbewertung",
+    "entscheidung",
+    "uebernahmebestaetigung",
+    "ereignis",
+    "objektversion",
+    "kontextbezug",
+    "meilenstein",
+    "funktion",
+    "umgebung",
+    "release",
+    "releasekomponente",
+    "installation",
+    "nachweis",
+    "unterlage",
+    "unterlagenversion",
+    "unterlagenzuordnung",
+    "repoverbindung",
+    "abrufstand",
+    "externesobjekt",
+    "externeaktion",
+    "besuchsmarke",
+)
+NUR_ANHAENGEND = {"ereignis", "meldung"}
 
 
 def zaehlen(pfad) -> list[int]:
     with sqlite3.connect(pfad) as z:
         if z.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise SystemExit("Datenbank nicht integer")
-        return [z.execute(f"select count(*) from steuerung_{t}").fetchone()[0] for t in TABELLEN]
+        vorhanden = {
+            zeile[0] for zeile in z.execute("select name from sqlite_master where type = 'table'")
+        }
+        return [
+            z.execute(f"select count(*) from steuerung_{t}").fetchone()[0]
+            if f"steuerung_{t}" in vorhanden
+            else 0
+            for t in TABELLEN
+        ]
 
 
 def abweichungen(vorher: list[int], nachher: list[int]) -> list[str]:

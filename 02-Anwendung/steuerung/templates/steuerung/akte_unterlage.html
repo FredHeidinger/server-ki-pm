@@ -1,88 +1,57 @@
 {% extends "steuerung/projekt_grund.html" %}
-{% block titel %}{{ u.kennung }} {{ u.titel }}{% endblock %}
+{% block titel %}{{ u.titel }}{% endblock %}
 {% block projektinhalt %}
-<p class="oberzeile"><a href="{% url 'akte_wissen' kennung=projekt.kennung %}">Wissen</a> › {{ u.kennung }} · {{ u.get_art_display }}{% if u.archiviert %} · archiviert{% endif %}</p>
+<p class="oberzeile"><a href="{% url 'akte_wissen' kennung=projekt.kennung %}">Zurück zum Wissen</a> · {{ u.get_art_display }}{% if u.archiviert %} · archiviert{% endif %}</p>
 <h2>{{ u.titel }}</h2>
 {% if u.beschreibung %}<p class="gedaempft">{{ u.beschreibung }}</p>{% endif %}
 
-<div class="zwei">
-<section class="box">
-  <h2>Stand</h2>
-  <dl class="felder eng">
-    <dt>Aktuelle Version</dt><dd>{% if aktuell %}{{ aktuell.nummer }} · {{ aktuell.get_rolle_display }} · {{ aktuell.autor_name }}, {{ aktuell.zeitpunkt|date:"d.m.Y H:i" }}{% else %}–{% endif %}</dd>
-    <dt>Geltende Grundlage</dt><dd>{% if grundlage %}Version {{ grundlage.nummer }}{% else %}keine{% endif %}</dd>
-    <dt>Für KI verfügbar</dt><dd>{% if u.ki_freigegeben %}ja{% else %}nein{% endif %}</dd>
-  </dl>
-  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='ki' %}" class="inline">{% csrf_token %}<input type="hidden" name="frei" value="{% if u.ki_freigegeben %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if u.ki_freigegeben %}KI-Freigabe widerrufen{% else %}Für KI freigeben{% endif %}</button></form>
-  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='archiv' %}" class="inline">{% csrf_token %}<input type="hidden" name="archiv" value="{% if u.archiviert %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if u.archiviert %}Zurückholen{% else %}Archivieren{% endif %}</button></form>
-  {% if u.ki_freigegeben %}<p class="hilfe">Ein Widerruf sperrt neue Abrufe; bereits an einen Chat übermittelte Inhalte lassen sich nicht zurückholen.</p>{% endif %}
-</section>
-<section class="box">
-  <h2>Zuordnungen</h2>
-  {% if zuordnungen %}<ul class="liste-schlicht">{% for z in zuordnungen %}<li>Version {{ z.version.nummer }} →
-    {% if z.funktion %}<a href="{% url 'funktion_detail' kennung=projekt.kennung nummer=z.funktion.nummer %}">{{ z.funktion.kennung }} {{ z.funktion.titel }}</a>{% elif z.auftrag %}<a href="{% url 'auftrag_detail' auftrag_id=z.auftrag.pk %}">{{ z.auftrag.nummer }}</a> Revision {{ z.auftrag_revision }}{% elif z.entscheidung %}<a href="{% url 'entscheidung_detail' entscheidung_id=z.entscheidung.pk %}">{{ z.entscheidung.nummer }}</a> Stand {{ z.entscheidung_stand }}{% else %}Release {{ z.release.kennung }}{% endif %}{% if z.zweck %} · {{ z.zweck }}{% endif %}</li>{% endfor %}</ul>
-  {% else %}<p class="gedaempft">Noch nicht zugeordnet.</p>{% endif %}
-  {% if aktuell %}
-  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='zuordnen' %}" class="formular klein">{% csrf_token %}
-    <input type="hidden" name="version" value="{{ aktuell.nummer }}">
-    <label for="ziel">Version {{ aktuell.nummer }} zuordnen zu</label>
-    <select id="ziel" name="ziel" required><option value="">wählen …</option>
-      {% if funktionen %}<optgroup label="Funktionen">{% for f in funktionen %}<option value="f:{{ f.pk }}">{{ f.kennung }} {{ f.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
-      {% if auftraege %}<optgroup label="Aufträge (aktuelle Revision)">{% for a in auftraege %}<option value="a:{{ a.pk }}">{{ a.nummer }} {{ a.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
-      {% if entscheidungen %}<optgroup label="Entscheidungen (aktueller Stand)">{% for e in entscheidungen %}<option value="e:{{ e.pk }}">{{ e.nummer }} {{ e.titel|truncatechars:60 }}</option>{% endfor %}</optgroup>{% endif %}
-      {% if releases %}<optgroup label="Releases">{% for r in releases %}<option value="r:{{ r.pk }}">{{ r.kennung }}{% if r.titel %} {{ r.titel|truncatechars:50 }}{% endif %}</option>{% endfor %}</optgroup>{% endif %}
-    </select>
-    <label for="zweck">Zweck</label><input type="text" id="zweck" name="zweck" maxlength="200">
-    <button type="submit" class="knopf zweit klein">Zuordnen</button>
-  </form>
-  {% endif %}
-</section>
-</div>
-
-<section class="box">
-  <h2>Versionen</h2>
-  <div class="tabellenrahmen"><table class="klein">
-    <thead><tr><th scope="col">Nr.</th><th scope="col">Rolle</th><th scope="col">Inhalt</th><th scope="col">Prüfung / Auszug</th><th scope="col">Von</th><th scope="col"><span class="unsichtbar">Aktionen</span></th></tr></thead>
-    <tbody>{% for v in versionen %}<tr>
-      <td>{{ v.nummer }}</td><td>{{ v.get_rolle_display }}</td>
-      <td>{% if v.blob %}{{ v.originalname }} · {{ v.groesse|filesizeformat }} · <code title="SHA-256">{{ v.sha256|slice:":12" }}…</code>{% if v.herunterladbar %}<br><a href="{% url 'unterlage_datei' kennung=projekt.kennung nummer=u.nummer vnr=v.nummer %}">Herunterladen</a>{% endif %}{% elif v.uri %}<a href="{{ v.uri }}" rel="noreferrer">{{ v.uri|truncatechars:60 }}</a> · {% if v.quellversion %}Stand {{ v.quellversion }}{% else %}<span class="status warn">veränderliche Quelle</span>{% endif %}{% else %}Text · {{ v.groesse }} Byte · <code>{{ v.sha256|slice:":12" }}…</code>{% endif %}</td>
-      <td>{% if v.blob %}<span class="status {% if v.pruefung == 'sauber' %}ok{% elif v.pruefung == 'abgewiesen' %}aus{% else %}warn{% endif %}">{{ v.get_pruefung_display }}</span>{% if v.pruefhinweis %} <span class="gedaempft">{{ v.pruefhinweis }}</span>{% endif %}<br>{% endif %}Auszug: {{ v.get_extraktion_display }}{% if v.extrakt_hinweis %} <span class="gedaempft">({{ v.extrakt_hinweis }})</span>{% endif %}</td>
-      <td>{{ v.autor_name }}<br><span class="gedaempft">{{ v.zeitpunkt|date:"d.m.Y H:i" }}</span></td>
-      <td>
-        {% if v.rolle != "grundlage" %}<form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='rolle' %}" class="inline">{% csrf_token %}<input type="hidden" name="version" value="{{ v.nummer }}"><input type="hidden" name="rolle" value="grundlage"><button type="submit" class="knopf zweit klein" {% if v.blob and v.pruefung != "sauber" %}disabled aria-disabled="true" title="Ungeprüfte Dateien können keine Grundlage sein"{% endif %}>Als Grundlage festlegen</button></form>{% endif %}
-        {% if v.rolle != "hintergrund" %}<form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='rolle' %}" class="inline">{% csrf_token %}<input type="hidden" name="version" value="{{ v.nummer }}"><input type="hidden" name="rolle" value="hintergrund"><button type="submit" class="leise">als Hintergrund</button></form>{% endif %}
-        {% if v.pruefung == "ausstehend" %}<form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='pruefen' %}" class="inline">{% csrf_token %}<input type="hidden" name="version" value="{{ v.nummer }}"><button type="submit" class="leise">Prüfung wiederholen</button></form>{% endif %}
-      </td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-</section>
-
-{% if aktuell %}
-<section class="box">
+{% if gezeigt %}
+<section class="box" aria-labelledby="h-inhalt">
+  <h2 id="h-inhalt">{% if gezeigt.nummer == aktuell.nummer %}Aktuelle Fassung{% else %}Ältere Fassung {{ gezeigt.nummer }}{% endif %} <span class="gedaempft klein">vom {{ gezeigt.zeitpunkt|date:"d.m.Y H:i" }}, {{ gezeigt.autor_name }}</span></h2>
+  {% if gezeigt.nummer != aktuell.nummer %}<p class="box warn">Du siehst Fassung {{ gezeigt.nummer }}. Aktuell ist Fassung {{ aktuell.nummer }}. <a href="?">Aktuelle Fassung zeigen</a></p>{% endif %}
   {% if u.art == "text" %}
-  <h2>Text (Version {{ aktuell.nummer }})</h2>
-  <pre class="textansicht">{{ aktuell.text }}</pre>
-  <details><summary class="knopf zweit klein">Neue Version schreiben</summary>
-    <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='text' %}" class="formular">{% csrf_token %}
-      <input type="hidden" name="erwartete_nr" value="{{ u.aktuelle_nr }}">
-      <label for="neuer-text">Text</label><textarea id="neuer-text" name="text" rows="16" required>{{ aktuell.text }}</textarea>
-      <p class="hilfe">Speichert Version {{ u.aktuelle_nr|add:"1" }} als Entwurf. Aufträge bleiben an ihre bisherige Version gebunden.</p>
-      <button type="submit" class="knopf">Neue Version speichern</button>
-    </form>
-  </details>
-  {% elif u.art == "datei" %}
-  <h2>Auszug (Version {{ aktuell.nummer }})</h2>
-  {% if aktuell.extrakt %}<pre class="textansicht">{{ aktuell.extrakt|truncatechars:20000 }}</pre>{% else %}<p class="gedaempft">Kein Textauszug{% if aktuell.extrakt_hinweis %}: {{ aktuell.extrakt_hinweis }}{% endif %}. Dateien werden nicht direkt im Browser eingebettet.</p>{% endif %}
-  <p><a class="knopf zweit klein" href="{% url 'hochladen_version' kennung=projekt.kennung nummer=u.nummer %}">Neue Dateiversion hochladen</a></p>
-  {% elif u.art == "link" %}
-  <h2>Neue Linkversion</h2>
-  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='link' %}" class="formular klein">{% csrf_token %}
-    <input type="hidden" name="erwartete_nr" value="{{ u.aktuelle_nr }}">
-    <label for="uri">Adresse</label><input type="url" id="uri" name="uri" value="{{ aktuell.uri }}" required>
-    <label for="qv">Fixierter Stand</label><input type="text" id="qv" name="quellversion" value="{{ aktuell.quellversion }}" maxlength="80">
-    <button type="submit" class="knopf zweit klein">Speichern</button>
-  </form>
+  <pre class="textansicht">{{ gezeigt.text }}</pre>
+  {% elif gezeigt.uri %}
+  <p><a href="{{ gezeigt.uri }}" rel="noreferrer">{{ gezeigt.uri }}</a>{% if gezeigt.quellversion %} · Stand {{ gezeigt.quellversion }}{% else %} · <span class="status warn">veränderliche Quelle</span>{% endif %}</p>
+  {% elif gezeigt.blob %}
+  <p>{{ gezeigt.originalname }} · {{ gezeigt.groesse|filesizeformat }}{% if gezeigt.herunterladbar %} · <a href="{% url 'unterlage_datei' kennung=projekt.kennung nummer=u.nummer vnr=gezeigt.nummer %}">Herunterladen</a>{% else %} · <span class="status warn">{{ gezeigt.get_pruefung_display }}</span>{% endif %}</p>
+  {% if gezeigt.extrakt %}<pre class="textansicht">{{ gezeigt.extrakt|truncatechars:20000 }}</pre>{% endif %}
   {% endif %}
 </section>
 {% endif %}
+
+{% if aktuell and gezeigt.nummer == aktuell.nummer and not u.archiviert %}
+{% if u.art == "text" %}
+<details class="box">
+  <summary class="knopf zweit klein">Text bearbeiten</summary>
+  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='text' %}" class="formular">{% csrf_token %}
+    <input type="hidden" name="erwartete_nr" value="{{ u.aktuelle_nr }}">
+    <label for="neuer-text">Text</label><textarea id="neuer-text" name="text" rows="16" required>{{ aktuell.text }}</textarea>
+    <p class="hilfe">Speichert Fassung {{ u.aktuelle_nr|add:"1" }}; die bisherige bleibt aufrufbar.</p>
+    <button type="submit" class="knopf">Speichern</button>
+  </form>
+</details>
+{% elif u.art == "link" %}
+<details class="box">
+  <summary class="knopf zweit klein">Link ändern</summary>
+  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='link' %}" class="formular klein">{% csrf_token %}
+    <input type="hidden" name="erwartete_nr" value="{{ u.aktuelle_nr }}">
+    <label for="uri">Adresse</label><input type="url" id="uri" name="uri" value="{{ aktuell.uri }}" required>
+    <label for="qv">Fixierter Stand <span class="stufe optional">optional</span></label><input type="text" id="qv" name="quellversion" value="{{ aktuell.quellversion }}" maxlength="80">
+    <button type="submit" class="knopf zweit klein">Speichern</button>
+  </form>
+</details>
+{% endif %}
+{% endif %}
+
+<section class="box" aria-labelledby="h-fassungen">
+  <h2 id="h-fassungen">Fassungen <span class="zahl">{{ versionen|length }}</span></h2>
+  <ul class="liste-schlicht">{% for v in versionen %}<li>{% if v.nummer == gezeigt.nummer %}<strong>Fassung {{ v.nummer }}</strong> (angezeigt){% else %}<a href="?fassung={{ v.nummer }}">Fassung {{ v.nummer }}</a>{% endif %} · {{ v.zeitpunkt|date:"d.m.Y H:i" }} · {{ v.autor_name }}{% if v.nummer == aktuell.nummer %} · aktuell{% endif %}</li>{% endfor %}</ul>
+</section>
+
+<details class="box">
+  <summary>Weitere Aktionen</summary>
+  <form method="post" action="{% url 'unterlage_aktion' kennung=projekt.kennung nummer=u.nummer aktion='archiv' %}" class="inline">{% csrf_token %}<input type="hidden" name="archiv" value="{% if u.archiviert %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if u.archiviert %}Zurückholen{% else %}Archivieren{% endif %}</button></form>
+  <p class="hilfe">Archivierte Texte und Links erscheinen nicht mehr im Kontext neuer Chats.</p>
+</details>
 {% endblock %}

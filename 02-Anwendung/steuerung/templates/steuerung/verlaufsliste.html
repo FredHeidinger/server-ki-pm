@@ -1,27 +1,18 @@
-<form method="get" class="filterzeile">
-  <label>Objekt <select name="objekt" onchange="this.form.submit()"><option value="">Alle</option>{% for o in objekte %}<option value="{{ o }}" {% if filter.objekt == o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
-  <label>Akteur <select name="akteur" onchange="this.form.submit()"><option value="">Alle</option>{% for a in akteure %}<option value="{{ a }}" {% if filter.akteur == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></label>
-  <label>Zeitraum <select name="tage" onchange="this.form.submit()"><option value="">Alles</option><option value="1" {% if filter.tage == "1" %}selected{% endif %}>Heute</option><option value="7" {% if filter.tage == "7" %}selected{% endif %}>7 Tage</option><option value="30" {% if filter.tage == "30" %}selected{% endif %}>30 Tage</option></select></label>
-  <label>Kennung <input type="text" name="kennung" value="{{ filter.kennung }}" size="10" placeholder="A-12"></label>
-  <button type="submit" class="knopf zweit">Filtern</button>
-</form>
+{% load steuerung_extras %}
+<nav class="werkzeuge umschalter-zeile" aria-label="Nach Art filtern">
+  <a class="umschalter {% if not art %}aktiv{% endif %}" href="{% filterlink art='' %}"{% if not art %} aria-current="page"{% endif %}>Alles</a>
+  {% for a in arten %}<a class="umschalter {% if art == a %}aktiv{% endif %}" href="{% filterlink art=a %}"{% if art == a %} aria-current="page"{% endif %}>{{ a }}</a>{% endfor %}
+</nav>
 {% if ereignisse %}
-<div class="tabellenrahmen"><table>
-  <thead><tr><th scope="col">Zeitpunkt</th><th scope="col">Akteur</th>{% if not projekt %}<th scope="col">Projekt</th>{% endif %}<th scope="col">Objekt</th><th scope="col">Ereignis</th><th scope="col">Anlass / Begründung</th><th scope="col">Revision</th></tr></thead>
-  <tbody>
-  {% for e in ereignisse %}
-    <tr>
-      <td><time datetime="{{ e.zeitpunkt|date:'c' }}">{{ e.zeitpunkt|date:"d.m.Y H:i" }}</time>{% if e.beobachtet_am %}<br><span class="gedaempft">geschehen {{ e.beobachtet_am|date:"d.m.Y H:i" }}</span>{% endif %}</td>
-      <td>{{ e.akteur_name }}</td>
-      {% if not projekt %}<td>{{ e.projekt.name|default:"–" }}</td>{% endif %}
-      <td>{{ e.objekt_typ }} <code>{{ e.objekt_kennung }}</code></td>
-      <td>{{ e.ereignis }}</td>
-      <td>{{ e.anlass|default:"–" }}</td>
-      <td>{{ e.revision|default:"–" }}{% if projekt and e.version_id %}<br><a href="{% url 'verlauf_stand' kennung=projekt.kennung ereignis_id=e.pk %}">damaliger Stand</a>{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table></div>
+<ul class="verlauf">
+{% for e in ereignisse %}
+  <li>
+    <span class="zeit"><time datetime="{{ e.zeitpunkt|date:'c' }}">{{ e.zeitpunkt|date:"d.m.Y H:i" }}</time>{% if e.beobachtet_am %}<br>geschehen {{ e.beobachtet_am|date:"d.m.Y H:i" }}{% endif %}</span>
+    <span class="wer">{{ e.akteur_name }}</span>
+    <span class="was">{{ e.ereignis }} <span class="gedaempft">{{ e.objekt_typ }} {{ e.objekt_kennung }}</span>{% if e.anlass %}<br><span class="gedaempft klein">{{ e.anlass }}</span>{% endif %}</span>
+  </li>
+{% endfor %}
+</ul>
 {% else %}
-<div class="leer">Keine Ereignisse für diese Auswahl.</div>
+<div class="leer">Keine Einträge für diese Auswahl.</div>
 {% endif %}

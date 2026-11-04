@@ -50,7 +50,7 @@ def test_konkretisieren_erzeugt_revision_und_freigabefaehigkeit(akteur, projekt)
     assert a.revision_nr == 2
     assert not a.aktuelle_revision.ist_wunsch
     assert dienst.freigabefaehig(a)
-    assert [p.erfuellt for p in dienst.freigabepruefung(a)] == [True] * 8
+    assert [p.erfuellt for p in dienst.freigabepruefung(a)] == [True] * 7
 
 
 def test_freigabe_bindet_revision_und_bearbeiten_laesst_sie_erloeschen(
@@ -220,7 +220,6 @@ def test_bearbeiter_kann_nichts_erweitern(akteur, projekt, freigegeben, bindung)
             prioritaet="hoch",
             modul=None,
         ),
-        lambda: dienst.pruefer_festlegen(chat, freigegeben, akteur.benutzer),
         lambda: dienst.vorgaenger_eintragen(chat, freigegeben, freigegeben),
         lambda: dienst.bindung_anlegen(chat, projekt, name="noch ein Chat"),
     ):
@@ -233,20 +232,15 @@ def test_hindernis_blockiert_und_owner_hebt_auf(akteur, projekt, freigegeben, bi
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
     dienst.hindernis_melden(chat, freigegeben, 2, "Quelldatei fehlt")
     assert freigegeben.zustand == Auftrag.BLOCKIERT
-    assert dienst.kacheln(None)["blockiert"] == 1
-    dienst.hindernis_aufheben(akteur, freigegeben, "Datei nachgeliefert")
+    assert dienst.wartet_auf_dich(projekt) == [freigegeben]
+    dienst.rueckfrage_beantworten(akteur, freigegeben, "Datei nachgeliefert")
     freigegeben.refresh_from_db()
     assert freigegeben.zustand == Auftrag.IN_ARBEIT
 
 
-def test_pause_abbruch_und_unklar(akteur, projekt, freigegeben, bindung):
+def test_abbruch_und_unklar(akteur, projekt, freigegeben, bindung):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.auftrag_uebernehmen(chat, freigegeben, 2)
-    # Pausieren gibt es im Ablauf ohne Abnahme nicht mehr.
-    with pytest.raises(dienst.Konflikt, match="Pausieren gibt es nicht mehr"):
-        dienst.auftrag_pausieren(akteur, freigegeben, "Urlaub")
-    freigegeben.refresh_from_db()
-    assert freigegeben.zustand == Auftrag.IN_ARBEIT and freigegeben.bearbeiter_name == "Chat A"
     dienst.bearbeitung_unklar(akteur, freigegeben, "Chat antwortet seit Tagen nicht")
     freigegeben.refresh_from_db()
     assert freigegeben.zustand == Auftrag.ENTWURF and not freigegeben.hat_bearbeiter
@@ -270,39 +264,6 @@ def test_pause_abbruch_und_unklar(akteur, projekt, freigegeben, bindung):
             prioritaet="hoch",
             modul=None,
         )
-
-
-def test_vorschlag_wird_erst_durch_owner_wirksam(akteur, projekt, freigegeben, bindung):
-    chat = dienst.Akteur.aus_bindung(bindung)
-    m = dienst.vorschlag_einreichen(chat, freigegeben, 2, "Kriterium 3 ergänzen")
-    assert m.vorschlag_status == Meldung.OFFEN
-    freigegeben.refresh_from_db()
-    assert freigegeben.revision_nr == 2 and freigegeben.zustand == Auftrag.FREIGEGEBEN
-    dienst.vorschlag_bewerten(akteur, m, uebernommen=True)
-    m.refresh_from_db()
-    assert m.vorschlag_status == Meldung.UEBERNOMMEN
-    with pytest.raises(dienst.DienstFehler):
-        dienst.vorschlag_bewerten(akteur, m, uebernommen=False)
-
-
-def test_owner_als_bearbeiter_darf_nicht_pruefer_sein(akteur, projekt, freigegeben):
-    with pytest.raises(dienst.Konflikt, match="Prüfer"):
-        dienst.auftrag_uebernehmen(akteur, freigegeben, 2)
-
-
-def test_teilauftrag_traegt_verweis(akteur, projekt):
-    gross = dienst.wunsch_erfassen(akteur, projekt, titel="Alles besser", beschreibung="viel")
-    teil = dienst.wunsch_erfassen(
-        akteur, projekt, titel="Teil 1", beschreibung="", abgeleitet_von=gross
-    )
-    assert teil.abgeleitet_von == gross and gross.abgeleitete.count() == 1
-
-
-def test_kacheln_zaehlen_wuensche_und_klaerung(akteur, projekt):
-    dienst.wunsch_erfassen(akteur, projekt, titel="W1", beschreibung="")
-    arbeitspaket(akteur, projekt, titel="Paket", umfang="x/**")
-    k = dienst.kacheln(projekt)
-    assert k["wuensche"] == 1 and k["zur_pruefung"] == 0 and k["klaerung"] == 0
 
 
 @pytest.mark.django_db(transaction=True)

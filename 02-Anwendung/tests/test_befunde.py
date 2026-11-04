@@ -8,7 +8,7 @@ from django.db import connection
 from django.test import Client
 
 from steuerung import dienst
-from steuerung.models import Auftrag, Ereignis, Meldung
+from steuerung.models import Auftrag, Entscheidung, Ereignis, Meldung
 from tests.conftest import arbeitspaket
 
 
@@ -98,19 +98,18 @@ def test_hindernis_wechselt_zustand_im_selben_commit_mit_ereignis(
     assert ereignis.ereignis == "Hindernis gemeldet, Auftrag Blockiert"
 
 
-@pytest.mark.django_db
-def test_chat_schlaegt_entscheidung_nur_fuer_eigenes_projekt_vor(projekt, projekt_b, bindung):
+def test_chat_traegt_entscheidung_nur_fuer_eigenes_projekt_ein(projekt, projekt_b, bindung):
     c = _api(bindung.klartext)
     antwort = _post(
         c,
-        "/api/entscheidungen/vorschlagen/",
-        titel="T",
-        text="X",
+        "/api/entscheidungen/eintragen/",
+        entscheidung="X",
         projekte=["synth-a", "synth-b", "geraten"],
         anfrage_kennung="e",
     )
     assert antwort.status_code == 201
-    assert antwort.json()["entscheidung"]["betroffen"] == ["synth-a"]
+    e = Entscheidung.objects.get(text="X")
+    assert [p.kennung for p in e.betroffene_projekte.all()] == ["synth-a"]
 
 
 @pytest.mark.django_db
@@ -120,26 +119,6 @@ def test_doppelter_vorgaenger_ist_verstaendlicher_fehler(akteur, projekt):
     dienst.vorgaenger_eintragen(akteur, b, a)
     with pytest.raises(dienst.DienstFehler, match="bereits als Vorgänger"):
         dienst.vorgaenger_eintragen(akteur, b, a)
-
-
-@pytest.mark.django_db
-def test_vorschlag_allein_macht_keinen_bearbeiter(akteur, projekt, freigegeben, bindung):
-    chat_a = dienst.Akteur.aus_bindung(bindung)
-    zweite, _ = dienst.bindung_anlegen(akteur, projekt, name="Chat Zwei")
-    chat_zwei = dienst.Akteur.aus_bindung(zweite)
-    dienst.vorschlag_einreichen(chat_zwei, freigegeben, 2, "Idee")
-    dienst.auftrag_uebernehmen(chat_a, freigegeben, 2)
-    with pytest.raises(dienst.KeinZugriff):
-        dienst.fortschritt_melden(chat_zwei, freigegeben, 2, "ich auch")
-    # Der frühere Bearbeiter wird an seiner Identität erkannt, nicht am Namen
-    dienst.bearbeitung_unklar(akteur, freigegeben, "verschwunden")
-    with pytest.raises(dienst.Konflikt, match="historisch"):
-        dienst.fortschritt_melden(chat_a, freigegeben, 2, "bin wieder da")
-    gleichnamig, _ = dienst.bindung_anlegen(akteur, projekt, name="Chat A")
-    with pytest.raises(dienst.KeinZugriff):
-        dienst.fortschritt_melden(
-            dienst.Akteur.aus_bindung(gleichnamig), freigegeben, 2, "ich bin Chat A"
-        )
 
 
 @pytest.mark.django_db

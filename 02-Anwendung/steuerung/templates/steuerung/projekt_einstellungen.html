@@ -2,11 +2,11 @@
 {% block titel %}{{ projekt.name }} – Projekteinstellungen{% endblock %}
 {% block projektinhalt %}
 <h2>Projekteinstellungen</h2>
-<p class="gedaempft">Technische Zuordnungen dieses Projekts. Die Inhalte stehen in den sechs Bereichen.</p>
+<p class="gedaempft">Technische Zuordnungen dieses Projekts. Die Inhalte stehen in den vier Bereichen.</p>
 
 <section id="module" class="box" aria-labelledby="h-module">
   <h2 id="h-module">Module <span class="zahl">{{ modulbaum.flach|length }}</span> <span class="stufe optional">optional</span></h2>
-  <p class="gedaempft">Ein Projekt funktioniert vollständig ohne Module. Module lassen sich beliebig tief in Untermodule gliedern; in Funktionen &amp; Planung und Arbeitsaufträgen erscheint der Baum links, ein Modul zeigt dort auch alles aus seinen Untermodulen. „Gesamtes Projekt“ gilt modulübergreifend. Die Kennung bleibt beim Umbenennen und Umhängen gleich.</p>
+  <p class="gedaempft">Ein Projekt funktioniert vollständig ohne Module. Module lassen sich beliebig tief in Untermodule gliedern; bei den Aufträgen erscheint der Baum links, ein Modul zeigt dort auch alles aus seinen Untermodulen. „Gesamtes Projekt“ gilt modulübergreifend. Die Kennung bleibt beim Umbenennen und Umhängen gleich.</p>
   {% if modulbaum.flach %}
   <ul class="modulpflege-liste" role="list">{% for k in modulbaum.flach %}
     <li style="--tiefe: {{ k.tiefe }}">
@@ -40,54 +40,26 @@
 </section>
 
 
-<section id="umgebungen" class="box" aria-labelledby="h-umg">
-  <h2 id="h-umg">Umgebungen</h2>
-  <p class="gedaempft">Wo das Projekt läuft, z. B. lokal, Testserver, Betrieb. Adressen werden nicht automatisch abgefragt. Schlägt eine KI eine Umgebung vor, zählt sie erst nach deiner Übernahme für Installations- und Prüfmeldungen.</p>
-  {% if umgebungen_aktiv %}<ul class="liste-schlicht">{% for u in umgebungen_aktiv %}<li><strong>{{ u.name }}</strong> · {{ u.get_art_display }}{% if u.beschreibung %} · {{ u.beschreibung }}{% endif %}{% if u.url %} · {{ u.url }}{% endif %}{% if not u.bestaetigt %} <span class="status warn">Entwurf von {{ u.vorgeschlagen_von|default:"einer KI" }}</span>{% endif %}
-    {% if not u.bestaetigt %}<form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>{% endif %}
-    <details class="modulpflege"><summary>Ändern</summary>
-      <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='aendern' %}" class="formular klein">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}">
-        <p class="feld"><label for="u{{ u.pk }}-name">Name <span class="stufe pflicht">Pflicht</span></label><input type="text" id="u{{ u.pk }}-name" name="u{{ u.pk }}-name" value="{{ u.name }}" maxlength="120" required></p>
-        <p class="feld"><label for="u{{ u.pk }}-art">Art <span class="stufe pflicht">Pflicht</span></label><select id="u{{ u.pk }}-art" name="u{{ u.pk }}-art">{% for wert, wort in umgebungsarten %}<option value="{{ wert }}" {% if wert == u.art %}selected{% endif %}>{{ wort }}</option>{% endfor %}</select></p>
-        <p class="feld"><label for="u{{ u.pk }}-beschreibung">Zielsystem <span class="stufe optional">optional</span></label><input type="text" id="u{{ u.pk }}-beschreibung" name="u{{ u.pk }}-beschreibung" value="{{ u.beschreibung }}" maxlength="300"></p>
-        <p class="feld"><label for="u{{ u.pk }}-url">Dienstadresse <span class="stufe optional">optional</span></label><input type="text" id="u{{ u.pk }}-url" name="u{{ u.pk }}-url" value="{{ u.url }}" maxlength="300"></p>
-        <button type="submit" class="knopf zweit klein">Speichern</button>
-      </form>
-      <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='archivieren' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf zweit klein gefahr">{% if u.bestaetigt %}Archivieren{% else %}Verwerfen{% endif %}</button></form>
-    </details></li>{% endfor %}</ul>{% else %}<p class="gedaempft">Noch keine Umgebung.</p>{% endif %}
-  {% if umgebungen_archiv %}
-  <details class="archiv"><summary>Archiv: {{ umgebungen_archiv|length }} Umgebung{{ umgebungen_archiv|length|pluralize:"en" }}</summary>
-    <ul class="liste-schlicht">{% for u in umgebungen_archiv %}<li>{{ u.name }} · {{ u.get_art_display }} <form method="post" action="{% url 'umgebung_pflegen' kennung=projekt.kennung pk=u.pk wahl='zurueckholen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ u.revision }}"><button type="submit" class="knopf zweit klein">Zurückholen</button></form></li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-  <details{% if not umgebungen_aktiv %} open{% endif %}>
-    <summary class="knopf zweit klein">+ Umgebung</summary>
-    <form method="post" action="{% url 'umgebung_neu' kennung=projekt.kennung %}" class="formular klein">
-      {% csrf_token %}
-      {% include "steuerung/formular_felder.html" with form=umgebung_form %}
-      <button type="submit" class="knopf zweit">Umgebung speichern</button>
-    </form>
-  </details>
-</section>
-
-
 <section id="github" class="box" aria-labelledby="h-gh">
-  <h2 id="h-gh">GitHub-Repositorys</h2>
-  <p class="gedaempft">Zuordnung über die stabile GitHub-ID. Lesend dürfen mehrere Projekte dasselbe Repository nutzen, schreibend genau eines. Schreiben bleibt auf Issues, Kommentare und Dokument-Pull-Requests in erlaubten Pfaden begrenzt; jede Aktion bestätigst du einzeln.</p>
-  {% if not github_eingerichtet %}<p class="box warn">Die GitHub App ist auf diesem Server nicht eingerichtet (KIPM_GITHUB_APP_ID und Schlüsseldatei fehlen). Verbinden ist erst danach möglich.</p>{% endif %}
-  {% if repos %}<ul class="liste-schlicht">{% for v in repos %}<li><strong>{{ v.name }}</strong> · ID {{ v.github_id }} · {% if not v.aktiv %}<span class="status aus">widerrufen {{ v.widerrufen_am|date:"d.m.Y" }}</span>{% elif v.schreibend %}schreibend: {{ v.aktionsliste|join:", "|default:"keine Aktion" }} · Pfade {{ v.pfadmuster|join:", " }}{% else %}nur lesen{% endif %}
-    {% if v.aktiv %}<form method="post" action="{% url 'repo_aktion' kennung=projekt.kennung pk=v.pk aktion='widerrufen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}
-    {% if v.workflow_hinweis %}<br><span class="gedaempft">{{ v.workflow_hinweis }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
-  {% if github_eingerichtet %}
-  <details>
-    <summary class="knopf zweit klein">+ Repository verbinden</summary>
-    <form method="post" action="{% url 'repo_verbinden' kennung=projekt.kennung %}" class="formular klein">
-      {% csrf_token %}
-      {% include "steuerung/formular_felder.html" with form=repo_form %}
-      <button type="submit" class="knopf zweit">Verbinden</button>
-    </form>
-  </details>
+  <h2 id="h-gh">GitHub-Repository</h2>
+  <p class="gedaempft">Aus diesem Repository liest KI-PM Releases und Bereitstellungen für die Versionszeile. KI-PM liest nur und ändert bei GitHub nichts.</p>
+  {% if not github.owner %}<p>Repository: {{ version.repository|default:"keines" }}. Wählen darf es nur der Owner.</p>
+  {% elif not github.verbunden %}<p>GitHub ist noch nicht verbunden. <a href="{% url 'verbindungen' %}#github">GitHub verbinden</a></p>
+  {% else %}
+  {% if github.fehler %}<p class="versionsfehler" role="alert">{{ github.fehler }}</p>{% endif %}
+  {% if repo_namen %}
+  <form method="post" action="{% url 'repo_waehlen' kennung=projekt.kennung %}" class="zeile">{% csrf_token %}
+    <label for="repository">Repository</label>
+    <select id="repository" name="repository"><option value="">Kein Repository</option>{% for n in repo_namen %}<option value="{{ n }}"{% if n == version.repository %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    <button type="submit" class="knopf zweit klein">Speichern</button>
+  </form>
+  <p class="gedaempft klein">Fehlt eines? Unter <a href="{% url 'verbindungen' %}#github">Konto &amp; KI verbinden</a> auf „Prüfen“ klicken; danach ist die Liste neu.</p>
+  {% else %}<p class="gedaempft">Der Schlüssel sieht noch kein Repository. Rechte des Schlüssels prüfen, dann unter <a href="{% url 'verbindungen' %}#github">Konto &amp; KI verbinden</a> auf „Prüfen“ klicken.</p>{% endif %}
   {% endif %}
+  <h3 id="umgebungen">Umgebungen</h3>
+  {% if version.umgebungen %}<ul class="liste-schlicht">{% for u in version.umgebungen %}<li><strong>{{ u.name }}</strong> · {{ u.version }}</li>{% endfor %}</ul>
+  <p class="gedaempft klein">Sie kommen aus den Bereitstellungen bei GitHub; hier gibt es nichts einzutragen. Gibt es eine Produktion, entscheidet nur sie über „aktuell“.</p>
+  {% else %}<p class="gedaempft">Sie kommen aus den Bereitstellungen bei GitHub. Noch keine gelesen.</p>{% endif %}
 </section>
 
 <section id="arbeitsorte" class="box">

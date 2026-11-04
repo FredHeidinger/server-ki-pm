@@ -56,7 +56,7 @@ EOF
   runuser -u kipm --preserve-environment -- env KIPM_DATEN_DIR="$PROBE" "$VENV/bin/python" "$APP/manage.py" migrate --noinput
   NACHHER=$("$VENV/bin/python" "$SKRIPTE/bestand.py" zaehlen "$PROBE/kipm.sqlite3")
   rm -rf "$PROBE"
-  # Nichts darf verloren gehen; nur der Verlauf darf wachsen (Umstellungen einer Migration).
+  # Nichts darf verloren gehen; nur Verlauf und Meldungen dürfen wachsen (Umstellungen einer Migration).
   "$VENV/bin/python" "$SKRIPTE/bestand.py" vergleichen "$VORHER" "$NACHHER" \
     || { echo "Probemigration verändert den Bestand ($VORHER → $NACHHER); Abbruch."; exit 4; }
   echo "Probemigration ohne Bestandsverlust: $VORHER → $NACHHER"

@@ -34,7 +34,6 @@ def ohne_ort(akteur, projekt):
         prioritaet="mittel",
         modul=None,
     )
-    dienst.pruefer_festlegen(akteur, a, akteur.benutzer)
     a.refresh_from_db()
     return a
 

@@ -1,5 +1,5 @@
 """Modulbaum (Verbesserungsliste 2c): Untermodule beliebig tief, Schutz gegen Kreise, Zahlen je
-Knoten einschließlich Untermodule, Filter in Funktionen und Aufträgen, Pflege in Oberfläche und
+Knoten einschließlich Untermodule, Filter in den Aufträgen, Pflege in Oberfläche und
 über MCP; dazu Projektauswahl mit festen Plätzen (2a) und Bereiche nur einmal (2b)."""
 
 from pathlib import Path
@@ -18,8 +18,6 @@ def baum(akteur, projekt):
     ober = dienst.modul_anlegen(akteur, projekt, kennung="oberflaeche", name="Oberfläche")
     wahl = dienst.modul_anlegen(akteur, projekt, kennung="wahl", name="Projektauswahl", eltern=ober)
     karten = dienst.modul_anlegen(akteur, projekt, kennung="karten", name="Karten", eltern=wahl)
-    akte.funktion_anlegen(akteur, projekt, titel="Gleich große Karten", modul=karten)
-    akte.funktion_anlegen(akteur, projekt, titel="Projektweite Suche")
     dienst.wunsch_erfassen(akteur, projekt, titel="Karten bauen", beschreibung="b", modul=wahl)
     dienst.wunsch_erfassen(
         akteur, projekt, titel="Karte bricht um", beschreibung="b", modul=karten, typ="issue"
@@ -43,27 +41,17 @@ def test_zahlen_je_knoten_schliessen_untermodule_ein(projekt, baum):
     daten = dienst.modulbaum(projekt)
     assert [k.modul.kennung for k in daten["knoten"]] == ["kern", "oberflaeche"]
     ober = _knoten(daten, "oberflaeche")
-    assert ober.zahlen == {"funktionen": 1, "auftraege": 1, "issues": 1, "unterlagen": 1}
+    assert ober.zahlen == {"auftraege": 1, "issues": 1, "unterlagen": 1}
     assert _knoten(daten, "karten").tiefe == 3
-    assert _knoten(daten, "karten").zahlen == {
-        "funktionen": 1,
-        "auftraege": 0,
-        "issues": 1,
-        "unterlagen": 0,
-    }
-    assert daten["projektweit"]["funktionen"] == 1
-    assert daten["gesamt"] == {"funktionen": 2, "auftraege": 2, "issues": 1, "unterlagen": 1}
+    assert _knoten(daten, "karten").zahlen == {"auftraege": 0, "issues": 1, "unterlagen": 0}
+    assert daten["projektweit"]["auftraege"] == 0
+    assert daten["gesamt"] == {"auftraege": 2, "issues": 1, "unterlagen": 1}
 
 
 def test_filter_umfasst_untermodule(owner_client, projekt, baum):
-    url = reverse("akte_funktionen", kwargs={"kennung": "synth-a"})
-    seite = owner_client.get(url + "?modul=oberflaeche").content.decode()
-    assert "F-1 Gleich große Karten</a>" in seite and "Projektweite Suche</a>" not in seite
-    assert 'aria-current="true"' in seite and "Nach Modul filtern" in seite
-    nur = owner_client.get(url + "?modul=ohne").content.decode()
-    assert "Projektweite Suche</a>" in nur and "Gleich große Karten</a>" not in nur
     auftraege = reverse("projekt_auftraege", kwargs={"kennung": "synth-a"})
     board = owner_client.get(auftraege + "?modul=wahl").content.decode()
+    assert 'aria-current="true"' in board and "Nach Modul filtern" in board
     assert "Karten bauen" in board and "Karte bricht um" in board and "Kern-Auftrag" not in board
     liste = owner_client.get(auftraege + "?modul=karten&ansicht=liste").content.decode()
     assert "Karte bricht um" in liste and "Karten bauen" not in liste
