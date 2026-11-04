@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, akte, dienst
+from . import abgleich, akte, dienst, sicherung
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -123,6 +123,7 @@ def projekte(request: HttpRequest) -> HttpResponse:
             "projekte": projekte_liste,
             "suche": suche,
             "ordneranfragen": OrdnerAnfrage.objects.count(),
+            "kopie_warnung": sicherung.kopie_warnung(),
         },
     )
 

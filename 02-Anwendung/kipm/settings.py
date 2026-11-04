@@ -121,6 +121,8 @@ def _zahl(name: str, standard: int) -> int:
 MIB = 1024 * 1024
 # Früher hochgeladene Dateien; nie unter STATIC_ROOT, nie direkt ausgeliefert.
 KIPM_ABLAGE_DIR = Path(os.environ.get("KIPM_ABLAGE_DIR", DATEN_DIR / "ablage"))
+# Schreibt kipm-kopieren als root (03-Server/skripte/kopieren.py); der Dienst liest nur, darum nicht im Datenordner.
+KIPM_KOPIE_STAND = Path("/var/lib/kipm-kopie/kopie-stand.json")
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * MIB
 KIPM_GITHUB_API = os.environ.get("KIPM_GITHUB_API", "https://api.github.com")
 # Sekunden je GitHub-Anfrage; die Seiten warten darauf, deshalb knapp.

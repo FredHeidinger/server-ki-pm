@@ -11,6 +11,7 @@
   <button type="submit" class="knopf zweit klein">Suchen</button>
   {% if suche %}<a href="{% url 'projekte' %}">Zurücksetzen</a>{% endif %}
 </form>
+{% if kopie_warnung %}<p class="box warn">{{ kopie_warnung }}</p>{% endif %}
 {% if ordneranfragen %}<p class="box warn">{{ ordneranfragen }} neue{{ ordneranfragen|pluralize:"r,"}} Arbeitsordner warte{{ ordneranfragen|pluralize:"t,n" }} auf Zuordnung: <a href="{% url 'verbindungen' %}#ordner">unter „Konto &amp; KI verbinden“ zuordnen</a>.</p>{% endif %}
 {% if projekte %}
 <ul class="projektwahl">

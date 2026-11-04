@@ -35,6 +35,7 @@ _GEHEIM = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
     r"|\bgh[pousr]_[A-Za-z0-9]{30,}"
     r"|\bkipm_[A-Za-z0-9]{6,}_[A-Za-z0-9_-]{20,}"
+    r"|\bAGE-SECRET-KEY-1[0-9A-Z]{20,}"
 )
 # RFC 1918 und CGNAT (RFC 6598, z. B. Tailscale); als Zahlen, sonst meldet die Prüfung sich selbst
 _HEIMNETZE = [

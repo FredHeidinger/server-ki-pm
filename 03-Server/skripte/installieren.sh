@@ -18,7 +18,7 @@ set -a; . /etc/kipm/kipm.env; set +a
 echo "== Pakete"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip rsync caddy >/dev/null
+apt-get install -y -q python3 python3-venv python3-pip rsync caddy age >/dev/null
 
 echo "== Dienstkonto und Ordner"
 id kipm >/dev/null 2>&1 || useradd --system --home-dir /opt/kipm --shell /usr/sbin/nologin kipm
@@ -79,6 +79,7 @@ echo "== Dienste"
 install -m 0644 "$SKRIPTE/kipm.service" /etc/systemd/system/kipm.service
 install -m 0750 "$SKRIPTE/sichern.sh" /usr/local/sbin/kipm-sichern
 install -m 0750 "$SKRIPTE/wiederherstellen.sh" /usr/local/sbin/kipm-wiederherstellen
+install -m 0750 "$SKRIPTE/kopieren.py" /usr/local/sbin/kipm-kopieren
 systemctl daemon-reload
 systemctl enable kipm >/dev/null 2>&1
 systemctl restart kipm
@@ -87,6 +88,11 @@ systemctl restart caddy
 
 echo "== Tägliche Sicherung 03:30"
 printf '30 3 * * * root /usr/local/sbin/kipm-sichern >>/var/log/kipm-sicherung.log 2>&1\n' > /etc/cron.d/kipm-sicherung
+
+echo "== Tägliche Kopie nach SharePoint 03:45 (tut nichts, bis kipm-kopieren --einrichten gelaufen ist)"
+# Stand in einem Ordner von root: Der Datenordner gehört dem Dienstkonto, dort könnte es root umlenken
+install -d -o root -g root -m 0755 /var/lib/kipm-kopie
+printf '45 3 * * * root /usr/local/sbin/kipm-kopieren >>/var/log/kipm-kopie.log 2>&1\n' > /etc/cron.d/kipm-kopie
 
 echo "== Zertifikat der internen CA für Clients bereitstellen (/static/kipm-root.crt)"
 for _ in $(seq 1 15); do
