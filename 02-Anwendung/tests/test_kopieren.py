@@ -263,12 +263,14 @@ def _einrichten(ort, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(kopieren, "AGE_KEYGEN", [sys.executable, str(keygen)])
-    _antworten(monkeypatch, ["mandant", "app", "firma.sharepoint.com:/sites/s", "ja"], [GEHEIMNIS])
+    _antworten(
+        monkeypatch, ["mandant", "app", "firma.sharepoint.com:/sites/s"], [GEHEIMNIS, PRIVAT]
+    )
 
 
 def test_einrichten_speichert_nur_den_oeffentlichen_schluessel(ort, monkeypatch, capsys):
     _einrichten(ort, monkeypatch)
-    assert kopieren.main(["--einrichten"]) == 0
+    assert kopieren.main(["--einrichten-von-hand"]) == 0
     ausgabe = capsys.readouterr().out
     assert PRIVAT in ausgabe
     assert GEHEIMNIS not in ausgabe
@@ -284,9 +286,11 @@ def test_einrichten_speichert_nur_den_oeffentlichen_schluessel(ort, monkeypatch,
 def test_ohne_bestaetigung_gilt_der_schluessel_nicht(ort, monkeypatch, capsys):
     _einrichten(ort, monkeypatch)
     _antworten(
-        monkeypatch, ["mandant", "app", "firma.sharepoint.com:/sites/s", "nein"], [GEHEIMNIS]
+        monkeypatch,
+        ["mandant", "app", "firma.sharepoint.com:/sites/s"],
+        [GEHEIMNIS, "falsch", "falsch", "falsch"],
     )
-    assert kopieren.main(["--einrichten"]) == 2
+    assert kopieren.main(["--einrichten-von-hand"]) == 2
     assert not (ort / "empfaenger.txt").exists()
     assert "Nicht bestätigt" in capsys.readouterr().out
     assert kopieren.main([]) == 1  # keine Kopie, die niemand öffnen kann
@@ -296,13 +300,13 @@ def test_ohne_bestaetigung_gilt_der_schluessel_nicht(ort, monkeypatch, capsys):
 @pytest.mark.skipif(os.name == "nt", reason="Dateirechte nur unter Linux")
 def test_einrichten_zugangsdatei_nur_fuer_root(ort, monkeypatch):
     _einrichten(ort, monkeypatch)
-    kopieren.main(["--einrichten"])
+    kopieren.main(["--einrichten-von-hand"])
     assert (ort / "sharepoint.env").stat().st_mode & 0o777 == 0o600
 
 
 def test_erneutes_einrichten_behaelt_schluessel_und_geheimnis(ort, monkeypatch, capsys):
     _antworten(monkeypatch, ["", "", ""], [""])
-    assert kopieren.main(["--einrichten"]) == 0
+    assert kopieren.main(["--einrichten-von-hand"]) == 0
     assert "age1oeffentlich" in (ort / "empfaenger.txt").read_text(encoding="utf-8")
     assert GEHEIMNIS in (ort / "sharepoint.env").read_text(encoding="utf-8")
     assert "AGE-SECRET-KEY-1" not in capsys.readouterr().out
@@ -311,14 +315,14 @@ def test_erneutes_einrichten_behaelt_schluessel_und_geheimnis(ort, monkeypatch, 
 def test_einrichten_meldet_abgelehnte_anmeldung(ort, dienst, monkeypatch, capsys):
     _einrichten(ort, monkeypatch)
     dienst.anmeldung_status = 401
-    assert kopieren.main(["--einrichten"]) == 1
+    assert kopieren.main(["--einrichten-von-hand"]) == 1
     assert "abgelaufen" in capsys.readouterr().out
 
 
 def test_einrichten_ohne_angaben_speichert_nichts(ort, monkeypatch):
     (ort / "sharepoint.env").unlink()
     _antworten(monkeypatch, ["", "", ""], [""])
-    assert kopieren.main(["--einrichten"]) == 2
+    assert kopieren.main(["--einrichten-von-hand"]) == 2
     assert not (ort / "sharepoint.env").exists()
 
 

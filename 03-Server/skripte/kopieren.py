@@ -2,8 +2,9 @@
 """Kopie der täglichen Sicherung nach SharePoint (A-15, Entscheidung E-11). Läuft im Container als root.
 
   kipm-kopieren                     verschlüsselt die jüngste Sicherung und lädt sie hoch (Zeitplan 03:45)
-  kipm-kopieren --einrichten        fragt die Microsoft-Angaben ab, erzeugt beim ersten Mal den Schlüssel
-  kipm-kopieren --pruefen           holt die jüngste Kopie, entschlüsselt sie, kipm-wiederherstellen --pruefen
+  kipm-kopieren --einrichten        richtet alles nach einer einmaligen Anmeldung bei Microsoft selbst ein und prüft es
+  kipm-kopieren --einrichten-von-hand  fragt die Angaben ab, falls die Anmeldung per Code gesperrt ist
+  kipm-kopieren --pruefen          holt die jüngste Kopie, entschlüsselt sie, kipm-wiederherstellen --pruefen
   kipm-kopieren --fremde-website W  belegt, dass der Zugang eine andere Website nicht erreicht
 
 Verschlüsselt wird mit dem öffentlichen age-Schlüssel: Der Server kann seine Kopien danach nicht mehr lesen; der
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,7 +44,20 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 AGE = ["age"]
 AGE_KEYGEN = ["age-keygen"]
 WIEDERHERSTELLEN = ["/usr/local/sbin/kipm-wiederherstellen"]
+SICHERN = ["/usr/local/sbin/kipm-sichern"]
 ORDNER = "kipm-sicherung"
+# Einrichtung: Microsofts eigenes Werkzeug „Microsoft Graph Command Line Tools“, damit keine App vorab nötig ist
+WERKZEUG_APP = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+BERECHTIGUNGEN = (
+    "User.Read Application.ReadWrite.All AppRoleAssignment.ReadWrite.All "
+    "Group.ReadWrite.All Sites.FullControl.All"
+)
+GRAPH_APP = "00000003-0000-0000-c000-000000000000"
+APP_NAME = "KI-PM Sicherung"
+WEBSITE_KURZNAME = "kipm-sicherung"
+MARKE = "Von kipm-kopieren angelegt: verschlüsselte Sicherung von Server-KI-PM"  # daran erkennt das Skript Eigenes
+VERSUCHE = 20
+PAUSE = 15
 FELDER = ("KOPIE_MANDANT", "KOPIE_APP", "KOPIE_GEHEIMNIS", "KOPIE_WEBSITE")
 # Täglich 03:30 gesichert, 03:45 kopiert: Die Vortagsdatei ist dann gut 24 Stunden alt und zählt nicht mehr
 MAX_ALTER_STUNDEN = 20
@@ -91,7 +106,8 @@ def _fehlergrund(f: urllib.error.HTTPError) -> str:
 
 def _json(was: str, anfrage: urllib.request.Request) -> dict:
     try:
-        return json.loads(_antwort(was, anfrage).decode("utf-8"))
+        roh = _antwort(was, anfrage)
+        return json.loads(roh.decode("utf-8")) if roh else {}
     except ValueError:
         raise KopieFehler(f"{was}: Antwort nicht lesbar") from None
 
@@ -271,7 +287,20 @@ def _frage(text: str, alt: str = "") -> str:
     return wert or alt
 
 
-def einrichten() -> int:
+def _konfig_schreiben(werte: dict[str, str]) -> None:
+    tmp = KONFIG.with_name(
+        f"{KONFIG.name}.{os.getpid()}.tmp"
+    )  # ganz oder gar nicht: Das Geheimnis gibt es nur einmal
+    griff = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(griff, "w", encoding="utf-8") as f:
+        f.writelines(f"{k}={v}\n" for k, v in werte.items())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, KONFIG)
+    print(f"Gespeichert in {KONFIG} (nur für root lesbar).")
+    stand_schreiben(eingerichtet=jetzt())  # ab jetzt zählt das Ausbleiben der Kopie
+
+
+def einrichten_von_hand() -> int:
     alt: dict[str, str] = {}
     if KONFIG.exists():
         try:
@@ -294,13 +323,8 @@ def einrichten() -> int:
     if fehlt:
         print(f"Nichts gespeichert, es fehlt: {', '.join(fehlt)}")
         return 2
-    griff = os.open(KONFIG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(griff, "w", encoding="utf-8") as f:
-        f.writelines(f"{k}={v}\n" for k, v in werte.items())
-    os.chmod(KONFIG, 0o600)
-    print(f"Gespeichert in {KONFIG} (nur für root lesbar).")
-    stand_schreiben(eingerichtet=jetzt())  # ab jetzt zählt das Ausbleiben der Kopie
-    if not _schluessel_anlegen():
+    _konfig_schreiben(werte)
+    if _schluessel_anlegen() is None:
         return 2
     try:
         token = zugang(werte)
@@ -312,15 +336,18 @@ def einrichten() -> int:
     return 0
 
 
-def _schluessel_anlegen() -> bool:
-    """Der öffentliche Schlüssel gilt erst nach Freds Bestätigung: Sonst liefen Kopien, die niemand öffnen kann."""
+def _schluessel_anlegen() -> str | None:
+    """Der öffentliche Schlüssel gilt erst, wenn Fred den privaten aus seiner Ablage wieder einfügt: Sonst liefen
+    Kopien, die niemand öffnen kann. Rückgabe: neuer privater Schlüssel (nur im Speicher), "" bei bestehendem
+    Schlüssel, None ohne Bestätigung."""
     if EMPFAENGER.exists():
         print(f"Der bestehende Schlüssel bleibt ({EMPFAENGER}).")
-        return True
+        return ""
     lauf = subprocess.run(AGE_KEYGEN, capture_output=True, check=True)
     privat = lauf.stdout.decode().strip()
     oeffentlich = re.search(r"age1[0-9a-z]+", lauf.stdout.decode() + lauf.stderr.decode())
-    if not oeffentlich or "AGE-SECRET-KEY-" not in privat:
+    schluessel = re.search(r"AGE-SECRET-KEY-1[0-9A-Z]+", privat)
+    if not oeffentlich or not schluessel:
         raise SystemExit("age-keygen lieferte keinen Schlüssel.")
     print("\n================ PRIVATER SCHLÜSSEL: JETZT SICHERN ================")
     print(
@@ -331,14 +358,343 @@ def _schluessel_anlegen() -> bool:
     )
     print(privat)
     print("===================================================================\n")
-    if input("Gesichert? Zum Bestätigen ja eingeben: ").strip().lower() != "ja":
-        print(
-            "Nicht bestätigt: Der Schlüssel gilt nicht, es entstehen keine Kopien. Später erneut --einrichten."
+    for _ in range(3):
+        eingabe = getpass.getpass(
+            "Zur Kontrolle: Schlüssel aus deiner Ablage hier einfügen (bleibt unsichtbar): "
+        ).strip()
+        if eingabe == schluessel.group(0):
+            EMPFAENGER.write_text(oeffentlich.group(0) + "\n", encoding="utf-8")
+            EMPFAENGER.chmod(0o644)
+            return eingabe
+        print("Das stimmt nicht mit dem angezeigten Schlüssel überein.")
+    print(
+        "Nicht bestätigt: Der Schlüssel gilt nicht, es entstehen keine Kopien. Später erneut --einrichten."
+    )
+    return None
+
+
+def anmelden() -> str:
+    """Anmeldung per Code: Fred meldet sich im eigenen Browser an; der Server sieht kein Passwort. Das Ergebnis bleibt
+    nur im Speicher dieses Laufs."""
+
+    def formular(pfad: str, **werte) -> urllib.request.Request:
+        return urllib.request.Request(
+            f"{LOGIN}/organizations/oauth2/v2.0/{pfad}",
+            data=urllib.parse.urlencode({"client_id": WERKZEUG_APP, **werte}).encode(),
         )
-        return False
-    EMPFAENGER.write_text(oeffentlich.group(0) + "\n", encoding="utf-8")
-    EMPFAENGER.chmod(0o644)
-    return True
+
+    start = _json("Anmeldung vorbereiten", formular("devicecode?mkt=de-DE", scope=BERECHTIGUNGEN))
+    if not start.get("device_code"):
+        raise KopieFehler("Anmeldung vorbereiten: kein Code erhalten")
+    print(f"\n>>> {start.get('message')}", flush=True)
+    print(
+        ">>> Melde dich mit einem globalen Administratorkonto an. Das Häkchen „für die Organisation“ NICHT setzen.\n",
+        flush=True,
+    )
+    pause = int(start.get("interval", 5))
+    ende = time.monotonic() + int(start.get("expires_in", 900))
+    while time.monotonic() < ende:
+        time.sleep(pause)
+        try:
+            antwort = _json(
+                "Anmeldung",
+                formular(
+                    "token",
+                    grant_type="urn:ietf:params:oauth:grant-type:device_code",
+                    device_code=start["device_code"],
+                ),
+            )
+        except KopieFehler as f:
+            if "authorization_pending" in str(f):
+                continue
+            if "slow_down" in str(f):
+                pause += 5
+                continue
+            raise
+        if antwort.get("access_token"):
+            return antwort["access_token"]
+    raise KopieFehler("Anmeldung: Die Zeit ist abgelaufen")
+
+
+def _graph(was: str, token: str, pfad: str, daten: dict | None = None) -> dict:
+    roh = json.dumps(daten).encode() if daten is not None else None
+    kopf = {"Content-Type": "application/json"} if daten is not None else {}
+    return _json(was, _mit_zugang(f"{GRAPH}{pfad}", token, data=roh, kopf=kopf))
+
+
+def _falls_vorhanden(was: str, token: str, pfad: str) -> dict | None:
+    try:
+        return _graph(was, token, pfad)
+    except KopieFehler as f:
+        if "Status 404" in str(f):
+            return None
+        raise
+
+
+def _wiederholen(schritt):
+    """Neue Apps, Websites und Freigaben brauchen bei Microsoft etwas Zeit, bis sie überall gelten."""
+    for versuch in range(VERSUCHE):
+        try:
+            return schritt()
+        except KopieFehler:
+            if versuch + 1 == VERSUCHE:
+                raise
+            time.sleep(PAUSE)
+    raise KopieFehler("Wiederholen: keine Versuche")
+
+
+def _filter(pfad: str, bedingung: str) -> str:
+    return f"{pfad}?$filter={urllib.parse.quote(bedingung)}"
+
+
+def _website_einrichten(token: str, host: str) -> dict:
+    """Vorhandenes nur übernehmen, wenn das Skript es selbst angelegt hat (MARKE): Fremdes bleibt unangetastet."""
+    gruppen = _graph(
+        "Gruppe suchen",
+        token,
+        _filter("/groups", f"mailNickname eq '{WEBSITE_KURZNAME}'")
+        + "&$select=id,description,visibility",
+    )["value"]
+    if gruppen:
+        if gruppen[0].get("description") != MARKE or gruppen[0].get("visibility") != "Private":
+            raise KopieFehler(
+                f"Es gibt schon eine Gruppe {WEBSITE_KURZNAME}, die nicht von diesem Skript stammt; sie bleibt unberührt"
+            )
+        gruppe = gruppen[0]["id"]
+        print(f"Website {WEBSITE_KURZNAME} ist schon da.")
+    else:
+        if _falls_vorhanden("Website suchen", token, f"/sites/{host}:/sites/{WEBSITE_KURZNAME}"):
+            raise KopieFehler(
+                f"Es gibt schon eine Website {WEBSITE_KURZNAME}, die nicht von diesem Skript stammt; sie bleibt unberührt"
+            )
+        ich = _graph("Konto lesen", token, "/me")["id"]
+        benutzer = f"{GRAPH}/users/{ich}"
+        print("Website wird angelegt, das kann einige Minuten dauern ...")
+        gruppe = _graph(
+            "Website anlegen",
+            token,
+            "/groups",
+            {
+                "displayName": WEBSITE_KURZNAME,
+                "description": MARKE,
+                "groupTypes": ["Unified"],
+                "mailEnabled": True,
+                "mailNickname": WEBSITE_KURZNAME,
+                "securityEnabled": False,
+                "visibility": "Private",
+                "owners@odata.bind": [benutzer],
+                "members@odata.bind": [benutzer],
+            },
+        )["id"]
+    return _wiederholen(lambda: _graph("Website lesen", token, f"/groups/{gruppe}/sites/root"))
+
+
+def _app_einrichten(token: str, rolle: str) -> dict:
+    """Namen sind nicht eindeutig: Eine fremde App gleichen Namens verlöre sonst ihre Geheimnisse."""
+    gefunden = _graph(
+        "App suchen",
+        token,
+        _filter("/applications", f"displayName eq '{APP_NAME}'")
+        + "&$select=id,appId,notes,passwordCredentials,requiredResourceAccess",
+    )["value"]
+    if gefunden:
+        if len(gefunden) > 1 or gefunden[0].get("notes") != MARKE:
+            raise KopieFehler(
+                f"Es gibt schon eine App {APP_NAME}, die nicht von diesem Skript stammt; sie bleibt unberührt"
+            )
+        print(f"App {APP_NAME} ist schon da.")
+        return gefunden[0]
+    return _graph(
+        "App anlegen",
+        token,
+        "/applications",
+        {
+            "displayName": APP_NAME,
+            "notes": MARKE,
+            "signInAudience": "AzureADMyOrg",
+            "requiredResourceAccess": [
+                {"resourceAppId": GRAPH_APP, "resourceAccess": [{"id": rolle, "type": "Role"}]}
+            ],
+        },
+    )
+
+
+def _freigabe_vorhanden(freigaben: list[dict], app_id: str) -> bool:
+    """Gibt es die Freigabe schon? Eine weiter reichende Rolle ist ein Fehler, keine Freigabe."""
+    for f in freigaben:
+        for identitaet in [*f.get("grantedToIdentitiesV2", []), *f.get("grantedToIdentities", [])]:
+            if identitaet.get("application", {}).get("id") == app_id:
+                if f.get("roles", ["write"]) != ["write"]:
+                    raise KopieFehler(
+                        f"Die App hat auf der Website weitere Rechte: {f.get('roles')}"
+                    )
+                return True
+    return False
+
+
+def _microsoft_einrichten(token: str) -> tuple[dict[str, str], str, dict]:
+    """Legt an, was fehlt, und übernimmt nur Eigenes: Ein abgebrochener Lauf lässt sich einfach wiederholen.
+    Die App bekommt nur Sites.Selected und nur für diese eine Website. Ein neues Geheimnis entsteht zuletzt."""
+    mandant = _graph("Verzeichnis lesen", token, "/organization")["value"][0]["id"]
+    host = _graph("Stammwebsite lesen", token, "/sites/root?$select=id,siteCollection")[
+        "siteCollection"
+    ]["hostname"]
+    website = _website_einrichten(token, host)
+    adresse = urllib.parse.urlsplit(website["webUrl"])
+
+    graph_dienst = _graph(
+        "Microsoft Graph lesen",
+        token,
+        f"/servicePrincipals(appId='{GRAPH_APP}')?$select=id,appRoles",
+    )
+    rolle = next(
+        (
+            r["id"]
+            for r in graph_dienst["appRoles"]
+            if r.get("value") == "Sites.Selected"
+            and "Application" in r.get("allowedMemberTypes", [])
+        ),
+        None,
+    )
+    if not rolle:
+        raise KopieFehler("Microsoft Graph lesen: Berechtigung Sites.Selected nicht gefunden")
+
+    app = _app_einrichten(token, rolle)
+    app_id = app["appId"]
+    dienst = _falls_vorhanden(
+        "Dienstkonto suchen", token, f"/servicePrincipals(appId='{app_id}')"
+    ) or _wiederholen(
+        lambda: _graph("Dienstkonto anlegen", token, "/servicePrincipals", {"appId": app_id})
+    )
+    zuweisungen = _wiederholen(
+        lambda: _graph(
+            "Berechtigung lesen", token, f"/servicePrincipals/{dienst['id']}/appRoleAssignments"
+        )
+    )["value"]
+    if any(z.get("appRoleId") != rolle for z in zuweisungen):
+        raise KopieFehler("Die App hat weitere Rechte als Sites.Selected; sie bleibt unberührt")
+    if not zuweisungen:
+        _wiederholen(
+            lambda: _graph(
+                "Berechtigung erteilen",
+                token,
+                f"/servicePrincipals/{dienst['id']}/appRoleAssignments",
+                {"principalId": dienst["id"], "resourceId": graph_dienst["id"], "appRoleId": rolle},
+            )
+        )
+    freigaben = _wiederholen(
+        lambda: _graph("Freigabe lesen", token, f"/sites/{website['id']}/permissions")
+    )["value"]
+    if not _freigabe_vorhanden(freigaben, app_id):
+        _wiederholen(
+            lambda: _graph(
+                "Website freigeben",
+                token,
+                f"/sites/{website['id']}/permissions",
+                {
+                    "roles": ["write"],
+                    "grantedToIdentities": [
+                        {"application": {"id": app_id, "displayName": APP_NAME}}
+                    ],
+                },
+            )
+        )
+    geheimnis = _graph(
+        "Geheimnis erzeugen",
+        token,
+        f"/applications/{app['id']}/addPassword",
+        {"passwordCredential": {"displayName": "kipm-kopieren"}},
+    )["secretText"]
+    return (
+        {
+            "KOPIE_MANDANT": mandant,
+            "KOPIE_APP": app_id,
+            "KOPIE_GEHEIMNIS": geheimnis,
+            "KOPIE_WEBSITE": f"{adresse.netloc}:{adresse.path}",
+        },
+        host,
+        app,
+    )
+
+
+def _alte_geheimnisse_entfernen(token: str, app: dict) -> None:
+    """Erst nach dem Speichern des neuen. Scheitert es, bleibt nur ein überzähliges Geheimnis gültig."""
+    for alt in app.get("passwordCredentials") or []:
+        try:
+            _graph(
+                "Altes Geheimnis entfernen",
+                token,
+                f"/applications/{app['id']}/removePassword",
+                {"keyId": alt["keyId"]},
+            )
+        except KopieFehler as f:
+            print(f"Hinweis: {f}. Der nächste Lauf versucht es erneut.")
+
+
+def _sicherung_frisch() -> bool:
+    """Jede Sicherung verdrängt eine alte: Wiederholte Läufe sollen den Tagesverlauf nicht aufzehren."""
+    staende = [p.stat().st_mtime for p in ABLAGE.glob("kipm-*.tar.gz")]
+    return bool(staende) and datetime.now().timestamp() - max(staende) < 3600
+
+
+def _selbstpruefung(werte: dict[str, str], schluessel: str, host: str) -> int:
+    print("\nDie App wird bei Microsoft freigeschaltet, das kann einige Minuten dauern ...")
+    _wiederholen(lambda: website_kennung(zugang(werte), werte["KOPIE_WEBSITE"]))
+    if not _sicherung_frisch():
+        print("Frische Sicherung ...")
+        _lauf(SICHERN, "Sicherung")
+    print("Erste Kopie hochladen ...")
+    for versuch in range(VERSUCHE):
+        if kopieren() == 0:
+            break
+        if versuch + 1 == VERSUCHE:
+            raise KopieFehler("Die erste Kopie ließ sich nicht hochladen")
+        time.sleep(PAUSE)
+    print("Kopie zurückholen, entschlüsseln und prüfen ...")
+    probe = pruefen(schluessel)
+    print("Zugriff auf eine andere Website muss abgewiesen werden ...")
+    fremd = fremde_website(host)
+    if probe != 0 or fremd != 0:
+        print(f"\nNICHT BESTANDEN: Probe Rückgabe {probe}, andere Website Rückgabe {fremd}.")
+        return 1
+    print(
+        "\nFERTIG: Kopie liegt auf SharePoint, die Probe ist bestanden, die Stammwebsite ist gesperrt."
+    )
+    print(
+        "Zum Schluss deine Zustimmung entziehen: Entra-Admin-Center, Unternehmensanwendungen,\n"
+        "„Microsoft Graph Command Line Tools“, Berechtigungen. Für die täglichen Kopien wird sie nicht gebraucht."
+    )
+    return 0
+
+
+def selbst_einrichten() -> int:
+    try:
+        token = anmelden()
+        werte, host, app = _microsoft_einrichten(token)
+        _konfig_schreiben(werte)
+        _alte_geheimnisse_entfernen(token, app)
+        schluessel = _schluessel_anlegen()
+        if schluessel is None:
+            return 2
+        return _selbstpruefung(werte, schluessel, host)
+    except KopieFehler as f:
+        print(f"\nFEHLER {f}")
+        print(
+            "Der Aufruf lässt sich wiederholen; Fremdes bleibt unberührt, das gespeicherte Geheimnis bleibt gültig."
+        )
+        print(
+            "Hat dein Konto globale Administratorrechte? Ist die Anmeldung per Code gesperrt: --einrichten-von-hand."
+        )
+        return 1
+    except (
+        KeyError,
+        IndexError,
+        TypeError,
+        OSError,
+    ) as f:  # nur die Art: Der Text könnte Werte nennen
+        print(f"\nFEHLER Unerwartete Antwort oder Schreibfehler ({type(f).__name__}).")
+        print("Der Aufruf lässt sich wiederholen; das gespeicherte Geheimnis bleibt gültig.")
+        return 1
 
 
 def _alle_kopien(token: str, site: str) -> list[dict]:
@@ -351,7 +707,7 @@ def _alle_kopien(token: str, site: str) -> list[dict]:
     return [k for k in kopien if str(k.get("name", "")).endswith(".tar.gz.age")]
 
 
-def pruefen() -> int:
+def pruefen(schluessel: str = "") -> int:
     """Abnahme: Von SharePoint zurückholen, entschlüsseln und mit der vorhandenen Probe prüfen; nichts Produktives."""
     try:
         k = konfig_lesen()
@@ -366,9 +722,12 @@ def pruefen() -> int:
         if not adresse:
             raise KopieFehler("Kopie laden: keine Abrufadresse erhalten")
         inhalt = _antwort("Kopie laden", urllib.request.Request(adresse), mit_zugang=False)
-        schluessel = getpass.getpass(
-            "Privater Schlüssel AGE-SECRET-KEY-... (Eingabe bleibt unsichtbar): "
-        ).strip()
+        schluessel = (
+            schluessel
+            or getpass.getpass(
+                "Privater Schlüssel AGE-SECRET-KEY-... (Eingabe bleibt unsichtbar): "
+            ).strip()
+        )
         with tempfile.TemporaryDirectory(prefix="kipm-probe-") as arbeit:
             ort = Path(arbeit)
             (ort / "kopie.age").write_bytes(inhalt)
@@ -414,11 +773,14 @@ def main(argumente: list[str] | None = None) -> int:
     teile = argparse.ArgumentParser(description="Kopie der Sicherung nach SharePoint")
     gruppe = teile.add_mutually_exclusive_group()
     gruppe.add_argument("--einrichten", action="store_true")
+    gruppe.add_argument("--einrichten-von-hand", action="store_true")
     gruppe.add_argument("--pruefen", action="store_true")
     gruppe.add_argument("--fremde-website", metavar="WEBSITE")
     a = teile.parse_args(argumente)
     if a.einrichten:
-        return einrichten()
+        return selbst_einrichten()
+    if a.einrichten_von_hand:
+        return einrichten_von_hand()
     if a.pruefen:
         return pruefen()
     if a.fremde_website:
@@ -427,6 +789,7 @@ def main(argumente: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)  # Anmeldecode sofort zeigen, auch ohne Terminal
     # Reißt die Sitzung ab, räumen die Arbeitsordner trotzdem auf (entschlüsselte Probe in --pruefen)
     for zeichen in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(zeichen, lambda *_: sys.exit(1))
