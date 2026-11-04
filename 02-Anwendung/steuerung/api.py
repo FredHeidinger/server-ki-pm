@@ -83,21 +83,30 @@ SITZUNGSSTART_VERTRAG = 1
 SITZUNGSSTART_OFFEN = 50
 
 
-def _sitzungsprojekt(request: HttpRequest, bindung: ChatBindung) -> Projekt | None:
-    """Wie ``bindung_erforderlich``, aber ohne Ordneranfrage: Ein unbekannter Ordner ist kein
-    Vorgang, sondern der Normalfall eines Hooks in einem nicht eingetragenen Ordner."""
-    if bindung.art != bindung.ART_PC:
-        return bindung.projekt
+def _sitzungsziel(
+    request: HttpRequest, bindung: ChatBindung
+) -> tuple[Projekt | None, Modul | None]:
+    """Projekt und Modul der Sitzung. Wie ``bindung_erforderlich``, aber ohne Ordneranfrage: Ein
+    unbekannter Ordner ist kein Vorgang, sondern der Normalfall eines Hooks in einem nicht
+    eingetragenen Ordner. Das Modul kommt vom Arbeitsort des Ordners; ein archiviertes filtert
+    nicht."""
+    im_ordner, ort = dienst.projekt_fuer_ordner(request.headers.get("X-KIPM-Ordner", "").strip())
     kennung = request.headers.get("X-KIPM-Projekt", "").strip()
-    if kennung:
-        return Projekt.objects.filter(kennung=kennung, aktiv=True).first()
-    return dienst.projekt_fuer_ordner(request.headers.get("X-KIPM-Ordner", "").strip())[0]
+    if bindung.art != bindung.ART_PC:
+        projekt = bindung.projekt
+    elif kennung:
+        projekt = Projekt.objects.filter(kennung=kennung, aktiv=True).first()
+    else:
+        projekt = im_ordner
+    modul = ort.modul if ort is not None and im_ordner == projekt else None
+    return projekt, modul if modul is not None and modul.aktiv else None
 
 
 def _sitzungseintrag(a: Auftrag, uebernehmbar: set[int]) -> dict:
     return {
         "nummer": a.nummer,
         "titel": akte._bereinigt(a.titel),
+        "modul": akte._bereinigt(a.modul.name) if a.modul else None,
         "art": a.typ,
         "zustand": a.zustand,
         "prioritaet": a.prioritaet,
@@ -143,29 +152,33 @@ def sitzungsstart(request: HttpRequest) -> JsonResponse:
     bindung = dienst.bindung_finden(kopf[7:]) if kopf.startswith("Bearer ") else None
     if bindung is None:
         return _fehler(401, "Zugangsschlüssel fehlt, ist ungültig, abgelaufen oder widerrufen.")
-    projekt = _sitzungsprojekt(request, bindung)
+    projekt, modul = _sitzungsziel(request, bindung)
     antwort = {
         "ok": True,
         "vertrag": SITZUNGSSTART_VERTRAG,
         "stand": timezone.now().isoformat(timespec="seconds"),
         "projekt": None,
+        "modul": None,
         "naechster": None,
         "offen": [],
         "weitere": 0,
+        "ausgeblendet": 0,
         "wartet": [],
     }
     if projekt is None:
         return JsonResponse(antwort)
-    weiter = dienst.weiter_reihenfolge(projekt)
+    weiter = dienst.weiter_reihenfolge(projekt, modul)
     uebernehmbar = {a.pk for a in weiter}
-    offen = dienst.offene_eintraege(projekt)
+    offen = dienst.offene_eintraege(projekt, modul)
     antwort.update(
         {
             "projekt": projekt.kennung,
+            "modul": modul.kennung if modul else None,
             "naechster": _sitzungseintrag(weiter[0], uebernehmbar) if weiter else None,
             "offen": [_sitzungseintrag(a, uebernehmbar) for a in offen[:SITZUNGSSTART_OFFEN]],
             "weitere": max(len(offen) - SITZUNGSSTART_OFFEN, 0),
-            "wartet": [_wartet_eintrag(x) for x in akte.wartet_liste(projekt)],
+            "ausgeblendet": len(dienst.offene_eintraege(projekt)) - len(offen) if modul else 0,
+            "wartet": [_wartet_eintrag(x) for x in akte.wartet_liste(projekt, modul)],
         }
     )
     return JsonResponse(antwort)
@@ -752,8 +765,14 @@ def _projekt_json(p: Projekt) -> dict:
         "beschreibung": p.beschreibung,
         "module": [_modul_json(m) for m in p.module.filter(aktiv=True)],
         "arbeitsorte": [
-            {"kennung": o.kennung, "name": o.name, "pfad": o.pfad, "bestaetigt": o.bestaetigt}
-            for o in p.arbeitsorte.filter(aktiv=True)
+            {
+                "kennung": o.kennung,
+                "name": o.name,
+                "pfad": o.pfad,
+                "bestaetigt": o.bestaetigt,
+                "modul": o.modul.kennung if o.modul else None,
+            }
+            for o in p.arbeitsorte.filter(aktiv=True).select_related("modul")
         ],
         "offene_auftraege": p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count(),
     }
@@ -788,6 +807,18 @@ def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         module=dienst.module_aus_text(_liste(daten.get("module"))),
     )
     return JsonResponse({"ok": True, "projekt": _projekt_json(p)}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_fred_bestaetigt
+@_mit_wiederholungsschutz
+@_behandeln
+def projekt_archivieren(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Projekt archivieren; zurückholen kann es Fred in der Oberfläche."""
+    p = dienst.projekt_archivieren(request.akteur, _projekt_noetig(request))
+    return JsonResponse({"ok": True, "projekt": p.kennung, "aktiv": p.aktiv})
 
 
 @csrf_exempt
@@ -864,6 +895,7 @@ def _ort_json(o: Arbeitsort) -> dict:
         "rechner": o.rechner,
         "pfad": o.pfad,
         "repository": o.repository,
+        "modul": o.modul.kennung if o.modul else None,
         "aktiv": o.aktiv,
         "bestaetigt": o.bestaetigt,
         "vorgeschlagen_von": o.vorgeschlagen_von or None,
@@ -924,12 +956,15 @@ def arbeitsort_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
         raise dienst.DienstFehler("arbeitsort (Kennung) ist erforderlich.")
     if "revision" not in daten:
         raise dienst.DienstFehler("revision (aktuelle Revision des Arbeitsorts) ist erforderlich.")
+    felder = {k: daten.get(k) for k in ("name", "rechner", "pfad", "repository", "aktiv")}
+    if "modul" in daten:
+        felder["modul"] = _nach_kennung(Modul, projekt, daten["modul"], "Modul")
     ort = dienst.arbeitsort_aendern(
         request.akteur,
         ort,
         erwartete_revision=_revision(daten),
         grund=str(daten.get("grund", "")),
-        **{k: daten.get(k) for k in ("name", "rechner", "pfad", "repository", "aktiv")},
+        **felder,
     )
     return JsonResponse({"ok": True, "arbeitsort": _ort_json(ort)})
 

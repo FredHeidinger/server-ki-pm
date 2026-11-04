@@ -79,6 +79,10 @@ class Arbeitsort(models.Model):
     rechner = models.CharField("Rechner", max_length=120, blank=True)
     pfad = models.CharField("Ordner auf dem Rechner", max_length=300, blank=True)
     repository = models.URLField("Repository (z. B. GitHub)", max_length=300, blank=True)
+    # Nur für den Sitzungsstart: Eine Sitzung in diesem Ordner sieht nur dieses Modul.
+    modul = models.ForeignKey(
+        Modul, null=True, blank=True, on_delete=models.SET_NULL, related_name="arbeitsorte"
+    )
     aktiv = models.BooleanField("Aktiv", default=True)
     # Ein Vorschlag einer KI gilt erst nach Bestätigung durch einen Menschen: vorher ordnet er
     # keinen Ordner zu und zählt nicht für die Freigabe.

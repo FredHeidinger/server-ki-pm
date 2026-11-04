@@ -507,6 +507,7 @@ def arbeitsort_anlegen(
     rechner: str = "",
     pfad: str = "",
     repository: str = "",
+    modul: Modul | None = None,
 ) -> Arbeitsort:
     """Arbeitsort anlegen. Legt ihn die KI an, ist er ein Vorschlag: er ordnet keinen Ordner zu
     und zählt nicht für die Freigabe, bis ein Mensch ihn bestätigt. Schlägt die KI einen Ordner
@@ -516,6 +517,7 @@ def arbeitsort_anlegen(
     kennung = slugify(kennung)
     if not kennung or not name.strip():
         raise DienstFehler("Kennung und Name sind erforderlich.")
+    _modul_pruefen(modul, projekt)
     if not akteur.ist_mensch and pfad.strip():
         norm = _ordner_normiert(pfad)
         for vorhanden in projekt.arbeitsorte.filter(aktiv=True).exclude(pfad=""):
@@ -530,6 +532,7 @@ def arbeitsort_anlegen(
                 rechner=rechner.strip(),
                 pfad=pfad.strip(),
                 repository=repository.strip(),
+                modul=modul,
                 bestaetigt=akteur.ist_mensch,
                 vorgeschlagen_von="" if akteur.ist_mensch else akteur.name,
             )
@@ -544,6 +547,44 @@ def arbeitsort_anlegen(
     except IntegrityError as fehler:
         raise DienstFehler(f"Arbeitsortkennung „{kennung}“ gibt es schon.") from fehler
     return ort
+
+
+def _modul_pruefen(modul: Modul | None, projekt: Projekt) -> None:
+    if modul is not None and (modul.projekt_id != projekt.pk or not modul.aktiv):
+        raise DienstFehler("Das Modul gehört nicht zu diesem Projekt oder ist archiviert.")
+
+
+def laufende_eintraege(projekt: Projekt) -> list[Auftrag]:
+    return list(projekt.auftraege.filter(zustand=Auftrag.IN_ARBEIT).order_by("id"))
+
+
+def projekt_archivieren(akteur: Akteur, projekt: Projekt, *, aktiv: bool = False) -> Projekt:
+    """Projekt archivieren oder zurückholen. Es wird nichts gelöscht: Einträge, Wissen und Verlauf
+    bleiben unverändert, nur Startseite, Chats und Sitzungsstart sehen das Projekt nicht mehr.
+    Solange ein Eintrag in Arbeit ist, geht das Archivieren nicht."""
+    _planung_erforderlich(akteur, "Projekte archivieren")
+    _projekt_sichtbar(akteur, projekt)
+    with transaction.atomic():
+        projekt = Projekt.objects.get(pk=projekt.pk)
+        if projekt.aktiv == aktiv:
+            return projekt
+        if not aktiv:
+            laufend = ", ".join(a.nummer for a in laufende_eintraege(projekt))
+            if laufend:
+                raise Konflikt(
+                    f"„{projekt.name}“ hat Einträge in Arbeit ({laufend}); zuerst abschließen oder "
+                    "abbrechen."
+                )
+        projekt.aktiv = aktiv
+        projekt.save(update_fields=["aktiv"])
+        _ereignis(
+            akteur,
+            projekt=projekt,
+            objekt_typ="Projekt",
+            objekt_kennung=projekt.kennung,
+            ereignis="Projekt zurückgeholt" if aktiv else "Projekt archiviert",
+        )
+    return projekt
 
 
 def freie_kennung(modell, projekt: Projekt, name: str, ersatz: str) -> str:
@@ -583,6 +624,10 @@ def arbeitsort_aendern(
             if wert is not None and getattr(ort, feld) != str(wert).strip():
                 setattr(ort, feld, str(wert).strip())
                 geaendert.append(feld)
+        if "modul" in felder and (felder["modul"].pk if felder["modul"] else None) != ort.modul_id:
+            _modul_pruefen(felder["modul"], ort.projekt)
+            ort.modul = felder["modul"]
+            geaendert.append("modul")
         if felder.get("aktiv") is not None and bool(felder["aktiv"]) != ort.aktiv:
             ort.aktiv = bool(felder["aktiv"])
             geaendert.append("aktiv")
@@ -611,6 +656,8 @@ def arbeitsort_aendern(
             anlass="; ".join(t for t in (", ".join(geaendert), grund.strip()) if t),
             revision=str(ort.revision),
         )
+        if "bestätigt" in geaendert:
+            _abgedeckte_anfragen_erledigen()
     return ort
 
 
@@ -772,19 +819,41 @@ def ordner_unbekannt_melden(bindung: ChatBindung, ordner: str) -> None:
 
 
 def ordner_zuordnen(akteur: Akteur, anfrage: OrdnerAnfrage, projekt: Projekt) -> Arbeitsort:
-    """Ordner als Arbeitsort des Projekts anlegen; erledigt alle Anfragen, die er abdeckt."""
+    """Ordner dem Projekt zuordnen; erledigt alle Anfragen, die er abdeckt. Hat das Projekt den
+    Ordner schon, gilt der vorhandene Arbeitsort, ein Vorschlag der KI wird damit übernommen."""
     _owner_erforderlich(akteur, "Ordner zuordnen")
     ordner = anfrage.ordner.rstrip("/\\")
-    name = ordner.replace("\\", "/").rsplit("/", 1)[-1] or ordner
-    kennung = freie_kennung(Arbeitsort, projekt, name, "ordner")
+    norm = _ordner_normiert(ordner)
     with transaction.atomic():
-        ort = arbeitsort_anlegen(
-            akteur, projekt, kennung=kennung, name=name, rechner=anfrage.bindung.name, pfad=ordner
+        vorhanden = next(
+            (
+                o
+                for o in projekt.arbeitsorte.filter(aktiv=True).order_by("-bestaetigt", "pk")
+                if _ordner_normiert(o.pfad) == norm
+            ),
+            None,
         )
-        for offen in OrdnerAnfrage.objects.all():
-            if projekt_fuer_ordner(offen.ordner)[0] is not None:
-                offen.delete()
+        if vorhanden is not None:
+            ort = arbeitsort_aendern(akteur, vorhanden, erwartete_revision=None, bestaetigen=True)
+        else:
+            name = ordner.replace("\\", "/").rsplit("/", 1)[-1] or ordner
+            ort = arbeitsort_anlegen(
+                akteur,
+                projekt,
+                kennung=freie_kennung(Arbeitsort, projekt, name, "ordner"),
+                name=name,
+                rechner=anfrage.bindung.name,
+                pfad=ordner,
+            )
+        _abgedeckte_anfragen_erledigen()
     return ort
+
+
+def _abgedeckte_anfragen_erledigen() -> None:
+    """Ordneranfragen entfernen, deren Ordner ein bestätigter Arbeitsort inzwischen abdeckt."""
+    for offen in OrdnerAnfrage.objects.all():
+        if projekt_fuer_ordner(offen.ordner)[0] is not None:
+            offen.delete()
 
 
 def ordner_verwerfen(akteur: Akteur, anfrage: OrdnerAnfrage) -> None:
@@ -866,8 +935,7 @@ def auftraege_fuer_bindung(
     """Aufträge des Projekts (ohne Projekt: aller Projekte): standardmäßig alle offenen,
     wahlweise nur übernehmbare und eigene, oder einschließlich abgeschlossener."""
     qs = Auftrag.objects.select_related("projekt", "modul", "meilenstein")
-    if projekt is not None:
-        qs = qs.filter(projekt=projekt)
+    qs = qs.filter(projekt=projekt) if projekt is not None else qs.filter(projekt__aktiv=True)
     if typ:
         qs = qs.filter(typ=typ)
     if nur_meine:
@@ -1461,6 +1529,8 @@ def auftrag_uebernehmen(akteur: Akteur, auftrag: Auftrag, revision_nr: int) -> A
         raise KeinZugriff("Übernehmen dürfen Chat-Bindungen oder der Owner.")
     with transaction.atomic():
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if not aktuell.projekt.aktiv:
+            raise Konflikt(f"{aktuell.nummer} gehört zu einem archivierten Projekt.")
         if aktuell.zustand != Auftrag.FREIGEGEBEN or aktuell.hat_bearbeiter:
             if aktuell.hat_bearbeiter:
                 raise Konflikt(
@@ -1750,22 +1820,29 @@ def _mit_offenem_vorgaenger(projekt: Projekt):
     )
 
 
-def weiter_reihenfolge(projekt: Projekt) -> list[Auftrag]:
+def _eintraege_im_modul(projekt: Projekt, modul: Modul | None):
+    """Einträge des Projekts; mit ``modul`` nur die dieses Moduls samt Untermodulen."""
+    if modul is None:
+        return projekt.auftraege.all()
+    return projekt.auftraege.filter(modul__in=modul_teilbaum(modul))
+
+
+def weiter_reihenfolge(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Die einzige Stelle mit der Regel für „weiter“: freigegebene Aufträge und Issues ohne
     Bearbeiter und ohne offenen Vorgänger, nach Priorität, dann die älteste Nummer."""
     return _nach_rang(
-        projekt.auftraege.filter(
-            zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None
-        ).exclude(pk__in=_mit_offenem_vorgaenger(projekt).values("auftrag_id"))
+        _eintraege_im_modul(projekt, modul)
+        .filter(zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None)
+        .exclude(pk__in=_mit_offenem_vorgaenger(projekt).values("auftrag_id"))
     )
 
 
-def offene_eintraege(projekt: Projekt) -> list[Auftrag]:
+def offene_eintraege(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Alles nicht Abgeschlossene: übernehmbar in „weiter“-Reihenfolge, dann Freigegebenes, das
     auf einen Vorgänger wartet, dann In Arbeit und Blockiert, dann Entwürfe."""
-    weiter = weiter_reihenfolge(projekt)
+    weiter = weiter_reihenfolge(projekt, modul)
     uebernehmbar = {a.pk for a in weiter}
-    offen = list(projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE))
+    offen = list(_eintraege_im_modul(projekt, modul).exclude(zustand__in=Auftrag.ENDZUSTAENDE))
     wartend = [a for a in offen if a.zustand == Auftrag.FREIGEGEBEN and a.pk not in uebernehmbar]
     laufend = [a for a in offen if a.zustand in Auftrag.BEARBEITER_ZUSTAENDE]
     entwuerfe = [a for a in offen if a.zustand == Auftrag.ENTWURF]
@@ -1784,19 +1861,20 @@ def ist_faellig(auftrag: Auftrag) -> bool:
     )
 
 
-def wartet_auf_dich(projekt: Projekt) -> list[Auftrag]:
+def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Was in diesem Projekt auf Fred wartet. Zuoberst jeder offene Eintrag ab seinem Termin, der
     älteste Termin zuerst, in jedem Zustand. Danach blockierte Aufträge (Rückfrage, Hindernis,
     Fehler) und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort fehlt. Entwürfe in
     Planung warten ohne Termin auf einen Chat, nicht auf ihn."""
+    eintraege = _eintraege_im_modul(projekt, modul)
     faellige = list(
-        projekt.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+        eintraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
         .filter(faellig__lte=timezone.localdate())
         .select_related("projekt", "modul")
         .order_by("faellig", "id")
     )
     offen = (
-        projekt.auftraege.filter(zustand__in=(Auftrag.BLOCKIERT, Auftrag.ENTWURF))
+        eintraege.filter(zustand__in=(Auftrag.BLOCKIERT, Auftrag.ENTWURF))
         .exclude(pk__in=[a.pk for a in faellige])
         .select_related("projekt", "modul")
     )

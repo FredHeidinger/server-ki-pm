@@ -43,6 +43,7 @@ ARBEIT = {
 FRAGE = {"kipm_entscheidung_fragen"}
 AENDERND = {
     "kipm_projekt_anlegen",
+    "kipm_projekt_archivieren",
     "kipm_modul_anlegen",
     "kipm_modul_aendern",
     "kipm_arbeitsort_vorschlagen",
@@ -94,6 +95,7 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
     projekt.refresh_from_db()
     return {
         "kipm_projekt_anlegen": {"name": "Ganz neu"},
+        "kipm_projekt_archivieren": {},
         "kipm_modul_anlegen": {"name": "Zweites"},
         "kipm_modul_aendern": {
             "modul": modul.kennung,

@@ -66,7 +66,7 @@
   <h2>Arbeitsorte</h2>
   <p class="gedaempft">Wo der Code liegt. Arbeitet eine KI in diesem Ordner, ordnet Server-KI-PM sie dem Projekt zu. Ein Pfad ist ein Hinweis auf einen Arbeitsplatz; der Server liest dort nichts. Schlägt eine KI einen Arbeitsort vor, gilt er erst nach deinem Häkchen.</p>
   {% if arbeitsorte_aktiv %}
-  <ul class="liste-schlicht">{% for o in arbeitsorte_aktiv %}<li><strong>{{ o.name }}</strong>{% if not o.bestaetigt %} <span class="status warn">Vorschlag von {{ o.vorgeschlagen_von|default:"einer KI" }}</span>{% endif %}{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}
+  <ul class="liste-schlicht">{% for o in arbeitsorte_aktiv %}<li><strong>{{ o.name }}</strong>{% if not o.bestaetigt %} <span class="status warn">Vorschlag von {{ o.vorgeschlagen_von|default:"einer KI" }}</span>{% endif %}{% if o.rechner %} · {{ o.rechner }}{% endif %}{% if o.pfad %} · <code>{{ o.pfad }}</code>{% endif %}{% if o.repository %} · <a href="{{ o.repository }}">Repository</a>{% endif %}{% if o.modul %} · Modul {{ o.modul.name }}{% endif %}
     {% if not o.bestaetigt %}<form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="revision" value="{{ o.revision }}"><button type="submit" class="knopf klein">✔ Übernehmen</button></form>{% endif %}
     <details class="modulpflege"><summary>Ändern</summary>
       <form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='aendern' %}" class="formular klein">{% csrf_token %}<input type="hidden" name="revision" value="{{ o.revision }}">
@@ -74,6 +74,7 @@
         <p class="feld"><label for="ort{{ o.pk }}-pfad">Ordner auf dem PC <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-pfad" name="ort{{ o.pk }}-pfad" value="{{ o.pfad }}" maxlength="300"></p>
         <p class="feld"><label for="ort{{ o.pk }}-rechner">PC <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-rechner" name="ort{{ o.pk }}-rechner" value="{{ o.rechner }}" maxlength="120"></p>
         <p class="feld"><label for="ort{{ o.pk }}-repository">Repository <span class="stufe optional">optional</span></label><input type="text" id="ort{{ o.pk }}-repository" name="ort{{ o.pk }}-repository" value="{{ o.repository }}" maxlength="300"></p>
+        {% if modulbaum.flach %}<p class="feld"><label for="ort{{ o.pk }}-modul">Modul <span class="stufe optional">optional</span></label><select id="ort{{ o.pk }}-modul" name="ort{{ o.pk }}-modul"><option value="">Gesamtes Projekt</option>{% for k in modulbaum.flach %}<option value="{{ k.modul.pk }}"{% if k.modul.pk == o.modul_id %} selected{% endif %}>{{ k.modul.name }}</option>{% endfor %}</select><br><span class="gedaempft klein">Eine KI-Sitzung in diesem Ordner sieht beim Start nur dieses Modul.</span></p>{% endif %}
         <button type="submit" class="knopf zweit klein">Speichern</button>
       </form>
       <form method="post" action="{% url 'arbeitsort_pflegen' kennung=projekt.kennung pk=o.pk wahl='archivieren' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">{% if o.bestaetigt %}Archivieren{% else %}Verwerfen{% endif %}</button></form>
@@ -100,5 +101,16 @@
   {% else %}<p class="gedaempft">Noch keine KI hat in diesem Projekt gearbeitet.</p>{% endif %}
   {% if bindungen %}<p>Projektgebundene Zugänge: {% for b in bindungen %}{{ b.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
   <p>KI-Programme verbindest du unter <a href="{% url 'verbindungen' %}">Konto &amp; KI verbinden</a>.</p>
+</section>
+
+<section id="archivieren" class="box" aria-labelledby="h-archivieren">
+  <h2 id="h-archivieren">Projekt archivieren</h2>
+  {% if projekt.aktiv %}
+  <p class="gedaempft">Das Projekt verschwindet von der Startseite und für alle Chats. Gelöscht wird nichts; unter „Archiv“ auf der Startseite holst du es zurück.</p>
+  {% if not github.owner %}<p><span class="knopf zweit klein" aria-disabled="true">Archivieren – nicht möglich</span><br><span class="gedaempft klein">Das darf nur der Owner.</span></p>
+  {% elif laufend %}<p><span class="knopf zweit klein" aria-disabled="true">Archivieren – nicht möglich</span><br><span class="gedaempft klein">In Arbeit: {% for a in laufend %}{{ a.nummer }}{% if not forloop.last %}, {% endif %}{% endfor %}. Zuerst abschließen oder abbrechen.</span></p>
+  {% else %}<form method="post" action="{% url 'projekt_archivieren' kennung=projekt.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="0"><button type="submit" class="knopf zweit klein gefahr">Projekt archivieren</button></form>{% endif %}
+  {% elif github.owner %}<form method="post" action="{% url 'projekt_archivieren' kennung=projekt.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="1"><button type="submit" class="knopf klein">Zurückholen</button></form>
+  {% else %}<p><span class="knopf zweit klein" aria-disabled="true">Zurückholen – nicht möglich</span><br><span class="gedaempft klein">Das darf nur der Owner.</span></p>{% endif %}
 </section>
 {% endblock %}

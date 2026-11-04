@@ -28,7 +28,13 @@ urlpatterns = [
     path("auftraege/<int:auftrag_id>/antwort/", views.antwort, name="antwort"),
     # Projekte als Arbeitsbereich
     path("projekte/", views.projekte, name="projekte"),
+    path("projekte/archiv/", views.projekt_archiv, name="projekt_archiv"),
     path("projekt/neu/", views.projekt_neu, name="projekt_neu"),
+    path(
+        "projekt/<slug:kennung>/archivieren/",
+        views.projekt_archivieren,
+        name="projekt_archivieren",
+    ),
     path("projekt/<slug:kennung>/", views_akte.ueberblick, name="projekt_detail"),
     path("projekt/<slug:kennung>/profil/", views_akte.profil, name="akte_profil"),
     path(
@@ -154,6 +160,7 @@ urlpatterns = [
         name="api_unterlage_version",
     ),
     path("api/projekte/anlegen/", api.projekt_anlegen, name="api_projekt_anlegen"),
+    path("api/projekte/archivieren/", api.projekt_archivieren, name="api_projekt_archivieren"),
     path("api/module/anlegen/", api.modul_anlegen, name="api_modul_anlegen"),
     path("api/module/aendern/", api.modul_aendern, name="api_modul_aendern"),
     path(

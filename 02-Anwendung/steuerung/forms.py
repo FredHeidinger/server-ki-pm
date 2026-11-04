@@ -83,9 +83,21 @@ class ArbeitsortForm(forms.Form):
             "z. B. https://github.com/FredHeidinger/nexus; macht Dateien in Ergebnissen anklickbar."
         ),
     )
+    modul = NamensAuswahl(
+        label="Modul",
+        queryset=Modul.objects.none(),
+        required=False,
+        empty_label="Gesamtes Projekt",
+        help_text="Eine KI-Sitzung in diesem Ordner sieht beim Start nur dieses Modul.",
+    )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, projekt: Projekt | None = None, **kwargs):
         super().__init__(*args, **kwargs)
+        module = projekt.module.filter(aktiv=True) if projekt is not None else Modul.objects.none()
+        if module.exists():
+            self.fields["modul"].queryset = module
+        else:
+            del self.fields["modul"]
         _stufen(self)
 
 

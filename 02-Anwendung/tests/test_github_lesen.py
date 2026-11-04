@@ -184,7 +184,8 @@ def test_geaendertes_servergeheimnis_ergibt_eine_zeile(owner_client, verbunden, 
 
 def test_einstellungen_ohne_verbindung_fuehren_zum_verbinden(owner_client, projekt):
     seite = owner_client.get(_u("projekt_einstellungen", projekt)).content.decode()
-    assert "noch nicht verbunden" in seite and "#github" in seite and "<select id=" not in seite
+    assert "noch nicht verbunden" in seite and "#github" in seite
+    assert '<select id="repository"' not in seite
     assert "+ Umgebung" not in seite and "GitHub App" not in seite
 
 

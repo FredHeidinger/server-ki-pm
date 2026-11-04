@@ -1,6 +1,7 @@
 {% extends "steuerung/grund.html" %}
 {% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › <a href="{% url 'projekt_detail' kennung=projekt.kennung %}">{{ projekt.name }}</a>{% endblock %}
 {% block inhalt %}
+{% if not projekt.aktiv %}<p class="box warn">Dieses Projekt ist archiviert: Es fehlt auf der Startseite, und Chats sehen es nicht. <a href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}#archivieren">Zurückholen</a></p>{% endif %}
 <div class="projektkopf-akte">
   <div>
     <p class="oberzeile">Projekt · {{ projekt.kennung }}{% if projekt.phase %} · {{ projekt.phase }}{% endif %}</p>

@@ -280,9 +280,10 @@ def offene_entscheidungen(projekt: Projekt) -> list[Entscheidung]:
     )
 
 
-def wartet_liste(projekt: Projekt) -> list[Auftrag | Entscheidung]:
-    """Alles, was auf Fred wartet: zuoberst Fälliges, dann offene Entscheidungen, dann der Rest."""
-    auftraege = wartet_auf_dich(projekt)
+def wartet_liste(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag | Entscheidung]:
+    """Alles, was auf Fred wartet: zuoberst Fälliges, dann offene Entscheidungen, dann der Rest.
+    ``modul`` beschränkt nur die Aufträge; Entscheidungen haben kein Modul."""
+    auftraege = wartet_auf_dich(projekt, modul)
     return [
         *(a for a in auftraege if ist_faellig(a)),
         *offene_entscheidungen(projekt),

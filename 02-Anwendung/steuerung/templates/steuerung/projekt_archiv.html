@@ -1,0 +1,18 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Archiv{% endblock %}
+{% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › Archiv{% endblock %}
+{% block inhalt %}
+<div class="seitenkopf">
+  <h1>Archivierte Projekte</h1>
+</div>
+<p class="gedaempft">Gelöscht ist hier nichts: Einträge, Wissen und Verlauf sind unverändert. Chats sehen diese Projekte nicht, bis du sie zurückholst.</p>
+{% if projekte %}
+<ul class="liste-schlicht">{% for p in projekte %}
+  <li><a href="{% url 'projekt_detail' kennung=p.kennung %}"><strong>{{ p.name }}</strong></a> <span class="kuerzel">{{ p.kennung }}</span>
+    {% if darf_zurueckholen %}<form method="post" action="{% url 'projekt_archivieren' kennung=p.kennung %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="1"><button type="submit" class="knopf zweit klein">Zurückholen</button></form>
+    {% else %}<span class="knopf zweit klein" aria-disabled="true">Zurückholen – nicht möglich</span> <span class="gedaempft klein">Das darf nur der Owner.</span>{% endif %}</li>
+{% endfor %}</ul>
+{% else %}
+<div class="leer">Kein Projekt ist archiviert.</div>
+{% endif %}
+{% endblock %}

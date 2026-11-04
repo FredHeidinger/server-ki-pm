@@ -17,10 +17,22 @@ from tests.test_klickwege import _blockiert, _projekt_url
 pytestmark = pytest.mark.django_db
 
 PFAD = "/api/sitzungsstart/"
-ANTWORTFELDER = {"ok", "vertrag", "stand", "projekt", "naechster", "offen", "weitere", "wartet"}
+ANTWORTFELDER = {
+    "ok",
+    "vertrag",
+    "stand",
+    "projekt",
+    "modul",
+    "naechster",
+    "offen",
+    "weitere",
+    "ausgeblendet",
+    "wartet",
+}
 EINTRAGSFELDER = {
     "nummer",
     "titel",
+    "modul",
     "art",
     "zustand",
     "prioritaet",
@@ -160,6 +172,7 @@ def test_antwort_entspricht_dem_vertrag(akteur, projekt, bindung):
     assert d["naechster"] == {
         "nummer": a.nummer,
         "titel": "frei",
+        "modul": "Kern",
         "art": "auftrag",
         "zustand": "FREIGEGEBEN",
         "prioritaet": "hoch",

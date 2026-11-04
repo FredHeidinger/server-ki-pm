@@ -82,6 +82,7 @@ def test_mcp_kennt_nur_die_schlanken_werkzeuge():
         "kipm_projekte",
         "kipm_projekt",
         "kipm_projekt_anlegen",
+        "kipm_projekt_archivieren",
         "kipm_modul_anlegen",
         "kipm_modul_aendern",
         "kipm_arbeitsort_vorschlagen",

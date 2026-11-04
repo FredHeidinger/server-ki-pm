@@ -124,8 +124,41 @@ def projekte(request: HttpRequest) -> HttpResponse:
             "suche": suche,
             "ordneranfragen": OrdnerAnfrage.objects.count(),
             "kopie_warnung": sicherung.kopie_warnung(),
+            "archiviert": Projekt.objects.filter(aktiv=False).count(),
         },
     )
+
+
+@login_required
+def projekt_archiv(request: HttpRequest) -> HttpResponse:
+    """Archivierte Projekte; nichts daran ist gelöscht, Zurückholen ist ein Klick."""
+    return render(
+        request,
+        "steuerung/projekt_archiv.html",
+        {
+            "projekte": Projekt.objects.filter(aktiv=False).order_by("name"),
+            "darf_zurueckholen": _akteur(request).ist_owner,
+        },
+    )
+
+
+@login_required
+@require_POST
+def projekt_archivieren(request: HttpRequest, kennung: str) -> HttpResponse:
+    projekt = _projekt(kennung)
+    aktiv = request.POST.get("aktiv") == "1"
+    try:
+        dienst.projekt_archivieren(_akteur(request), projekt, aktiv=aktiv)
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+        return redirect(
+            reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#archivieren"
+        )
+    if aktiv:
+        messages.success(request, f"„{projekt.name}“ ist wieder aktiv.")
+        return redirect("projekt_detail", kennung=kennung)
+    messages.success(request, f"„{projekt.name}“ ist archiviert; gelöscht wurde nichts.")
+    return redirect("projekte")
 
 
 @login_required
@@ -401,7 +434,7 @@ def modul_archivieren(request: HttpRequest, kennung: str, modul: str) -> HttpRes
 @require_POST
 def arbeitsort_neu(request: HttpRequest, kennung: str) -> HttpResponse:
     projekt = _projekt(kennung)
-    form = ArbeitsortForm(request.POST, prefix="ort")
+    form = ArbeitsortForm(request.POST, prefix="ort", projekt=projekt)
     if form.is_valid():
         try:
             d = form.cleaned_data
@@ -429,7 +462,7 @@ def arbeitsort_pflegen(request: HttpRequest, kennung: str, pk: int, wahl: str) -
             )
             messages.success(request, f"Arbeitsort „{ort.name}“ übernommen.")
         elif wahl == "aendern":
-            form = ArbeitsortForm(request.POST, prefix=f"ort{ort.pk}")
+            form = ArbeitsortForm(request.POST, prefix=f"ort{ort.pk}", projekt=ort.projekt)
             if not form.is_valid():
                 raise dienst.DienstFehler(
                     "Arbeitsort: Der Name ist erforderlich, das Repository muss eine Adresse sein."

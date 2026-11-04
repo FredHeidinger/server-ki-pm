@@ -102,6 +102,14 @@ WERKZEUGE = [
         ["name"],
     ),
     (
+        "kipm_projekt_archivieren",
+        "Projekt archivieren: Es verschwindet von der Startseite und für alle Chats, gelöscht wird "
+        "nichts; geht nicht, solange ein Eintrag in Arbeit ist. Zurückholen kann es Fred in der "
+        "Oberfläche",
+        {},
+        [],
+    ),
+    (
         "kipm_modul_anlegen",
         "Modul im Projekt anlegen; mit eltern (Modulkennung) als Untermodul, beliebig tief",
         {
@@ -143,7 +151,8 @@ WERKZEUGE = [
         "kipm_arbeitsort_aendern",
         "Arbeitsort umbenennen, Ordner oder Repository ändern oder archivieren (aktiv=false); "
         "revision aus kipm_projekt. Neuer Ordner oder neues Repository gilt erst nach Freds "
-        "Häkchen",
+        "Häkchen. modul: Eine Sitzung in diesem Ordner sieht beim Start nur dieses Modul samt "
+        "Untermodulen",
         {
             "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
             "revision": {"type": "integer", "description": "Revision aus kipm_projekt"},
@@ -151,6 +160,7 @@ WERKZEUGE = [
             "pfad": _TEXT,
             "repository": _TEXT,
             "rechner": _TEXT,
+            "modul": {"type": "string", "description": "Modulkennung, leer = ganzes Projekt"},
             "aktiv": {"type": "boolean"},
             "grund": _TEXT,
         },
@@ -569,6 +579,8 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
             reverse("api_projekt_anlegen"),
             _felder(a, ("name", "kennung", "beschreibung", "module")),
         )
+    if name == "kipm_projekt_archivieren":
+        return rufe(reverse("api_projekt_archivieren"), {})
     if name == "kipm_modul_anlegen":
         return rufe(reverse("api_modul_anlegen"), _felder(a, ("name", "kennung", "eltern")))
     if name == "kipm_modul_aendern":
@@ -581,7 +593,8 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
     if name == "kipm_arbeitsort_aendern":
         felder = ("arbeitsort", "revision", "name", "pfad", "repository", "rechner", "aktiv")
         felder = (*felder, "grund")
-        return rufe(reverse("api_arbeitsort_aendern"), _felder(a, felder))
+        daten = _felder(a, felder) | ({"modul": a["modul"] or ""} if "modul" in a else {})
+        return rufe(reverse("api_arbeitsort_aendern"), daten)
     if name == "kipm_text_aendern":
         nr = str(a.get("unterlage", "")).upper().removeprefix("U-")
         if not nr.isdigit():

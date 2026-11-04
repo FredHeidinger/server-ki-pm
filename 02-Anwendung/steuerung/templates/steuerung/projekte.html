@@ -31,4 +31,5 @@
 {% else %}
 <div class="leer">Noch kein Projekt. Über „+ Neu“ → Projekt legst du eines an; Module sind optional.</div>
 {% endif %}
+{% if archiviert %}<p class="gedaempft"><a href="{% url 'projekt_archiv' %}">Archiv: {{ archiviert }} Projekt{{ archiviert|pluralize:"e" }}</a></p>{% endif %}
 {% endblock %}

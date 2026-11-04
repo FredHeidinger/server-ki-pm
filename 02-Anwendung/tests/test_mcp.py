@@ -99,6 +99,37 @@ def test_unbekannter_ordner_landet_bei_ki_verbinden(client, owner_client, projek
     assert not fehler and daten["projekt"]["kennung"] == projekt.kennung
 
 
+def test_zuordnen_nimmt_vorhandenen_vorschlag_statt_doppel(akteur, projekt, pc_zugang):
+    """A-162: Vorschlag der KI und Ordneranfrage zum selben Ordner ergeben einen Arbeitsort."""
+    ki = dienst.Akteur.aus_bindung(pc_zugang, projekt=projekt)
+    vorschlag = dienst.arbeitsort_anlegen(
+        ki, projekt, kennung="neu", name="Neu", pfad=r"C:\Projekte\Neu"
+    )
+    dienst.ordner_unbekannt_melden(pc_zugang, "c:/projekte/neu/")
+    zahl = projekt.arbeitsorte.count()
+
+    ort = dienst.ordner_zuordnen(akteur, OrdnerAnfrage.objects.get(), projekt)
+
+    assert ort.pk == vorschlag.pk and ort.bestaetigt
+    assert projekt.arbeitsorte.count() == zahl
+    assert not OrdnerAnfrage.objects.exists()
+
+
+def test_uebernehmen_erledigt_abgedeckte_ordneranfragen(akteur, projekt, pc_zugang):
+    """A-162: Das Häkchen am Vorschlag räumt die Anfragen weg, die er abdeckt, sonst keine."""
+    ki = dienst.Akteur.aus_bindung(pc_zugang, projekt=projekt)
+    vorschlag = dienst.arbeitsort_anlegen(
+        ki, projekt, kennung="neu", name="Neu", pfad=r"C:\Projekte\Neu"
+    )
+    dienst.ordner_unbekannt_melden(pc_zugang, r"C:\Projekte\Neu")
+    dienst.ordner_unbekannt_melden(pc_zugang, r"C:\Projekte\Neu\src")
+    dienst.ordner_unbekannt_melden(pc_zugang, r"C:\Projekte\Fremd")
+
+    dienst.arbeitsort_bestaetigen(akteur, vorschlag, erwartete_revision=vorschlag.revision)
+
+    assert [a.ordner for a in OrdnerAnfrage.objects.all()] == [r"C:\Projekte\Fremd"]
+
+
 def test_ordner_verwerfen(client, owner_client, pc_zugang):
     _werkzeug(client, pc_zugang.klartext, "kipm_projekt", ordner="D:/irgendwo")
     anfrage = OrdnerAnfrage.objects.get()

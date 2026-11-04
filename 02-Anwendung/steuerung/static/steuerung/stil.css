@@ -169,7 +169,7 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 @media (max-width: 1100px) { .drei { grid-template-columns: 1fr; } }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .seitenleiste { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 10px 12px; }
   .seitenleiste .marke { width: 100%; margin-bottom: 6px; }
   
