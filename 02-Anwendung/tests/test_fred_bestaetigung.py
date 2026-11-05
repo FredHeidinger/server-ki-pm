@@ -181,8 +181,9 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "fehler",
         "ergebnis",
         "entscheidung_fragen",
+        "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats
     }
-    assert len(routen) == len(AENDERND) + len(ARBEIT) + len(FRAGE)
+    assert len(routen) == len(AENDERND) + len(ARBEIT) + len(FRAGE) + 1
 
 
 @pytest.mark.parametrize("werkzeug", sorted(AENDERND))

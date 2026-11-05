@@ -128,7 +128,10 @@ def _wartet_eintrag(x: Auftrag | Entscheidung) -> dict:
     frage = None
     if x.zustand == Auftrag.BLOCKIERT:
         frage = x.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
-    if dienst.ist_faellig(x):
+    text = akte._bereinigt(frage.text) if frage else ""
+    if dienst.verstummt(x):  # vor „faellig“: Der Stand darf auch mit Termin nicht fehlen
+        art, text = "still", _still_text(x)
+    elif dienst.ist_faellig(x):
         art = "faellig"
     elif x.zustand == Auftrag.BLOCKIERT:
         art = frage.art.lower() if frage else "hindernis"
@@ -138,9 +141,21 @@ def _wartet_eintrag(x: Auftrag | Entscheidung) -> dict:
         "art": art,
         "nummer": x.nummer,
         "titel": akte._bereinigt(x.titel),
-        "text": akte._bereinigt(frage.text) if frage else "",
+        "text": text,
         "faellig": x.faellig.isoformat() if x.faellig else None,
     }
+
+
+def _still_text(a: Auftrag) -> str:
+    v = dienst.verstummt(a)
+    if v is None:
+        return ""
+    zeit = timezone.localtime(v["seit"]).strftime("%d.%m. %H:%M")
+    vorn = "Chat beendet, Ergebnis fehlt." if v["beendet"] else f"Seit {zeit} keine Meldung."
+    stand = (
+        f"Letzter Stand: {akte._bereinigt(v['stand'].text)}" if v["stand"] else "Noch kein Stand."
+    )
+    return f"{vorn} {stand}"
 
 
 @csrf_exempt
@@ -539,6 +554,18 @@ def fortschritt(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonRespo
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     dienst.fortschritt_melden(request.akteur, auftrag, _revision(daten), str(daten.get("text", "")))
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def sitzung_beendet(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Nur für den Hook beim Schließen eines Chats; darum kein MCP-Werkzeug."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    vermerkt = dienst.sitzungsende_melden(request.akteur, auftrag)
+    return JsonResponse({"ok": True, "vermerkt": vermerkt})
 
 
 @csrf_exempt

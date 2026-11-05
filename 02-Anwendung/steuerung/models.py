@@ -355,6 +355,7 @@ class Meldung(models.Model):
     VORSCHLAG = "VORSCHLAG"
     PRUEFBERICHT = "PRUEFBERICHT"
     ANTWORT = "ANTWORT"
+    SITZUNGSENDE = "SITZUNGSENDE"
     ARTEN = [
         (FORTSCHRITT, "Fortschritt"),
         (HINDERNIS, "Hindernis"),
@@ -363,6 +364,7 @@ class Meldung(models.Model):
         (VORSCHLAG, "Vorschlag"),
         (PRUEFBERICHT, "Prüfbericht"),
         (ANTWORT, "Antwort"),
+        (SITZUNGSENDE, "Chat beendet"),
     ]
     BLOCKIERENDE = (HINDERNIS, RUECKFRAGE, FEHLER)
     OFFEN = "OFFEN"

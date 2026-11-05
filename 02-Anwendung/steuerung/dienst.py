@@ -1806,6 +1806,45 @@ def ergebnis_einreichen(
 # --- Was als Nächstes dran ist --------------------------------------------------------------
 
 PRIO_RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
+STILL_STUNDEN = 4
+
+
+def sitzungsende_melden(akteur: Akteur, auftrag: Auftrag) -> bool:
+    """Vermerk des Hooks beim Schließen eines Chats, der den Auftrag noch hält. Er ist kein Stand:
+    Er ändert weder Zustand noch ``zuletzt_gemeldet_am``, sonst verdeckte er die letzte echte
+    Meldung. Falsch zurück, wenn nichts zu vermerken ist; das ist kein Fehler."""
+    with transaction.atomic():
+        aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        _projekt_sichtbar(akteur, aktuell.projekt)
+        # Auch blockiert: Antwortet Fred später, soll er sofort sehen, dass der Chat weg ist.
+        if aktuell.zustand not in Auftrag.BEARBEITER_ZUSTAENDE or not akteur.ist_bearbeiter_von(
+            aktuell
+        ):
+            return False
+        neueste = aktuell.meldungen.filter(historisch=False).first()
+        if (
+            neueste is not None
+            and neueste.art == Meldung.SITZUNGSENDE
+            and (not aktuell.uebernommen_am or neueste.zeitpunkt >= aktuell.uebernommen_am)
+        ):
+            return False  # schon vermerkt; ein Vermerk von vor einer neuen Übernahme zählt nicht
+        Meldung.objects.create(
+            auftrag=aktuell,
+            revision_nr=aktuell.revision_nr,
+            art=Meldung.SITZUNGSENDE,
+            text="Chat beendet, Ergebnis fehlt.",
+            akteur_name=akteur.name,
+            bindung=akteur.bindung,
+        )
+        _ereignis(
+            akteur,
+            projekt=aktuell.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=aktuell.nummer,
+            ereignis="Chat beendet, Ergebnis fehlt",
+            revision=str(aktuell.revision_nr),
+        )
+    return True
 
 
 def _nach_rang(auftraege) -> list[Auftrag]:
@@ -1861,11 +1900,37 @@ def ist_faellig(auftrag: Auftrag) -> bool:
     )
 
 
+def verstummt(auftrag: Auftrag) -> dict | None:
+    """Auftrag in Arbeit, dessen Chat beendet ist oder seit ``STILL_STUNDEN`` nichts gemeldet hat.
+    Schweigen beweist nicht, dass der Chat weg ist; darum wird nur angezeigt, nichts geändert.
+    ``stand`` ist die letzte Meldung des Bearbeiters, ohne Antworten und ohne den Ende-Vermerk."""
+    if auftrag.zustand != Auftrag.IN_ARBEIT or auftrag.bearbeiter_bindung_id is None:
+        return None  # Bearbeitet Fred selbst, gibt es keinen Chat, der schweigen könnte.
+    zeiten = [auftrag.zuletzt_gemeldet_am, auftrag.uebernommen_am]
+    zuletzt = max((z for z in zeiten if z), default=auftrag.aktualisiert_am)
+    ende = auftrag.meldungen.filter(art=Meldung.SITZUNGSENDE, historisch=False).first()
+    beendet = ende is not None and ende.zeitpunkt >= zuletzt
+    if not beendet:
+        # Auch Freds Antwort startet die Frist neu: Die Wartezeit davor lag bei ihm, nicht beim
+        # Chat. Ist der Chat schon beendet, ändert seine Antwort daran nichts.
+        antwort = auftrag.meldungen.filter(art=Meldung.ANTWORT).first()
+        if antwort is not None:
+            zuletzt = max(zuletzt, antwort.zeitpunkt)
+        if timezone.now() - zuletzt < timedelta(hours=STILL_STUNDEN):
+            return None
+    stand = (
+        auftrag.meldungen.filter(historisch=False)
+        .exclude(art__in=(Meldung.ANTWORT, Meldung.SITZUNGSENDE))
+        .first()
+    )
+    return {"seit": zuletzt, "beendet": beendet, "stand": stand}
+
+
 def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Was in diesem Projekt auf Fred wartet. Zuoberst jeder offene Eintrag ab seinem Termin, der
     älteste Termin zuerst, in jedem Zustand. Danach blockierte Aufträge (Rückfrage, Hindernis,
-    Fehler) und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort fehlt. Entwürfe in
-    Planung warten ohne Termin auf einen Chat, nicht auf ihn."""
+    Fehler), verstummte Aufträge und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort
+    fehlt. Entwürfe in Planung warten ohne Termin auf einen Chat, nicht auf ihn."""
     eintraege = _eintraege_im_modul(projekt, modul)
     faellige = list(
         eintraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
@@ -1886,4 +1951,12 @@ def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftra
             offene = [p for p in freigabepruefung(a) if not p.erfuellt]
             if all(p.arbeitsort_wahl for p in offene):
                 entwuerfe.append(a)
-    return faellige + blockiert + entwuerfe
+    verstummte = [
+        a
+        for a in eintraege.filter(zustand=Auftrag.IN_ARBEIT)
+        .exclude(pk__in=[f.pk for f in faellige])
+        .select_related("projekt", "modul")
+        .order_by("id")
+        if verstummt(a)
+    ]
+    return faellige + blockiert + verstummte + entwuerfe

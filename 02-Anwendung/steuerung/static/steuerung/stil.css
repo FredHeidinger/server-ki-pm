@@ -205,7 +205,7 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .eintragtitel { margin: 4px 0; font-weight: 600; } .eintragtitel a { color: var(--text); text-decoration: none; }
 .eintragtext { margin: 2px 0 8px; color: var(--gedaempft); }
 .eintragaktionen { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.eintrag-faellig { border-left-color: var(--warn-linie); }
+.eintrag-faellig, .eintrag-still { border-left-color: var(--warn-linie); }
 .naechste { padding-left: 22px; }
 .naechste li { overflow-wrap: anywhere; }
 .eintrag-frage { border-left-color: var(--akzent); }

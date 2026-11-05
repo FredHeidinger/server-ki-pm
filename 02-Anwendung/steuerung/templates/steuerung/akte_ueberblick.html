@@ -16,16 +16,17 @@
       <p class="gedaempft klein">Lässt du das Feld leer, gilt der Text so, wie er dasteht.</p>
     </li>
     {% else %}
-    <li class="eintrag {% if w.faellig %}eintrag-faellig{% elif w.a.zustand == 'BLOCKIERT' %}eintrag-blockade{% else %}eintrag-freigabe{% endif %}">
-      <div class="eintragkopf"><span class="eintragart">{{ w.a|faellig_marke }} {% if w.faellig %}{{ w.a.get_zustand_display }}{% elif w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><span class="eintragzeit">{{ w.a.aktualisiert_am|date:"d.m. H:i" }}</span></div>
+    <li class="eintrag {% if w.faellig %}eintrag-faellig{% elif w.a.zustand == 'BLOCKIERT' %}eintrag-blockade{% elif w.still %}eintrag-still{% else %}eintrag-freigabe{% endif %}">
+      <div class="eintragkopf"><span class="eintragart">{{ w.a|faellig_marke }} {% if w.still %}{% if w.still.beendet %}Chat beendet{% else %}Keine Meldung{% endif %}{% elif w.faellig %}{{ w.a.get_zustand_display }}{% elif w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><span class="eintragzeit">{% if w.still %}{{ w.still.seit|date:"d.m. H:i" }}{% else %}{{ w.a.aktualisiert_am|date:"d.m. H:i" }}{% endif %}</span></div>
       <p class="eintragtitel"><a href="{% url 'auftrag_detail' auftrag_id=w.a.pk %}"><span class="nr">{{ w.a.nummer }}</span> {{ w.a.titel }}</a></p>
+      {% if w.still %}<p class="eintragtext"><strong>Letzter Stand{% if w.still.stand %} vom {{ w.still.stand.zeitpunkt|date:"d.m. H:i" }}{% endif %}:</strong> {% if w.still.stand %}{{ w.still.stand.text|linebreaksbr }}{% else %}Der Chat hat noch nichts gemeldet.{% endif %}</p>{% endif %}
       <div class="eintragaktionen">{% include "steuerung/hauptknopf.html" with a=w.a h=w.h ort="eingang" zurueck=request.path %}{% if w.faellig %}{% include "steuerung/faellig_form.html" with a=w.a ort="eingang" zurueck=request.path %}{% endif %}</div>
     </li>
     {% endif %}
   {% endfor %}
   </ul>
   {% else %}
-  <p class="gedaempft">Nichts. Fälliges, offene Entscheidungen und Fragen, blockierte Aufträge und Entwürfe zum Freigeben erscheinen hier.</p>
+  <p class="gedaempft">Nichts. Fälliges, offene Entscheidungen und Fragen, blockierte und verstummte Aufträge und Entwürfe zum Freigeben erscheinen hier.</p>
   {% endif %}
 </section>
 

@@ -250,16 +250,31 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
         gruende = ", ".join(p.text for p in offen)
         satz = f"Freigeben noch nicht möglich ({gruende}). Was fehlt, steht unten unter „Freigabe“."
         return {"art": "hinweis", "satz": satz, "kurz": "Freigabe noch nicht möglich"}
+    termin = "Der Termin ist da. Verschiebe oder entferne ihn, sonst wartet er weiter auf dich."
+    bei = auftrag.bearbeiter_name or "einem Chat"
+    still = dienst.verstummt(auftrag)
+    if still:
+        zeit = timezone.localtime(still["seit"]).strftime("%d.%m. %H:%M")
+        vorn = (
+            "Der Chat ist beendet, ein Ergebnis fehlt."
+            if still["beendet"]
+            else f"Seit {zeit} keine Meldung; ob der Chat noch läuft, weiß KI-PM nicht."
+        )
+        satz = (
+            f"{vorn} Soll es weitergehen, sag einem neuen Chat in {bei}: "
+            f"„Mach bei {auftrag.nummer} weiter.“"
+        )
+        if dienst.ist_faellig(auftrag):
+            satz = f"{satz} {termin}"
+        kurz = "Chat beendet" if still["beendet"] else "keine Meldung"
+        return {"art": "hinweis", "satz": satz, "kurz": kurz}
     if dienst.ist_faellig(auftrag):
         # Vor „nichts zu tun“: Ein fälliger Eintrag bleibt in „Wartet auf dich“.
-        satz = "Der Termin ist da. Verschiebe oder entferne ihn, sonst wartet er weiter auf dich."
-        return {"art": "hinweis", "satz": satz, "kurz": ""}
+        return {"art": "hinweis", "satz": termin, "kurz": ""}
     if z == Auftrag.FREIGEGEBEN:
         satz = "Freigegeben: Ein Chat übernimmt ihn mit „weiter“. Für dich ist nichts zu tun."
     elif z == Auftrag.IN_ARBEIT:
-        satz = (
-            f"In Arbeit bei {auftrag.bearbeiter_name or 'einem Chat'}. Für dich ist nichts zu tun."
-        )
+        satz = f"In Arbeit bei {bei}. Für dich ist nichts zu tun."
     elif z == Auftrag.ERLEDIGT:
         satz = "Erledigt. Passt etwas nicht, lege über „+ Neu“ ein Issue an."
     else:
@@ -272,7 +287,12 @@ def wartet_eintraege(projekt: Projekt) -> list[dict]:
     return [
         {"e": x}
         if isinstance(x, Entscheidung)
-        else {"a": x, "h": hauptaktion(x), "faellig": dienst.ist_faellig(x)}
+        else {
+            "a": x,
+            "h": hauptaktion(x),
+            "faellig": dienst.ist_faellig(x),
+            "still": dienst.verstummt(x),
+        }
         for x in akte.wartet_liste(projekt)
     ]
 
