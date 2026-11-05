@@ -122,7 +122,7 @@ def test_ergebnis_erledigt_ohne_abnahme_in_oberflaeche(
     board = owner_client.get(
         reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
     ).content.decode()
-    assert 'id="gruppe-erledigt"' in board and "Erledigt" in board
+    assert 'id="spalte-erledigt"' in board and 'id="spalte-blockiert"' in board
     assert "Zur Prüfung" not in board and ">Prüfung<" not in board
 
 
@@ -239,11 +239,13 @@ def test_verlauf_filter(owner_client, projekt, freigegeben):
     assert "Freigegeben" in seite and "Projekt registriert" not in seite
 
 
-def test_zeilen_und_projektzeilen_rendern(owner_client, projekt, freigegeben):
+def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
     url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
     board = owner_client.get(url).content.decode()
-    assert 'id="gruppe-frei"' in board and freigegeben.nummer in board and "Freigegeben" in board
+    assert 'class="board"' in board and freigegeben.nummer in board and "Freigegeben" in board
     assert 'class="reiter"' in board
+    liste = owner_client.get(url + "?ansicht=liste").content.decode()
+    assert "<table" in liste and freigegeben.nummer in liste
     auswahl = owner_client.get(reverse("projekte")).content.decode()
     assert "projektwahl" in auswahl and projekt.name in auswahl
     assert "1 offen · <span>0 wartet auf dich</span> · Version unbekannt" in auswahl
@@ -395,8 +397,8 @@ def test_neu_menue_issues_und_filter(owner_client, akteur, projekt):
     issues = owner_client.get(url + "?ansicht=liste&art=issue").content.decode()
     assert "Absturz beim Speichern" in issues and "Export nach CSV" not in issues
     auftraege = owner_client.get(url + "?art=auftrag").content.decode()
-    assert "Export nach CSV" in auftraege.split('class="zeilenliste"')[1]
-    assert "Absturz beim Speichern" not in auftraege
+    assert "Export nach CSV" in auftraege.split('class="board"')[1]
+    assert "Absturz beim Speichern" not in auftraege.split('class="board"')[1]
 
 
 def test_module_in_einstellungen_und_filter(owner_client, akteur, projekt):
@@ -431,7 +433,10 @@ def test_module_in_einstellungen_und_filter(owner_client, akteur, projekt):
         reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
         + "?ansicht=liste&modul=kern"
     ).content.decode()
-    assert "Absturz" in liste and "Ohne Modul" not in liste
+    assert (
+        "Absturz" in liste
+        and "Ohne Modul" not in liste.split("modulleiste")[-1].split("</nav>", 1)[1]
+    )
 
 
 def test_assistent_darf_module_pflegen(akteur, projekt):

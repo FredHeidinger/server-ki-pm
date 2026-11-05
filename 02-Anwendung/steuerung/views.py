@@ -194,41 +194,32 @@ def _projekt_kontext(projekt: Projekt, reiter: str) -> dict:
     return {"projekt": projekt, "reiter": reiter}
 
 
-GRUPPEN = [
-    ("blockiert", "Blockiert", Auftrag.BLOCKIERT),
-    ("arbeit", "In Arbeit", Auftrag.IN_ARBEIT),
-    ("frei", "Freigegeben", Auftrag.FREIGEGEBEN),
-    ("entwurf", "Entwurf", Auftrag.ENTWURF),
-    ("erledigt", "Erledigt", Auftrag.ERLEDIGT),
+SPALTEN = [
+    ("issues", "Issues", None, ()),
+    ("entwurf", "Entwurf", Auftrag.ENTWURF, (Auftrag.ENTWURF,)),
+    ("freigegeben", "Freigegeben", Auftrag.FREIGEGEBEN, (Auftrag.FREIGEGEBEN,)),
+    ("arbeit", "In Arbeit", Auftrag.IN_ARBEIT, (Auftrag.IN_ARBEIT,)),
+    ("blockiert", "Blockiert", Auftrag.BLOCKIERT, (Auftrag.BLOCKIERT,)),
+    ("erledigt", "Erledigt", Auftrag.ERLEDIGT, (Auftrag.ERLEDIGT,)),
 ]
 PRIO_RANG = dienst.PRIO_RANG
 
 
-def _gruppen(zeilen: list[dict], *, alle_erledigten: bool) -> list[dict]:
-    """Zeilen nach Zustand; leere Gruppen fallen weg. Erledigte nur die letzten zehn, außer wenn
-    genau nach ihnen gefiltert wird."""
-    gruppen = []
-    for klasse, titel, zustand in GRUPPEN:
-        teil = [z for z in zeilen if z["a"].zustand == zustand]
-        if not teil:
-            continue
-        anzahl = len(teil)
-        if zustand == Auftrag.ERLEDIGT:
-            teil.sort(key=lambda z: -z["a"].pk)
-            if not alle_erledigten:
-                teil = teil[:10]
+def _spalten(auftraege) -> list[dict]:
+    """Aufträge auf die Board-Spalten verteilen; Erledigte nur die letzten zehn."""
+    spalten = []
+    for klasse, titel, haupt, zustaende in SPALTEN:
+        # Offene Issues haben ihre eigene Spalte; erledigte stehen bei den Erledigten.
+        offen_issue = [a for a in auftraege if a.typ == Auftrag.TYP_ISSUE and not a.ist_endzustand]
+        if klasse == "issues":
+            karten = [a for a in offen_issue if a.zustand != Auftrag.ABGEBROCHEN]
         else:
-            teil.sort(key=lambda z: (PRIO_RANG[z["a"].prioritaet], -z["a"].pk))
-        gruppen.append(
-            {
-                "klasse": klasse,
-                "titel": titel,
-                "zeilen": teil,
-                "anzahl": anzahl,
-                "gekuerzt": len(teil) < anzahl,
-            }
-        )
-    return gruppen
+            karten = [a for a in auftraege if a.zustand in zustaende and a not in offen_issue]
+        karten.sort(key=lambda a: (PRIO_RANG[a.prioritaet], -a.pk))
+        if haupt == Auftrag.ERLEDIGT:
+            karten = sorted(karten, key=lambda a: -a.pk)[:10]
+        spalten.append({"klasse": klasse, "titel": titel, "hauptzustand": haupt, "karten": karten})
+    return spalten
 
 
 def _reifegrad(auftrag: Auftrag) -> str:
@@ -241,9 +232,9 @@ def _reifegrad(auftrag: Auftrag) -> str:
 
 
 def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
-    """Der eine Knopf, der den Auftrag jetzt weiterbringt; gleich in „Wartet auf dich“, in der
-    Zeile der Auftragsliste und im Auftragskopf. Ohne möglichen Knopf ein Satz: warum und was zu tun
-    ist (``kurz`` für die Zeile)."""
+    """Der eine Knopf, der den Auftrag jetzt weiterbringt; gleich in „Wartet auf dich“, auf der
+    Board-Karte und im Auftragskopf. Ohne möglichen Knopf ein Satz: warum und was zu tun ist
+    (``kurz`` für die Karte)."""
     z = auftrag.zustand
     if z == Auftrag.BLOCKIERT:
         frage = auftrag.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
@@ -314,7 +305,9 @@ def wartet_eintraege(projekt: Projekt) -> list[dict]:
 
 
 def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> HttpResponse:
-    """Aufträge als Zeilen, nach Zustand gruppiert, mit Filtern."""
+    """Board oder Liste mit Filtern."""
+    ansicht = "liste" if request.GET.get("ansicht") == "liste" else "board"
+    kontext["ansicht"] = ansicht
     art = request.GET.get("art", "")
     if art in dict(Auftrag.TYPEN):
         liste = liste.filter(typ=art)
@@ -323,6 +316,13 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     if filter_:
         liste = liste.filter(**filter_)
     kontext.update(auswahl)
+    if ansicht == "board":
+        alle = list(liste)
+        for a in alle:
+            a.haupt = hauptaktion(a)
+        kontext["spalten"] = _spalten(alle)
+        kontext["abgebrochen"] = sum(1 for a in alle if a.zustand == Auftrag.ABGEBROCHEN)
+        return render(request, vorlage, kontext)
     zustand = request.GET.get("zustand", "")
     if zustand == "offen":
         liste = liste.exclude(zustand__in=Auftrag.ENDZUSTAENDE)
@@ -336,14 +336,13 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     reifegrad = request.GET.get("reifegrad", "")
     zeilen = []
     for a in liste:
-        if reifegrad and not _reifegrad(a).startswith(reifegrad):
+        stufe = _reifegrad(a)
+        if reifegrad and not stufe.startswith(reifegrad):
             continue
-        a.haupt = hauptaktion(a)
-        zeilen.append({"a": a})
+        zeilen.append({"a": a, "reifegrad": stufe})
     kontext.update(
         {
-            "gruppen": _gruppen(zeilen, alle_erledigten=zustand == Auftrag.ERLEDIGT),
-            "abgebrochen": [z for z in zeilen if z["a"].zustand == Auftrag.ABGEBROCHEN],
+            "zeilen": zeilen,
             "zustaende": Auftrag.ZUSTAENDE,
             "filter": {"zustand": zustand, "bearbeiter": bearbeiter, "reifegrad": reifegrad},
             "bearbeiter_namen": sorted(

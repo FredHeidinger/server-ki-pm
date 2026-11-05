@@ -1,10 +1,18 @@
 {% load steuerung_extras %}
 <div class="werkzeuge umschalter-zeile">
+  <a class="umschalter {% if ansicht == 'board' %}aktiv{% endif %}" href="{% filterlink ansicht='' %}">Board</a>
+  <a class="umschalter {% if ansicht == 'liste' %}aktiv{% endif %}" href="{% filterlink ansicht='liste' %}">Liste</a>
+  <span class="trenner" aria-hidden="true"></span>
   <a class="umschalter {% if not art %}aktiv{% endif %}" href="{% filterlink art='' %}">Alles</a>
   <a class="umschalter {% if art == 'auftrag' %}aktiv{% endif %}" href="{% filterlink art='auftrag' %}">Aufträge</a>
   <a class="umschalter {% if art == 'issue' %}aktiv{% endif %}" href="{% filterlink art='issue' %}">Issues</a>
 </div>
+{% if ansicht == 'board' %}
+  {% include "steuerung/board.html" with spalten=spalten %}
+  {% if abgebrochen %}<p class="gedaempft">{{ abgebrochen }} abgebrochene Aufträge, sichtbar in der Listenansicht.</p>{% endif %}
+{% else %}
 <form method="get" class="filterzeile">
+  <input type="hidden" name="ansicht" value="liste">
   <input type="hidden" name="art" value="{{ art }}">
   <input type="hidden" name="modul" value="{{ modul }}">
   <label>Zustand
@@ -31,19 +39,26 @@
   </label>
   <noscript><button type="submit" class="knopf zweit">Filtern</button></noscript>
 </form>
-{% for g in gruppen %}
-<section class="zeilengruppe" aria-labelledby="gruppe-{{ g.klasse }}">
-  <h3 id="gruppe-{{ g.klasse }}">{{ g.titel }} <span class="anzahl">{{ g.anzahl }}</span></h3>
-  <ul class="zeilenliste">{% for z in g.zeilen %}{% include "steuerung/auftrag_zeile.html" %}{% endfor %}</ul>
-  {% if g.gekuerzt %}<p class="gedaempft klein"><a href="{% filterlink zustand='ERLEDIGT' %}">Alle {{ g.anzahl }} erledigten anzeigen</a></p>{% endif %}
-</section>
-{% endfor %}
-{% if abgebrochen %}
-<details class="zeilengruppe" id="gruppe-abgebrochen"{% if filter.zustand == "ABGEBROCHEN" %} open{% endif %}>
-  <summary>Abgebrochen <span class="anzahl">{{ abgebrochen|length }}</span></summary>
-  <ul class="zeilenliste">{% for z in abgebrochen %}{% include "steuerung/auftrag_zeile.html" %}{% endfor %}</ul>
-</details>
-{% endif %}
-{% if not gruppen and not abgebrochen %}
+{% if zeilen %}
+<table>
+  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col" class="nur-mittel">Modul</th><th scope="col" class="nur-breit">Planung</th><th scope="col">Zustand</th><th scope="col" class="nur-breit">Bearbeiter</th><th scope="col" class="nur-mittel">Prio</th><th scope="col" class="nur-breit">Rev</th><th scope="col" class="nur-breit">Letzte Meldung</th></tr></thead>
+  <tbody>
+  {% for z in zeilen %}
+    <tr>
+      <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
+      <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a> {{ z.a|faellig_marke }}</td>
+      <td class="nur-mittel">{{ z.a.modul.name|default:"–" }}</td>
+      <td class="nur-breit">{{ z.reifegrad|default:"–" }}</td>
+      <td>{{ z.a.zustand|zustand }}</td>
+      <td class="nur-breit">{{ z.a.bearbeiter_name|default:"–" }}</td>
+      <td class="nur-mittel">{{ z.a.prioritaet }}</td>
+      <td class="nur-breit">{{ z.a.revision_nr }}</td>
+      <td class="nur-breit">{% if z.a.zuletzt_gemeldet_am %}{{ z.a.zuletzt_gemeldet_am|date:"d.m. H:i" }}{% else %}–{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
 <div class="leer">Nichts für diese Auswahl. Neues legst du mit „+ Neu“ oben rechts an.</div>
+{% endif %}
 {% endif %}

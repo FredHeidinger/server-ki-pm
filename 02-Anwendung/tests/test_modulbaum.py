@@ -206,9 +206,9 @@ def test_projektauswahl_feste_plaetze_und_bereiche_einmal(owner_client, akteur, 
     akte.profil_bearbeiten(akteur, projekt, erwartete_revision=None, phase="Aufbau", zweck="Z")
     dienst.projekt_registrieren(akteur, kennung="ohne-zweck", name="Ohne Zweck")
     seite = owner_client.get(reverse("projekte")).content.decode()
-    assert seite.count('class="projektzeile"') == 2
-    assert seite.count('class="kuerzel projektzeile-kuerzel"') == 2
-    assert '<span class="chip">Aufbau</span>' in seite
+    assert seite.count('class="projektwahl-karte"') == 2
+    assert seite.count('class="kuerzel projektwahl-kuerzel"') == 2
+    assert "Phase –" in seite and '<span class="chip projektwahl-phase">Aufbau</span>' in seite
     assert "Zweck noch nicht erfasst." in seite
     stil = Path(__file__).parents[1] / "steuerung" / "static" / "steuerung" / "stil.css"
     assert "@media (min-width: 901px) { .reiter { display: none; } }" in stil.read_text(

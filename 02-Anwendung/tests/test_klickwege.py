@@ -221,22 +221,22 @@ def test_auftragskopf_steht_vor_dem_inhalt(owner_client, akteur, projekt):
         reverse("auftrag_detail", kwargs={"auftrag_id": entwurf.pk})
     ).content.decode()
     assert html.index(">Freigeben</button>") < html.index('id="auftrag"')
-    assert html.index("Zurück zu den Aufträgen") < html.index('class="box auftragskopf"')
+    assert html.index("Zurück zum Board") < html.index('class="box auftragskopf"')
 
 
 # --- Startseite, Bereiche, Überblick, Board, Verlauf, „+ Neu“ -----------------------------
 
 
-def test_startseite_projektzeilen(owner_client, akteur, projekt, projekt_b, bindung):
+def test_startseite_projektkarten_mit_zeile(owner_client, akteur, projekt, projekt_b, bindung):
     arbeitspaket(akteur, projekt)
     _blockiert(akteur, projekt, bindung)
     dienst.wunsch_erfassen(akteur, projekt, titel="Idee", beschreibung="b")
     html = owner_client.get(reverse("start")).content.decode()
-    assert html.count('class="projektzeile"') == 2
+    assert html.count('class="projektwahl-karte"') == 2
     assert '3 offen · <span class="wartet">2 wartet auf dich</span> · Version unbekannt' in html
     assert "0 offen · <span>0 wartet auf dich</span> · Version unbekannt" in html
-    zeile = html.split(f'title="{projekt.name}"')[1].split("</a>")[0]
-    assert projekt.kuerzel in zeile and projekt.name in zeile
+    karte = html.split(f'title="{projekt.name}"')[1].split("</a>")[0]
+    assert projekt.kuerzel in karte and "Phase" in karte
 
 
 def test_seitenleiste_vier_bereiche_und_einstellungen(owner_client, projekt):
@@ -283,15 +283,20 @@ def test_zuletzt_erledigt_hoechstens_fuenf(owner_client, akteur, projekt):
     assert erledigt.count("<li>") == 5
 
 
-def test_gruppen_und_abgebrochene_zugeklappt(owner_client, akteur, projekt):
+def test_board_spalten_und_abgebrochene_nur_in_liste(owner_client, akteur, projekt):
     weg = dienst.wunsch_erfassen(akteur, projekt, titel="Verworfen", beschreibung="b")
     dienst.auftrag_abbrechen(akteur, weg, "nicht nötig")
     url = _projekt_url(projekt, "projekt_auftraege")
     board = owner_client.get(url).content.decode()
-    assert "Verworfen" in board.split('id="gruppe-abgebrochen"')[1]
-    assert "Verworfen" not in board.split('id="gruppe-abgebrochen"')[0]
+    spalten = [
+        board.index(f'id="spalte-{k}"')
+        for k in ("entwurf", "freigegeben", "arbeit", "blockiert", "erledigt")
+    ]
+    assert spalten == sorted(spalten)
+    assert "Verworfen" not in board.split('class="board"')[1]
+    assert "Verworfen" in owner_client.get(url + "?ansicht=liste").content.decode()
     # Modulbaum links als Filter
-    assert 'class="baumspalte"' in board and "Gesamtes Projekt" in board
+    assert 'class="modulleiste"' in board and "Alle Module" in board
 
 
 def test_verlauf_neuestes_oben_und_filter_nach_art(owner_client, akteur, projekt):

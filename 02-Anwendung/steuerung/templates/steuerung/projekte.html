@@ -17,12 +17,10 @@
 <ul class="projektwahl">
 {% for p in projekte %}
   <li>
-    <a class="projektzeile" href="{% url 'projekt_detail' kennung=p.kennung %}" title="{{ p.name }}">
-      <strong class="projektwahl-name">{{ p.name }}</strong>
-      <span class="kuerzel projektzeile-kuerzel">{{ p.kuerzel }}</span>
-      {% if p.phase %}<span class="chip">{{ p.phase }}</span>{% endif %}
-      <span class="projektzeile-zweck{% if not p.zweck and not p.beschreibung %} leer-text{% endif %}">{% if p.zweck %}{{ p.zweck }}{% elif p.beschreibung %}{{ p.beschreibung }}{% else %}Zweck noch nicht erfasst.{% endif %}</span>
-      <span class="projektzeile-stand">{{ p.offen }} offen · <span{% if p.wartet %} class="wartet"{% endif %}>{{ p.wartet }} wartet auf dich</span> · {% if p.version == "nicht aktuell" %}<span class="wartet">Version nicht aktuell</span>{% else %}Version {{ p.version }}{% endif %}</span>
+    <a class="projektwahl-karte" href="{% url 'projekt_detail' kennung=p.kennung %}" title="{{ p.name }}">
+      <span class="projektwahl-kopf"><strong class="projektwahl-name">{{ p.name }}</strong><span class="kuerzel projektwahl-kuerzel">{{ p.kuerzel }}</span>{% if p.phase %}<span class="chip projektwahl-phase">{{ p.phase }}</span>{% else %}<span class="projektwahl-phase gedaempft klein">Phase –</span>{% endif %}</span>
+      <span class="projektwahl-zweck{% if not p.zweck and not p.beschreibung %} leer-text{% endif %}">{% if p.zweck %}{{ p.zweck }}{% elif p.beschreibung %}{{ p.beschreibung }}{% else %}Zweck noch nicht erfasst.{% endif %}</span>
+      <span class="projektwahl-zeile">{{ p.offen }} offen · <span{% if p.wartet %} class="wartet"{% endif %}>{{ p.wartet }} wartet auf dich</span> · {% if p.version == "nicht aktuell" %}<span class="wartet">Version nicht aktuell</span>{% else %}Version {{ p.version }}{% endif %}</span>
     </a>
   </li>
 {% endfor %}

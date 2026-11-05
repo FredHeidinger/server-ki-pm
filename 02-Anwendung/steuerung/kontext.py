@@ -51,13 +51,59 @@ def modulwahl(projekt: Projekt, wert: str) -> tuple[dict | None, dict]:
             filter_ = {"modul_id__in": dienst.modul_teilbaum(gewaehlt)}
         else:
             wert = ""
-    offen = set(dienst._vorfahren(gewaehlt)) if gewaehlt else set()
     return filter_, {
         "baum": baum,
         "modul": wert,
         "modul_gewaehlt": gewaehlt,
-        "baum_offen": offen,
+        "modul_reihen": _modul_reihen(baum, gewaehlt) if baum else [],
     }
+
+
+def _modul_eintrag(name: str, kennung: str, zahlen: dict, im_pfad: bool = False) -> dict:
+    """Ein Feld der Modulleiste: die Zahl zählt Aufträge und Issues, der Titel sagt es in Worten."""
+    teile = [
+        f"{zahlen[schluessel]} {einzahl if zahlen[schluessel] == 1 else mehrzahl}"
+        for schluessel, einzahl, mehrzahl in (
+            ("auftraege", "Auftrag", "Aufträge"),
+            ("issues", "Issue", "Issues"),
+        )
+        if zahlen[schluessel]
+    ]
+    return {
+        "name": name,
+        "kennung": kennung,
+        "zahl": zahlen["auftraege"] + zahlen["issues"],
+        "titel": ", ".join(teile) or "keine Einträge",
+        "im_pfad": im_pfad,
+    }
+
+
+def _modul_reihen(baum: dict, gewaehlt) -> list[list[dict]]:
+    """Erste Reihe: alle Hauptmodule. Untermodule erscheinen erst, wenn ihr Modul gewählt ist."""
+    from . import dienst
+
+    pfad = set(dienst._vorfahren(gewaehlt))
+
+    def felder(knoten):
+        return [
+            _modul_eintrag(k.modul.name, k.modul.kennung, k.zahlen, k.modul.pk in pfad)
+            for k in knoten
+        ]
+
+    reihen = [
+        [
+            _modul_eintrag("Alle Module", "", baum["gesamt"]),
+            *felder(baum["knoten"]),
+            _modul_eintrag("Ohne Modul", "ohne", baum["projektweit"]),
+        ]
+    ]
+    knoten = baum["knoten"]
+    while True:
+        offen = next((k for k in knoten if k.modul.pk in pfad and k.kinder), None)
+        if offen is None:
+            return reihen
+        reihen.append(felder(offen.kinder))
+        knoten = offen.kinder
 
 
 def projektfilter(request: HttpRequest) -> dict:

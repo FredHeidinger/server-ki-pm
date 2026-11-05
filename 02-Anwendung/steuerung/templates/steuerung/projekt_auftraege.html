@@ -1,7 +1,6 @@
 {% extends "steuerung/projekt_grund.html" %}
 {% block titel %}{{ projekt.name }} – Aufträge{% endblock %}
 {% block projektinhalt %}
-{% include "steuerung/modulbaum_anfang.html" %}
+{% include "steuerung/modulleiste.html" %}
 {% include "steuerung/auftragsliste.html" %}
-{% include "steuerung/modulbaum_ende.html" %}
 {% endblock %}

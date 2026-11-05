@@ -255,14 +255,3 @@ def test_projektschluessel_erkennt_nicht_ob_eine_nummer_existiert(
         for text in (fremd.nummer, f"{projekt_b.kuerzel}-99", "ZZZ-1")
     ]
     assert antworten[0] == antworten[1] == antworten[2]
-
-
-def test_filter_abgebrochen_zeigt_die_treffer_aufgeklappt(owner_client, akteur, projekt):
-    a = _neu(akteur, projekt, "weg")
-    dienst.auftrag_abbrechen(akteur, a, "Probe")
-    url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
-    assert (
-        'id="gruppe-abgebrochen" open'
-        in owner_client.get(url + "?zustand=ABGEBROCHEN").content.decode()
-    )
-    assert 'id="gruppe-abgebrochen" open' not in owner_client.get(url).content.decode()
