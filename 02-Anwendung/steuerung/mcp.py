@@ -72,7 +72,10 @@ _ORDNER = {
     "type": "string",
     "description": "Dein Arbeitsverzeichnis; bestimmt das Projekt, wenn „projekt“ fehlt",
 }
-_AUFTRAG = {"type": "string", "description": "Auftragsnummer, z. B. A-12"}
+_AUFTRAG = {
+    "type": "string",
+    "description": "Auftragsnummer, z. B. NEX-12; die frühere Schreibweise A-171 gilt weiter",
+}
 _MEILENSTEIN = {
     "type": "string",
     "description": "Meilensteinnummer des eigenen Projekts aus kipm_meilensteine, z. B. M-3",
@@ -101,8 +104,15 @@ WERKZEUGE = [
     ("kipm_projekt", "Ein Projekt mit Modulen und Arbeitsorten", {}, []),
     (
         "kipm_projekt_anlegen",
-        "Neues Projekt anlegen; module je Eintrag „Name“ oder „kennung: Name“",
-        {"name": _TEXT, "kennung": _TEXT, "beschreibung": _TEXT, "module": _LISTE},
+        "Neues Projekt anlegen; module je Eintrag „Name“ oder „kennung: Name“; kuerzel steht vorn "
+        "in den Auftragsnummern (z. B. NEX), leer wird es aus dem Namen gebildet",
+        {
+            "name": _TEXT,
+            "kennung": _TEXT,
+            "kuerzel": _TEXT,
+            "beschreibung": _TEXT,
+            "module": _LISTE,
+        },
         ["name"],
     ),
     (
@@ -523,11 +533,14 @@ def werkzeugliste() -> list[dict]:
 
 
 def _nummer(text) -> int:
-    wert = str(text).strip().upper()
-    wert = wert.removeprefix("A-")
-    if not wert.isdigit():
-        raise _Ungueltig(f"Ungültige Nummer: {text}")
-    return int(wert)
+    try:
+        return dienst.auftrag_id_aus_nummer(text)
+    except dienst.KeinZugriff:
+        # Schlüssel 0 gibt es nie: Eine unbekannte Nummer nimmt denselben Weg wie eine fremde, sonst
+        # verriete die Reihenfolge der Prüfungen, welche Nummern in anderen Projekten existieren.
+        return 0
+    except dienst.DienstFehler as fehler:
+        raise _Ungueltig(str(fehler)) from fehler
 
 
 def _revision(a: dict) -> int:
@@ -581,7 +594,7 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
     if name == "kipm_projekt_anlegen":
         return rufe(
             reverse("api_projekt_anlegen"),
-            _felder(a, ("name", "kennung", "beschreibung", "module")),
+            _felder(a, ("name", "kennung", "kuerzel", "beschreibung", "module")),
         )
     if name == "kipm_projekt_archivieren":
         return rufe(reverse("api_projekt_archivieren"), {})

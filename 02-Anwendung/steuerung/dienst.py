@@ -8,7 +8,9 @@ Regeln:
 """
 
 import hashlib
+import re
 import secrets
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -33,6 +35,8 @@ from .models import (
     Projekt,
     Revision,
 )
+
+KUERZEL_MUSTER = re.compile(r"[A-Z][A-Z0-9]{1,7}")
 
 
 class DienstFehler(Exception):
@@ -233,6 +237,37 @@ def muster_ueberschneiden(a: str, b: str) -> bool:
 # --- Projekte, Arbeitsorte, Bindungen -------------------------------------------------------
 
 
+def kuerzel_vorschlag(name: str) -> str:
+    """Kürzel für ein neues Projekt: Anfangsbuchstaben der Wörter, sonst die ersten drei Zeichen;
+    ist es vergeben, wird es länger, zuletzt mit einer Ziffer."""
+    flach = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
+    woerter = re.findall(r"[A-Z0-9]+", flach)
+    zeichen = "".join(woerter) or "P"
+    if not zeichen[0].isalpha():
+        zeichen = "P" + zeichen
+    vorn = "".join(w[0] for w in woerter)[:4] if len(woerter) > 1 else zeichen[:3]
+    belegt = set(Projekt.objects.values_list("kuerzel", flat=True))
+    for kandidat in (vorn, *(zeichen[:n] for n in range(3, min(len(zeichen), 8) + 1))):
+        if KUERZEL_MUSTER.fullmatch(kandidat) and kandidat not in belegt:
+            return kandidat
+    n = 2
+    while f"{zeichen[:5]}{n}" in belegt:
+        n += 1
+    return f"{zeichen[:5]}{n}"
+
+
+def _kuerzel_lesen(kuerzel: str) -> str:
+    kuerzel = kuerzel.strip().upper()
+    if not KUERZEL_MUSTER.fullmatch(kuerzel):
+        raise DienstFehler(
+            "Das Kürzel braucht 2 bis 8 Zeichen: zuerst ein Buchstabe, dann Buchstaben A–Z oder "
+            "Ziffern, z. B. NEX."
+        )
+    if Projekt.objects.filter(kuerzel=kuerzel).exists():
+        raise DienstFehler(f"Das Kürzel „{kuerzel}“ ist bereits vergeben.")
+    return kuerzel
+
+
 def projekt_registrieren(
     akteur: Akteur,
     *,
@@ -240,6 +275,7 @@ def projekt_registrieren(
     name: str,
     beschreibung: str = "",
     module: list[tuple[str, str]] | None = None,
+    kuerzel: str = "",
 ) -> Projekt:
     """Projekt mit optionalen Modulen anlegen. Erteilt keinem Chat Rechte."""
     _planung_erforderlich(akteur, "Projekte registrieren")
@@ -248,10 +284,16 @@ def projekt_registrieren(
         raise DienstFehler("Die Kennung darf nur Buchstaben, Ziffern und Bindestriche enthalten.")
     if not name.strip():
         raise DienstFehler("Der Name darf nicht leer sein.")
+    if Projekt.objects.filter(kennung=kennung).exists():
+        raise DienstFehler(f"Die Kennung „{kennung}“ ist bereits vergeben.")
+    kuerzel = _kuerzel_lesen(kuerzel) if kuerzel.strip() else kuerzel_vorschlag(name)
     try:
         with transaction.atomic():
             projekt = Projekt.objects.create(
-                kennung=kennung, name=name.strip(), beschreibung=beschreibung.strip()
+                kennung=kennung,
+                name=name.strip(),
+                beschreibung=beschreibung.strip(),
+                kuerzel=kuerzel,
             )
             for modul_kennung, modul_name in module or []:
                 Modul.objects.create(projekt=projekt, kennung=modul_kennung, name=modul_name)
@@ -263,8 +305,10 @@ def projekt_registrieren(
                 ereignis="Projekt registriert",
                 anlass=f"{len(module or [])} Modul(e)" if module else "ohne Module",
             )
-    except IntegrityError as fehler:
-        raise DienstFehler(f"Die Kennung „{kennung}“ ist bereits vergeben.") from fehler
+    except IntegrityError as fehler:  # gleichzeitig angelegt
+        raise DienstFehler(
+            f"Die Kennung „{kennung}“ oder das Kürzel „{kuerzel}“ ist bereits vergeben."
+        ) from fehler
     return projekt
 
 
@@ -888,6 +932,29 @@ def bindung_finden(schluessel: str) -> ChatBindung | None:
 # --- Aufträge: Sicht und Reifegrad ----------------------------------------------------------
 
 
+def auftrag_id_aus_nummer(text) -> int:
+    """Der Schlüssel zu NEX-12 oder zur früheren Schreibweise A-171 und 171. Prüft keine Befugnis:
+    Das tut ``auftrag_holen``, und eine unbekannte Nummer verrät nichts über fremde Projekte."""
+    wert = str(text).strip().upper()
+    if wert.isdigit():
+        return int(wert)
+    treffer = re.fullmatch(r"([A-Z][A-Z0-9]{0,7})-(\d+)", wert)
+    if not treffer:
+        raise DienstFehler(f"Ungültige Nummer: {text}. Erwartet wird z. B. NEX-12 oder A-171.")
+    if treffer.group(1) == "A":
+        return int(treffer.group(2))
+    pk = (
+        Auftrag.objects.filter(
+            projekt__kuerzel=treffer.group(1), projekt_nummer=int(treffer.group(2))
+        )
+        .values_list("pk", flat=True)
+        .first()
+    )
+    if pk is None:
+        raise KeinZugriff("Nicht gefunden.")
+    return pk
+
+
 def auftrag_holen(akteur: Akteur, auftrag_id: int) -> Auftrag:
     """Auftrag für den Akteur laden; fremde Projekte sind für Chats nicht vorhanden."""
     auftrag = (
@@ -1139,8 +1206,12 @@ def wunsch_erfassen(
                 + "; zuerst dort nachsehen oder das Anlegen ausdrücklich erzwingen."
             )
     with transaction.atomic():
+        # Die Transaktion hält die Schreibsperre (IMMEDIATE): Zwei Anlagen bekommen nie dieselbe Zahl.
+        Projekt.objects.filter(pk=projekt.pk).update(naechste_nummer=F("naechste_nummer") + 1)
+        nummer = Projekt.objects.values_list("naechste_nummer", flat=True).get(pk=projekt.pk) - 1
         auftrag = Auftrag.objects.create(
             projekt=projekt,
+            projekt_nummer=nummer,
             modul=modul,
             meilenstein=meilenstein,
             faellig=faellig,

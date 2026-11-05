@@ -1,9 +1,9 @@
-{% comment %}Der eine Knopf, der den Auftrag weiterbringt; gleich in „Wartet auf dich“ (ort="eingang"), auf der Board-Karte (ort="karte") und im Auftragskopf (ort="kopf"). Kein Knopf möglich: ein Satz, warum und was zu tun ist; auf der Karte nur kurz.{% endcomment %}
+{% comment %}Der eine Knopf, der den Auftrag weiterbringt; gleich in „Wartet auf dich“ (ort="eingang"), in der Zeile der Auftragsliste (ort="zeile") und im Auftragskopf (ort="kopf"). Kein Knopf möglich: ein Satz, warum und was zu tun ist; in der Zeile nur kurz.{% endcomment %}
 {% if h.art == "freigeben" %}
-<form method="post" action="{% url 'auftrag_aktion' auftrag_id=a.pk aktion='freigeben' %}" class="inline hauptknopf">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><button type="submit" class="knopf{% if ort == 'karte' %} klein{% endif %}">{{ h.text }}</button></form>
+<form method="post" action="{% url 'auftrag_aktion' auftrag_id=a.pk aktion='freigeben' %}" class="inline hauptknopf">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><button type="submit" class="knopf{% if ort == 'zeile' %} klein{% endif %}">{{ h.text }}</button></form>
 {% elif h.art == "antworten" %}
-{% if ort == "karte" %}
-<details class="hauptknopf kartenantwort"><summary class="knopf klein">{{ h.text }}</summary>
+{% if ort == "zeile" %}
+<details class="hauptknopf zeilenantwort"><summary class="knopf klein">{{ h.text }}</summary>
   {% if h.frage %}<p class="eintragtext">{{ h.frage.text|truncatechars:160 }}</p>{% endif %}
   <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Antwort"><button type="submit" class="knopf klein">{{ h.text }}</button></form>
 </details>
@@ -13,8 +13,8 @@
   <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Deine Antwort"><button type="submit" class="knopf">{{ h.text }}</button></form>
 </div>
 {% endif %}
-{% elif ort == "karte" %}
-{% if h.kurz %}<p class="kartenhinweis">{{ h.kurz }}</p>{% endif %}
+{% elif ort == "zeile" %}
+{% if h.kurz %}<p class="zeilenhinweis">{{ h.kurz }}</p>{% endif %}
 {% else %}
 <p class="hinweissatz">{{ h.satz }}{% if h.ort and ort == "eingang" %} <a href="{% url 'auftrag_detail' auftrag_id=a.pk %}#freigabe">Arbeitsort wählen</a>{% endif %}</p>
 {% endif %}

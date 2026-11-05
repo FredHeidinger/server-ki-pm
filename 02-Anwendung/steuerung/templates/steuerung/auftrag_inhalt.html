@@ -1,8 +1,8 @@
 {% load steuerung_extras %}
 <div class="auftrag" id="auftrag-{{ auftrag.pk }}">
-<p class="zurueckzeile"><a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">← Zurück zum Board</a></p>
+<p class="zurueckzeile"><a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">← Zurück zu den Aufträgen</a></p>
 <header class="box auftragskopf" aria-labelledby="titel-{{ auftrag.pk }}">
-  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span>{% if not auftrag.ist_endzustand %} {% if auftrag.faellig %}{{ auftrag|faellig_marke }}{% else %}<span>kein Termin</span>{% endif %}{% endif %}</p>
+  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.projekt_nummer %} <span class="gedaempft klein" title="Frühere Nummer, sie gilt weiter">früher {{ auftrag.alte_nummer }}</span>{% endif %}{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span>{% if not auftrag.ist_endzustand %} {% if auftrag.faellig %}{{ auftrag|faellig_marke }}{% else %}<span>kein Termin</span>{% endif %}{% endif %}</p>
   <h1 class="auftragstitel" id="titel-{{ auftrag.pk }}">{{ auftrag.titel }}</h1>
   <div class="kopfknopf">{% include "steuerung/hauptknopf.html" with a=auftrag h=haupt ort="kopf" %}</div>
   {% if weitere_aktionen or bearbeitbar %}

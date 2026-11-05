@@ -333,6 +333,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
     rev = auftrag.aktuelle_revision
     daten = {
         "nummer": auftrag.nummer,
+        "alte_nummer": auftrag.alte_nummer,
         "id": auftrag.pk,
         "titel": auftrag.titel,
         "projekt": auftrag.projekt.kennung,
@@ -788,6 +789,7 @@ def meilenstein_aendern(request: HttpRequest, daten: dict) -> JsonResponse:
 def _projekt_json(p: Projekt) -> dict:
     return {
         "kennung": p.kennung,
+        "kuerzel": p.kuerzel,
         "name": p.name,
         "beschreibung": p.beschreibung,
         "module": [_modul_json(m) for m in p.module.filter(aktiv=True)],
@@ -832,6 +834,7 @@ def projekt_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         name=name,
         beschreibung=str(daten.get("beschreibung", "")),
         module=dienst.module_aus_text(_liste(daten.get("module"))),
+        kuerzel=str(daten.get("kuerzel", "")),
     )
     return JsonResponse({"ok": True, "projekt": _projekt_json(p)}, status=201)
 
@@ -942,10 +945,9 @@ def arbeitsort_vorschlagen(request: HttpRequest, daten: dict) -> JsonResponse:
     projekt = _projekt_noetig(request)
     auftrag = None
     if daten.get("auftrag"):
-        nr = str(daten["auftrag"]).upper().removeprefix("A-")
-        if not nr.isdigit():
-            raise dienst.DienstFehler("auftrag muss eine Nummer wie A-12 sein.")
-        auftrag = dienst.auftrag_holen(request.akteur, int(nr))
+        auftrag = dienst.auftrag_holen(
+            request.akteur, dienst.auftrag_id_aus_nummer(daten["auftrag"])
+        )
         if auftrag.projekt_id != projekt.pk:
             raise dienst.KeinZugriff("Nicht gefunden.")
     name = str(daten.get("name", "")).strip()
@@ -1140,10 +1142,9 @@ def projektkontext(request: HttpRequest) -> JsonResponse:
     else:
         auftrag = None
         if request.GET.get("auftrag"):
-            nr = request.GET["auftrag"].upper().removeprefix("A-")
-            if not nr.isdigit():
-                raise dienst.DienstFehler("auftrag muss eine Nummer wie A-12 sein.")
-            auftrag = dienst.auftrag_holen(request.akteur, int(nr))
+            auftrag = dienst.auftrag_holen(
+                request.akteur, dienst.auftrag_id_aus_nummer(request.GET["auftrag"])
+            )
         modul = _nach_kennung(Modul, p, request.GET.get("modul"), "Modul")
         k = akte.kontext_erzeugen(request.akteur, p, auftrag=auftrag, modul=modul)
         text = k.teile[0]

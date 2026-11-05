@@ -20,6 +20,9 @@ class Projekt(models.Model):
         help_text="Kurz, eindeutig, unveränderlich, z. B. synth-a",
     )
     name = models.CharField("Name", max_length=120)
+    # Vorn in jeder Auftragsnummer des Projekts, z. B. NEX in NEX-12.
+    kuerzel = models.CharField("Kürzel", max_length=8, unique=True)
+    naechste_nummer = models.PositiveIntegerField("Nächste Auftragsnummer", default=1)
     beschreibung = models.TextField("Beschreibung", blank=True)
     aktiv = models.BooleanField("Aktiv", default=True)
     angelegt_am = models.DateTimeField("Angelegt am", auto_now_add=True)
@@ -266,17 +269,31 @@ class Auftrag(models.Model):
     zuletzt_gemeldet_am = models.DateTimeField(null=True, blank=True)
     angelegt_am = models.DateTimeField(auto_now_add=True)
     aktualisiert_am = models.DateTimeField(auto_now=True)
+    # Zählt je Projekt; vergibt nur dienst.auftrag_anlegen.
+    projekt_nummer = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ["-id"]
         verbose_name = "Auftrag"
         verbose_name_plural = "Aufträge"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["projekt", "projekt_nummer"], name="auftrag_nummer_je_projekt"
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.nummer} {self.titel}"
 
     @property
     def nummer(self) -> str:
+        if self.projekt_nummer is None:
+            return self.alte_nummer
+        return f"{self.projekt.kuerzel}-{self.projekt_nummer}"
+
+    @property
+    def alte_nummer(self) -> str:
+        """Bleibt gültig: Sie steht in Commits, Ergebnissen und Meldungen von früher."""
         return f"A-{self.pk}"
 
     @property

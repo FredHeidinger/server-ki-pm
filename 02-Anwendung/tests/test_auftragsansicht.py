@@ -1,4 +1,4 @@
-"""Auftrag als ganze Seite: „Zurück zum Board“, Kopf mit genau einem passenden Knopf, dann die
+"""Auftrag als ganze Seite: „Zurück zu den Aufträgen“, Kopf mit genau einem passenden Knopf, dann die
 Abschnitte Auftrag, Ergebnis, Verlauf; Bearbeiten und Abbrechen unter „Weitere Aktionen“."""
 
 from django.urls import reverse
@@ -18,7 +18,7 @@ def _kopf(html):
 def test_ganze_seite_mit_abschnitten_und_zurueck(owner_client, akteur, projekt):
     a = arbeitspaket(akteur, projekt)
     html = _seite(owner_client, a)
-    assert "← Zurück zum Board" in html
+    assert "← Zurück zu den Aufträgen" in html
     assert f'href="{reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})}"' in html
     reihenfolge = [html.index(s) for s in ('id="auftrag"', 'id="ergebnis"', 'id="verlauf"')]
     assert reihenfolge == sorted(reihenfolge) and html.index("auftragskopf") < reihenfolge[0]

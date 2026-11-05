@@ -9,16 +9,14 @@
   {% for w in wartet %}
     {% if w.e %}
     <li class="eintrag eintrag-frage">
-      <div class="eintragkopf"><span class="eintragart">Offene Entscheidung</span><span class="eintragzeit">{{ w.e.vorgeschlagen_am|date:"d.m. H:i" }}</span></div>
-      <p class="eintragtitel"><span class="nr">{{ w.e.nummer }}</span> {{ w.e.text|linebreaksbr }}</p>
+      <div class="eintragkopf"><span class="eintragart">Offene Entscheidung</span><span class="eintragtitel"><span class="nr">{{ w.e.nummer }}</span> {{ w.e.text|linebreaksbr }}</span><span class="eintragzeit">{{ w.e.vorgeschlagen_am|date:"d.m. H:i" }}</span></div>
       {% if w.e.warum %}<p class="eintragtext"><strong>Warum:</strong> {{ w.e.warum|linebreaksbr }}</p>{% endif %}
       <form method="post" action="{% url 'entscheidung_antworten' kennung=projekt.kennung nummer=w.e.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="stand" value="{{ w.e.stand }}"><input type="text" name="antwort" aria-label="Antwort zu {{ w.e.nummer }}" placeholder="Deine Antwort"><button type="submit" class="knopf">Antworten</button></form>
       <p class="gedaempft klein">Lässt du das Feld leer, gilt der Text so, wie er dasteht.</p>
     </li>
     {% else %}
     <li class="eintrag {% if w.faellig %}eintrag-faellig{% elif w.a.zustand == 'BLOCKIERT' %}eintrag-blockade{% elif w.still %}eintrag-still{% else %}eintrag-freigabe{% endif %}">
-      <div class="eintragkopf"><span class="eintragart">{{ w.a|faellig_marke }} {% if w.still %}{% if w.still.beendet %}Chat beendet{% else %}Keine Meldung{% endif %}{% elif w.faellig %}{{ w.a.get_zustand_display }}{% elif w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><span class="eintragzeit">{% if w.still %}{{ w.still.seit|date:"d.m. H:i" }}{% else %}{{ w.a.aktualisiert_am|date:"d.m. H:i" }}{% endif %}</span></div>
-      <p class="eintragtitel"><a href="{% url 'auftrag_detail' auftrag_id=w.a.pk %}"><span class="nr">{{ w.a.nummer }}</span> {{ w.a.titel }}</a></p>
+      <div class="eintragkopf"><span class="eintragart">{{ w.a|faellig_marke }} {% if w.still %}{% if w.still.beendet %}Chat beendet{% else %}Keine Meldung{% endif %}{% elif w.faellig %}{{ w.a.get_zustand_display }}{% elif w.a.zustand == "BLOCKIERT" %}Blockiert{% elif w.a.typ == "issue" %}Issue zum Freigeben{% else %}Entwurf zum Freigeben{% endif %}</span><a class="eintragtitel" href="{% url 'auftrag_detail' auftrag_id=w.a.pk %}"><span class="nr">{{ w.a.nummer }}</span> {{ w.a.titel }}</a><span class="eintragzeit">{% if w.still %}{{ w.still.seit|date:"d.m. H:i" }}{% else %}{{ w.a.aktualisiert_am|date:"d.m. H:i" }}{% endif %}</span></div>
       {% if w.still %}<p class="eintragtext"><strong>Letzter Stand{% if w.still.stand %} vom {{ w.still.stand.zeitpunkt|date:"d.m. H:i" }}{% endif %}:</strong> {% if w.still.stand %}{{ w.still.stand.text|linebreaksbr }}{% else %}Der Chat hat noch nichts gemeldet.{% endif %}</p>{% endif %}
       <div class="eintragaktionen">{% include "steuerung/hauptknopf.html" with a=w.a h=w.h ort="eingang" zurueck=request.path %}{% if w.faellig %}{% include "steuerung/faellig_form.html" with a=w.a ort="eingang" zurueck=request.path %}{% endif %}</div>
     </li>

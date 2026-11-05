@@ -45,11 +45,18 @@ class ProjektForm(forms.Form):
         forms.CharField(label="Module", required=False, widget=forms.HiddenInput),
         "Modulname, z. B. Core",
     )
+    kuerzel = forms.CharField(
+        label="Kürzel für die Nummern",
+        max_length=8,
+        required=False,
+        help_text="Steht vorn in jeder Nummer, z. B. NEX in NEX-12. Später nicht mehr änderbar; "
+        "leer lassen, dann wird es aus dem Namen gebildet.",
+    )
     kennung = forms.SlugField(
-        label="Kürzel",
+        label="Kennung für die Adresse",
         max_length=40,
         required=False,
-        help_text="Kurz, ohne Leerzeichen; leer lassen, dann wird es aus dem Namen gebildet.",
+        help_text="Kurz, ohne Leerzeichen; leer lassen, dann wird sie aus dem Namen gebildet.",
     )
 
     def __init__(self, *args, **kwargs):

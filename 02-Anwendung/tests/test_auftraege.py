@@ -36,12 +36,12 @@ def test_chat_legt_wunsch_nur_im_eigenen_projekt_an(bindung, projekt, projekt_b)
 
 def test_doppelter_titel_wird_erkannt(akteur, projekt):
     dienst.wunsch_erfassen(akteur, projekt, titel="Schneller starten", beschreibung="")
-    with pytest.raises(dienst.Konflikt, match="A-1"):
+    with pytest.raises(dienst.Konflikt, match=f"{projekt.kuerzel}-1"):
         dienst.wunsch_erfassen(akteur, projekt, titel="  schneller  STARTEN ", beschreibung="")
     zweiter = dienst.wunsch_erfassen(
         akteur, projekt, titel="Schneller starten", beschreibung="", erzwingen=True
     )
-    assert zweiter.nummer == "A-2"
+    assert zweiter.nummer == f"{projekt.kuerzel}-2"
     assert len(dienst.doppelte_auftraege(projekt, "Schneller starten")) == 2
 
 

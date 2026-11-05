@@ -1,0 +1,10 @@
+{% load steuerung_extras %}<li class="zeile">
+  <a class="zeile-titel" href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}"><span class="nr">{{ z.a.nummer }}</span> {{ z.a.titel }}</a>
+  {% if z.a.typ == "issue" %}<span class="issue">Issue</span>{% endif %}
+  {% if z.a.modul %}<span class="zeile-angabe nur-mittel" title="Modul">{{ z.a.modul.name }}</span>{% endif %}
+  <span class="prio prio-{{ z.a.prioritaet }} zeile-angabe" title="Priorität">{{ z.a.prioritaet }}</span>
+  {{ z.a|faellig_marke }}
+  {% if z.a.bearbeiter_name %}<span class="bearbeiter zeile-angabe nur-breit" title="Bearbeiter">{% if z.a.bearbeiter_bindung_id %}<span class="ki">KI</span>{% else %}👤{% endif %} {{ z.a.bearbeiter_name }}</span>{% endif %}
+  {% if z.a.zuletzt_gemeldet_am %}<span class="zeile-angabe nur-breit" title="Letzte Meldung">{{ z.a.zuletzt_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
+  {% include "steuerung/hauptknopf.html" with a=z.a h=z.a.haupt ort="zeile" zurueck=request.get_full_path %}
+</li>
