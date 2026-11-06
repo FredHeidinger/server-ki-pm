@@ -114,9 +114,9 @@ def w_instanz(akteur, projekt):
 
 @pytest.fixture
 def w_pbindung(w_instanz, projekt):
-    from steuerung.models import WerkbankProjektbindung
+    from tests.werkbank_hilfen import bindung_sichern
 
-    return WerkbankProjektbindung.objects.create(
+    return bindung_sichern(
         instanz=w_instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first()
     )
 

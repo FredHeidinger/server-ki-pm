@@ -17,6 +17,7 @@ from steuerung.models import (
     WerkbankZuweisung,
 )
 from tests.conftest import arbeitspaket
+from tests.werkbank_hilfen import bindung_sichern
 
 pytestmark = pytest.mark.django_db
 
@@ -31,7 +32,7 @@ def instanz(akteur, projekt):
 @pytest.fixture
 def pbindung(instanz, projekt):
     ort = projekt.arbeitsorte.first()
-    return WerkbankProjektbindung.objects.create(instanz=instanz, projekt=projekt, arbeitsort=ort)
+    return bindung_sichern(instanz=instanz, projekt=projekt, arbeitsort=ort)
 
 
 @pytest.fixture

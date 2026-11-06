@@ -120,3 +120,16 @@ def senden(client, instanz, pfad, n):
     return client.post(
         BASIS + pfad, data=json.dumps(n), content_type="application/json", **kopf(instanz)
     )
+
+
+def bindung_sichern(**kw):
+    """Die Projektbindung von Instanz und Projekt mit den angegebenen Werten (``instanz_anlegen``
+    legt sie schon an; ein zweites ``create`` verletzte die Eindeutigkeit)."""
+    from steuerung.models import WerkbankProjektbindung
+
+    suche = {k: kw.pop(k) for k in ("instanz", "projekt")}
+    b, _ = WerkbankProjektbindung.objects.get_or_create(**suche, defaults=kw)
+    for k, v in kw.items():
+        setattr(b, k, v)
+    b.save()
+    return b

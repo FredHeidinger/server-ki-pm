@@ -20,9 +20,9 @@ from steuerung.models import (
     WerkbankEreignis,
     WerkbankInstanz,
     WerkbankOperation,
-    WerkbankProjektbindung,
     WerkbankZuweisung,
 )
+from tests.werkbank_hilfen import bindung_sichern
 
 pytestmark = pytest.mark.django_db
 
@@ -40,9 +40,7 @@ def instanz(akteur, projekt):
 
 @pytest.fixture
 def pbindung(instanz, projekt):
-    return WerkbankProjektbindung.objects.create(
-        instanz=instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first()
-    )
+    return bindung_sichern(instanz=instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first())
 
 
 def _auftrag(projekt, titel="Synthetischer Auftrag", **felder):
@@ -297,7 +295,7 @@ def test_abgleich_zeigt_nur_eigene_erlaubte_und_offene(
     client, akteur, instanz, pbindung, projekt, projekt_b
 ):
     fremde = WerkbankInstanz.objects.create(name="Andere Werkbank")
-    fremd_pb = WerkbankProjektbindung.objects.create(instanz=fremde, projekt=projekt)
+    fremd_pb = bindung_sichern(instanz=fremde, projekt=projekt)
     WerkbankZuweisung.objects.create(
         auftrag=_auftrag(projekt, "fremd"), instanz=fremde, projektbindung=fremd_pb
     )
@@ -428,7 +426,7 @@ def test_fremde_projektbindung_auftrag_ausfuehrung_werkbank_sind_404(
 ):
     q = quelle(instanz, pbindung, auftrag, ausfuehrung)
     fremde = WerkbankInstanz.objects.create(name="Fremd")
-    fremd_pb = WerkbankProjektbindung.objects.create(instanz=fremde, projekt=projekt)
+    fremd_pb = bindung_sichern(instanz=fremde, projekt=projekt)
     for aenderung in (
         {"projektbindung_id": fremd_pb.pk},
         {"projektbindung_id": 999999},
@@ -512,7 +510,7 @@ def test_gleiche_operation_id_je_instanz_getrennt(
     assert post(client, instanz, "ereignisse/", n).status_code == 200
     zweite, schluessel = werkbank.instanz_anlegen(akteur, name="Zweite", projekte=[projekt])
     zweite.klartext = schluessel
-    zweite_pb = WerkbankProjektbindung.objects.create(instanz=zweite, projekt=projekt)
+    zweite_pb = bindung_sichern(instanz=zweite, projekt=projekt)
     a2 = _auftrag(projekt, "zweiter")
     z2 = WerkbankZuweisung.objects.create(auftrag=a2, instanz=zweite, projektbindung=zweite_pb)
     ausf2 = WerkbankAusfuehrung.objects.create(

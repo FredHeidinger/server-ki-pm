@@ -339,3 +339,32 @@ def test_historische_meldung_aendert_weder_zustand_noch_statusversion(
     assert ausf.zustand == "offline" and ausf.statusversion == vorher
     assert WerkbankAusfuehrung.objects.get(pk=ausf.pk).zustand == "offline"
     assert werkbank  # Modul geladen
+
+
+# --- Fund beim Aufschreiben der Probe: ohne Projektbindung gab es kein Zuweisungsziel ----------
+
+
+def test_anlegen_legt_die_projektbindungen_der_erlaubten_projekte_an(akteur, projekt, projekt_b):
+    from steuerung.models import WerkbankProjektbindung
+
+    inst, _ = werkbank.instanz_anlegen(akteur, name="W", projekte=[projekt])
+    bindung = WerkbankProjektbindung.objects.get(instanz=inst)
+    assert bindung.projekt == projekt and bindung.arbeitsort == projekt.arbeitsorte.first()
+    werkbank.instanz_projekte_setzen(akteur, inst, [projekt, projekt_b])
+    assert WerkbankProjektbindung.objects.filter(instanz=inst).count() == 2
+    werkbank.instanz_projekte_setzen(akteur, inst, [projekt])  # nichts geht verloren
+    assert WerkbankProjektbindung.objects.filter(instanz=inst).count() == 2
+    werkbank.instanz_projekte_setzen(akteur, inst, [projekt, projekt_b])
+    assert WerkbankProjektbindung.objects.filter(instanz=inst).count() == 2
+
+
+def test_auftrag_bietet_nach_dem_anlegen_der_werkbank_das_zuweisen_an(
+    owner_client, akteur, projekt, w_instanz
+):
+    from django.urls import reverse
+
+    from tests.conftest import arbeitspaket
+
+    a = arbeitspaket(akteur, projekt)
+    html = owner_client.get(reverse("auftrag_detail", kwargs={"auftrag_id": a.pk})).content.decode()
+    assert "Freigeben und Werkbank zuweisen" in html

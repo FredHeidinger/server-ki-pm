@@ -51,6 +51,17 @@ def _projekte_pruefen(projekte: list[Projekt]) -> list[Projekt]:
     return list(eindeutig.values())
 
 
+def _bindungen_sichern(instanz: WerkbankInstanz, projekte: list[Projekt]) -> None:
+    """Jedes erlaubte Projekt bekommt seine Projektbindung (Ziel einer Zuweisung), mit dem ersten
+    aktiven, bestätigten Arbeitsort des Projekts, falls es einen gibt. Bestehende Bindungen
+    bleiben (Fassung und gemeldete Bereitschaft gehen nicht verloren)."""
+    for projekt in projekte:
+        ort = projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True).order_by("id").first()
+        WerkbankProjektbindung.objects.get_or_create(
+            instanz=instanz, projekt=projekt, defaults={"arbeitsort": ort}
+        )
+
+
 def instanz_anlegen(
     akteur: dienst.Akteur,
     *,
@@ -81,6 +92,7 @@ def instanz_anlegen(
         )
         instanz = WerkbankInstanz.objects.create(name=name.strip(), bindung=bindung)
         instanz.erlaubte_projekte.set(projekte)
+        _bindungen_sichern(instanz, projekte)
         dienst._ereignis(
             akteur,
             projekt=None,
@@ -99,6 +111,7 @@ def instanz_projekte_setzen(
     projekte = _projekte_pruefen(projekte)
     with transaction.atomic():
         instanz.erlaubte_projekte.set(projekte)
+        _bindungen_sichern(instanz, projekte)
         dienst._ereignis(
             akteur,
             projekt=None,
@@ -137,11 +150,12 @@ def instanz_widerrufen(akteur: dienst.Akteur, instanz: WerkbankInstanz, grund: s
 
 
 def instanz_benutzt(instanz: WerkbankInstanz) -> bool:
-    """Hatte die Werkbank Kontakt oder hängen Bindungen, Zuweisungen, Operationen, Ereignisse
-    an ihr, bleibt sie für den Verlauf erhalten."""
+    """Hatte die Werkbank Kontakt, hat sie Bereitschaft gemeldet oder hängen Zuweisungen,
+    Operationen, Ereignisse an ihr, bleibt sie für den Verlauf erhalten (die beim Anlegen
+    erzeugten Projektbindungen allein zählen nicht)."""
     return bool(
         instanz.letzter_kontakt is not None
-        or instanz.projekte.exists()
+        or instanz.projekte.filter(bereit_gemeldet_am__isnull=False).exists()
         or instanz.operationen.exists()
         or instanz.ereignisse.exists()
         or WerkbankZuweisung.objects.filter(instanz=instanz).exists()

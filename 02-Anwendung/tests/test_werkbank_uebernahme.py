@@ -15,10 +15,10 @@ from steuerung.models import (
     Ereignis,
     WerkbankAusfuehrung,
     WerkbankOperation,
-    WerkbankProjektbindung,
     WerkbankZuweisung,
 )
 from tests.conftest import arbeitspaket
+from tests.werkbank_hilfen import bindung_sichern
 
 pytestmark = pytest.mark.django_db
 
@@ -36,9 +36,7 @@ def instanz(akteur, projekt):
 
 @pytest.fixture
 def pbindung(instanz, projekt):
-    return WerkbankProjektbindung.objects.create(
-        instanz=instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first()
-    )
+    return bindung_sichern(instanz=instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first())
 
 
 @pytest.fixture
@@ -132,7 +130,7 @@ def test_nur_der_owner_weist_zu(akteur, entwurf, pbindung, bindung):
 def test_ziel_muss_zum_projekt_gehoeren_und_aktiv_sein(
     akteur, entwurf, pbindung, instanz, projekt_b
 ):
-    fremd = WerkbankProjektbindung.objects.create(
+    fremd = bindung_sichern(
         instanz=instanz, projekt=projekt_b, arbeitsort=projekt_b.arbeitsorte.first()
     )
     with pytest.raises(dienst.DienstFehler):
@@ -205,9 +203,7 @@ def test_neue_revision_beendet_die_freigabe_und_erhoeht_die_fassung(akteur, bere
 
 def test_zielwechsel_erhoeht_fassung_und_nimmt_freigabe_zurueck(akteur, bereit, pbindung, projekt):
     zweite, _ = werkbank.instanz_anlegen(akteur, name="Werkbank 2", projekte=[projekt])
-    ziel2 = WerkbankProjektbindung.objects.create(
-        instanz=zweite, projekt=projekt, arbeitsort=projekt.arbeitsorte.first()
-    )
+    ziel2 = bindung_sichern(instanz=zweite, projekt=projekt, arbeitsort=projekt.arbeitsorte.first())
     z = werkbank.zuweisen(akteur, bereit, ziel2)
     bereit.refresh_from_db()
     assert z.version == 2 and z.projektbindung == ziel2 and z.instanz == zweite
