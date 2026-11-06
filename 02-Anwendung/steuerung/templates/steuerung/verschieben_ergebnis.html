@@ -1,0 +1,17 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Verschoben{% endblock %}
+{% block inhalt %}
+<h1>{{ ergebnis.verschoben|length }} Eintr{{ ergebnis.verschoben|length|pluralize:"ag,äge" }} verschoben</h1>
+{% if ergebnis.reaktiviert %}<p>Wieder aktiv: {{ ergebnis.reaktiviert|join:", " }}. Arbeit wurde dadurch nicht freigegeben.</p>{% endif %}
+<ul class="verschiebeliste">
+{% for v in ergebnis.verschoben %}
+  <li class="box">
+    <p class="verschiebekopf"><a class="id" href="{{ v.adresse }}">{{ v.neu }}</a>{% if v.alt != v.neu %} <span class="gedaempft klein">früher {{ v.alt }}, {{ v.alte_nummer }}</span>{% endif %} <strong>{{ v.titel }}</strong></p>
+    <p class="klein">{{ v.von.text }} → {{ v.nach.text }} · Zustand {{ v.zustand_text }}</p>
+    <ul class="klein folgen">{% for t in v.aenderungen %}<li>{{ t }}</li>{% endfor %}</ul>
+  </li>
+{% endfor %}
+</ul>
+{% if ergebnis.unveraendert %}<p class="gedaempft">Schon am Ziel, unverändert: {{ ergebnis.unveraendert|join:", " }}</p>{% endif %}
+<p><a class="knopf zweit" href="{% if ergebnis.zurueck %}{{ ergebnis.zurueck }}{% else %}{% url 'projekte' %}{% endif %}">Zurück</a></p>
+{% endblock %}

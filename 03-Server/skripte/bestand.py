@@ -21,6 +21,7 @@ TABELLEN = (
     "auftrag",
     "revision",
     "abhaengigkeit",
+    "frueherenummer",
     "meldung",
     "ergebnis",
     "pruefung",

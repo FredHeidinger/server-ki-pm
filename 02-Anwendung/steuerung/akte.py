@@ -809,7 +809,9 @@ def _abschnitte(
             "Nicht-Ziele:\n" + _daten(rev.nicht_ziele or "nicht festgelegt", None),
             "Arbeitsort:\n"
             + _daten(
-                f"{rev.arbeitsort.name} ({rev.arbeitsort.pfad or 'ohne Pfad'})"
+                f"{rev.arbeitsort.name} (früheres Projekt)"
+                if rev.arbeitsort and rev.arbeitsort.projekt_id != auftrag.projekt_id
+                else f"{rev.arbeitsort.name} ({rev.arbeitsort.pfad or 'ohne Pfad'})"
                 if rev.arbeitsort
                 else "nicht festgelegt",
                 None,

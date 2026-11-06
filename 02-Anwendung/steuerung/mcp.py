@@ -63,7 +63,10 @@ ANWEISUNGEN = (
     "Aufträge ordnest du mit meilenstein (z. B. M-3) in kipm_auftrag_anlegen oder kipm_planen zu, "
     "den Fortschritt zählt KI-PM selbst. Termine setzt du mit faellig (JJJJ-MM-TT) in "
     "kipm_auftrag_anlegen oder kipm_planen; ab dem Tag steht der Eintrag oben in „Wartet auf "
-    "dich“. Versionen und Installationen kommen aus GitHub (Releases "
+    "dich“. Verschieben in ein anderes Projekt oder Modul: kipm_verschiebeziele, dann "
+    "kipm_verschieben_pruefen und die Folgen Fred nennen, nach seinem Ja kipm_verschieben mit dem "
+    "pruefcode der Vorschau; nie als Kopie neu anlegen. Versionen und Installationen kommen aus "
+    "GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
 
@@ -98,10 +101,58 @@ _REVISION = {"type": "integer", "description": "Aktuelle Revision aus kipm_lesen
 _TEXT = {"type": "string"}
 _LISTE = {"type": "array", "items": {"type": "string"}}
 _MELDUNG = {"auftrag": _AUFTRAG, "revision": _REVISION, "text": _TEXT}
+_VERSCHIEBUNG = {
+    "eintraege": {
+        "type": "array",
+        "description": "Je Eintrag ein eigenes Ziel. modul leer = ohne Modul; arbeitsort und "
+        "meilenstein leer = aufheben; weggelassen bleibt es im selben Projekt und wird bei einem "
+        "Projektwechsel aufgehoben",
+        "items": {
+            "type": "object",
+            "properties": {
+                "auftrag": _AUFTRAG,
+                "revision": _REVISION,
+                "projekt": {"type": "string", "description": "Kennung des Zielprojekts"},
+                "modul": {"type": "string", "description": "Modulkennung im Ziel"},
+                "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung im Ziel"},
+                "meilenstein": {"type": "string", "description": "Meilenstein im Ziel, z. B. M-3"},
+            },
+            "required": ["auftrag", "revision", "projekt"],
+        },
+    },
+    "archiv": {
+        "type": "object",
+        "description": "Je archiviertem Zielprojekt (Kennung) die Wahl „reaktivieren“ oder "
+        "„im_archiv“; ohne Wahl wird nicht verschoben",
+        "additionalProperties": {"type": "string", "enum": ["reaktivieren", "im_archiv"]},
+    },
+}
 
 WERKZEUGE = [
     ("kipm_projekte", "Alle Projekte mit Modulen, Arbeitsorten und Zahl offener Aufträge", {}, []),
     ("kipm_projekt", "Ein Projekt mit Modulen und Arbeitsorten", {}, []),
+    (
+        "kipm_verschiebeziele",
+        "Ziele zum Verschieben: alle Projekte, auch archivierte (archiviert=true), mit "
+        "Modulpfaden, Arbeitsorten und Meilensteinen; nur für Freds Assistent",
+        {},
+        [],
+    ),
+    (
+        "kipm_verschieben_pruefen",
+        "Vorschau: was das Verschieben mit jedem Eintrag täte (neue Zuordnungen, Folgen für "
+        "Freigabe, Bearbeiter und Zustand, Konflikte) und der pruefcode; ändert nichts",
+        _VERSCHIEBUNG,
+        ["eintraege"],
+    ),
+    (
+        "kipm_verschieben",
+        "Einträge verschieben statt kopieren: dieselbe ID und Historie, alte Nummern gelten "
+        "weiter, alle oder keiner. pruefcode aus kipm_verschieben_pruefen; hat sich seither etwas "
+        "geändert, geschieht nichts. Nicht für Einträge in Arbeit",
+        {**_VERSCHIEBUNG, "pruefcode": _TEXT},
+        ["eintraege", "pruefcode"],
+    ),
     (
         "kipm_projekt_anlegen",
         "Neues Projekt anlegen; module je Eintrag „Name“ oder „kennung: Name“; kuerzel steht vorn "
@@ -119,7 +170,7 @@ WERKZEUGE = [
         "kipm_projekt_archivieren",
         "Projekt archivieren: Es verschwindet von der Startseite und für alle Chats, gelöscht wird "
         "nichts; geht nicht, solange ein Eintrag in Arbeit ist. Zurückholen kann es Fred in der "
-        "Oberfläche",
+        "Oberfläche oder ausdrücklich beim Verschieben eines Eintrags dorthin",
         {},
         [],
     ),
@@ -494,6 +545,8 @@ _NUR_LESEN = frozenset(
         "kipm_unterlage_lesen",
         "kipm_entscheidungen",
         "kipm_meilensteine",
+        "kipm_verschiebeziele",
+        "kipm_verschieben_pruefen",
     }
 )
 _ARBEIT_AM_AUFTRAG = frozenset(
@@ -591,6 +644,12 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         return rufe(reverse("api_projekte"))
     if name == "kipm_projekt":
         return rufe(reverse("api_projekt"))
+    if name == "kipm_verschiebeziele":
+        return rufe(reverse("api_verschiebeziele"))
+    if name == "kipm_verschieben_pruefen":
+        return rufe(reverse("api_verschieben_pruefen"), _felder(a, ("eintraege", "archiv")))
+    if name == "kipm_verschieben":
+        return rufe(reverse("api_verschieben"), _felder(a, ("eintraege", "archiv", "pruefcode")))
     if name == "kipm_projekt_anlegen":
         return rufe(
             reverse("api_projekt_anlegen"),

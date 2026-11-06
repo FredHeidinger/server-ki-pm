@@ -1,0 +1,1 @@
+{% if leer %}<option value="">{{ leer }}</option>{% endif %}{% for g in gruppen %}<optgroup label="{{ g.titel }}">{% for o in g.optionen %}<option value="{{ o.wert }}"{% if o.wert == gewaehlt %} selected{% endif %}>{{ g.titel }} › {{ o.text }}</option>{% endfor %}</optgroup>{% endfor %}

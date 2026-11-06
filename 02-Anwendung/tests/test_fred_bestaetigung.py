@@ -30,6 +30,8 @@ LESEN = {
     "kipm_unterlage_lesen",
     "kipm_entscheidungen",
     "kipm_meilensteine",
+    "kipm_verschiebeziele",
+    "kipm_verschieben_pruefen",
 }
 ARBEIT = {
     "kipm_uebernehmen",
@@ -58,6 +60,7 @@ AENDERND = {
     "kipm_entscheidung_aendern",
     "kipm_meilenstein_anlegen",
     "kipm_meilenstein_aendern",
+    "kipm_verschieben",
 }
 
 
@@ -93,7 +96,21 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
     entscheidung = rufe("kipm_entscheidung_eintragen", entscheidung="Es gilt.")["entscheidung"]
     meilenstein = rufe("kipm_meilenstein_anlegen", name="Erste Version")["meilenstein"]
     projekt.refresh_from_db()
+    verschieben = {
+        "eintraege": [
+            {
+                "auftrag": entwurf.nummer,
+                "revision": entwurf.revision_nr,
+                "projekt": projekt.kennung,
+                "modul": "",
+            }
+        ],
+    }
+    pruefcode = dienst.verschiebung_pruefen(
+        dienst.Akteur.aus_bindung(pc_zugang), verschieben["eintraege"]
+    )["pruefcode"]
     return {
+        "kipm_verschieben": {**verschieben, "pruefcode": pruefcode},
         "kipm_projekt_anlegen": {"name": "Ganz neu"},
         "kipm_projekt_archivieren": {},
         "kipm_modul_anlegen": {"name": "Zweites"},

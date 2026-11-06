@@ -362,6 +362,31 @@ class Abhaengigkeit(models.Model):
         ]
 
 
+class FruehereNummer(models.Model):
+    """Nummer, die ein Auftrag vor einem Projektwechsel trug. Sie führt weiter zu ihm und wird nie
+    neu vergeben, weil ``Projekt.naechste_nummer`` nur wächst."""
+
+    auftrag = models.ForeignKey(Auftrag, on_delete=models.CASCADE, related_name="fruehere_nummern")
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="+")
+    projekt_nummer = models.PositiveIntegerField()
+    bis = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["bis", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["projekt", "projekt_nummer"], name="fruehere_nummer_einmal"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.nummer
+
+    @property
+    def nummer(self) -> str:
+        return f"{self.projekt.kuerzel}-{self.projekt_nummer}"
+
+
 class Meldung(models.Model):
     """Fortschritt, Hindernis, Vorschlag oder Prüfbericht eines Bearbeiters oder Chats."""
 

@@ -9,6 +9,8 @@ urlpatterns = [
     path("", views.projekte, name="start"),
     path("auftraege/wunsch/", views.wunsch_neu, name="wunsch_neu"),
     path("auftraege/<int:auftrag_id>/", views.auftrag_detail, name="auftrag_detail"),
+    path("verschieben/", views.verschieben, name="verschieben"),
+    path("verschieben/ergebnis/", views.verschieben_ergebnis, name="verschieben_ergebnis"),
     path(
         "auftraege/<int:auftrag_id>/bearbeiten/",
         views.auftrag_bearbeiten,
@@ -174,6 +176,13 @@ urlpatterns = [
     path("api/auftraege/<int:auftrag_id>/antworten/", api.antworten, name="api_antworten"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),
+    path("api/verschiebeziele/", api.verschiebeziele, name="api_verschiebeziele"),
+    path("api/auftraege/verschieben/", api.verschieben, name="api_verschieben"),
+    path(
+        "api/auftraege/verschieben/pruefen/",
+        api.verschieben_pruefen,
+        name="api_verschieben_pruefen",
+    ),
     path("api/auftraege/<int:auftrag_id>/", api.auftrag_lesen, name="api_auftrag"),
     path("api/auftraege/<int:auftrag_id>/uebernehmen/", api.uebernehmen, name="api_uebernehmen"),
     path("api/auftraege/<int:auftrag_id>/fortschritt/", api.fortschritt, name="api_fortschritt"),

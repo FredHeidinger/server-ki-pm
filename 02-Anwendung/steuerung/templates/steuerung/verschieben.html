@@ -1,0 +1,66 @@
+{% extends "steuerung/grund.html" %}
+{% load steuerung_extras %}
+{% block titel %}Verschieben{% endblock %}
+{% block inhalt %}
+<h1>{{ zeilen|length }} Eintr{{ zeilen|length|pluralize:"ag,äge" }} verschieben</h1>
+<p class="gedaempft">Ziel wählen und prüfen; geändert wird erst mit „Jetzt verschieben“. Verlauf und Ergebnisse bleiben erhalten, alte Nummern führen weiter zum Eintrag.</p>
+<form method="post" action="{% url 'verschieben' %}" class="verschieben">
+  {% csrf_token %}
+  <input type="hidden" name="zurueck" value="{{ zurueck }}">
+  {% if vorschau %}<input type="hidden" name="pruefcode" value="{{ vorschau.pruefcode }}">{% endif %}
+  <section class="box" aria-labelledby="h-ziel">
+    <h2 id="h-ziel">Ziel für alle</h2>
+    <label>Projekt und Modul<br>
+      <select name="ziel">{% include "steuerung/zielauswahl.html" with gewaehlt=ziel leer="Bitte wählen, oder je Eintrag unten" %}</select>
+    </label>
+  </section>
+  <ul class="verschiebeliste">
+  {% for z in zeilen %}
+    <li class="box{% if z.e.konflikte %} warn{% endif %}">
+      <input type="hidden" name="auftrag" value="{{ z.a.pk }}">
+      <input type="hidden" name="revision_{{ z.a.pk }}" value="{{ z.revision }}">
+      <p class="verschiebekopf"><span class="id">{{ z.a.nummer }}</span>{% if z.a.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ z.a.zustand|zustand }} <strong>{{ z.a.titel }}</strong></p>
+      <p class="klein">Bisher: {{ z.a.projekt.name }}{% if not z.a.projekt.aktiv %} (archiviert){% endif %} › {% if z.a.modul %}{{ z.a.modul.name }}{% else %}ohne Modul{% endif %}</p>
+      <label class="klein">Eigenes Ziel<br>
+        <select name="ziel_{{ z.a.pk }}">{% include "steuerung/zielauswahl.html" with gewaehlt=z.ziel leer="wie „Ziel für alle“" %}</select>
+      </label>
+      {% if z.e %}
+        {% if z.e.nach %}
+        <p class="klein"><strong>Ziel:</strong> {{ z.e.nach.text }}{% if z.e.nach.archiviert %} (archiviert){% endif %}{% if not z.e.aendert %} · steht schon dort, bleibt unverändert{% endif %}</p>
+        <div class="zielwahl">
+          {% if z.ort_waehlbar %}<label class="klein">Arbeitsort im Ziel<br><select name="arbeitsort_{{ z.a.pk }}">{% for o in z.orte %}<option value="{{ o.wert }}"{% if o.wert == z.ort_wahl %} selected{% endif %}>{{ o.text }}</option>{% endfor %}</select></label>{% endif %}
+          <label class="klein">Meilenstein im Ziel<br><select name="meilenstein_{{ z.a.pk }}">{% for o in z.marken %}<option value="{{ o.wert }}"{% if o.wert == z.marke_wahl %} selected{% endif %}>{{ o.text }}</option>{% endfor %}</select></label>
+        </div>
+        {% endif %}
+        {% if z.e.aendert %}
+        <p class="klein">Zustand danach: <strong>{{ z.e.zustand_danach_text }}</strong>{% if z.e.bearbeiter %} · Bearbeiter: {{ z.e.bearbeiter }}{% endif %}</p>
+        <ul class="klein folgen">{% for t in z.e.aenderungen %}<li>{{ t }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% for k in z.e.konflikte %}<p class="klein" role="alert"><span class="status bad">geht nicht</span> {{ k }}</p>{% endfor %}
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  {% if vorschau.archivziele %}
+  <section class="box warn" aria-labelledby="h-archiv">
+    <h2 id="h-archiv">Archivierte Ziele</h2>
+    {% for a in vorschau.archivziele %}
+    <fieldset class="archivwahl">
+      <legend>„{{ a.name }}“ ist archiviert</legend>
+      <label><input type="radio" name="archiv_{{ a.kennung }}" value="reaktivieren"{% if a.wahl == "reaktivieren" %} checked{% endif %}> Projekt reaktivieren: wieder aktiv, ohne dass alte Arbeit anläuft</label><br>
+      <label><input type="radio" name="archiv_{{ a.kennung }}" value="im_archiv"{% if a.wahl == "im_archiv" %} checked{% endif %}> Im Archiv lassen: Eintrag erscheint nur beim archivierten Projekt</label>
+    </fieldset>
+    {% endfor %}
+    {% if vorschau.reaktivierung_folgen %}<p class="klein"><strong>Folge des Reaktivierens für andere Einträge:</strong></p><ul class="klein folgen">{% for t in vorschau.reaktivierung_folgen %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+  </section>
+  {% endif %}
+  {% if vorschau %}
+    {% for k in vorschau.konflikte %}{% if forloop.first %}<section class="box warn" aria-labelledby="h-konflikte"><h2 id="h-konflikte">Das fehlt noch</h2><ul class="klein">{% endif %}<li>{{ k }}</li>{% if forloop.last %}</ul></section>{% endif %}{% endfor %}
+  {% endif %}
+  <p class="verschiebeknoepfe">
+    <button type="submit" name="aktion" value="pruefen" class="knopf{% if vorschau.ausfuehrbar %} zweit{% endif %}">{% if vorschau %}Neu prüfen{% else %}Prüfen{% endif %}</button>
+    {% if vorschau %}<button type="submit" name="aktion" value="ausfuehren" class="knopf"{% if not vorschau.ausfuehrbar %} disabled aria-disabled="true"{% endif %}>Jetzt verschieben</button>{% if not vorschau.ausfuehrbar %} <span class="gedaempft klein">Erst möglich, wenn nichts mehr fehlt.</span>{% endif %}{% endif %}
+    <a class="knopf zweit" href="{{ abbrechen }}">Abbrechen</a>
+  </p>
+</form>
+{% endblock %}

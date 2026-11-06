@@ -6,6 +6,8 @@
   <a class="umschalter {% if not art %}aktiv{% endif %}" href="{% filterlink art='' %}">Alles</a>
   <a class="umschalter {% if art == 'auftrag' %}aktiv{% endif %}" href="{% filterlink art='auftrag' %}">Aufträge</a>
   <a class="umschalter {% if art == 'issue' %}aktiv{% endif %}" href="{% filterlink art='issue' %}">Issues</a>
+  <span class="trenner" aria-hidden="true"></span>
+  {% if darf_verschieben %}<form id="verschiebe-auswahl" method="get" action="{% url 'verschieben' %}" class="inline"><input type="hidden" name="zurueck" value="{{ request.get_full_path }}"><button type="submit" class="knopf zweit klein">Auswahl verschieben</button></form>{% else %}<span class="gedaempft klein">Verschieben darf nur der Owner.</span>{% endif %}
 </div>
 {% if ansicht == 'board' %}
   {% include "steuerung/board.html" with spalten=spalten %}
@@ -41,10 +43,11 @@
 </form>
 {% if zeilen %}
 <table>
-  <thead><tr><th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col" class="nur-mittel">Modul</th><th scope="col" class="nur-breit">Planung</th><th scope="col">Zustand</th><th scope="col" class="nur-breit">Bearbeiter</th><th scope="col" class="nur-mittel">Prio</th><th scope="col" class="nur-breit">Rev</th><th scope="col" class="nur-breit">Letzte Meldung</th></tr></thead>
+  <thead><tr>{% if darf_verschieben %}<th scope="col"><span class="sr-nur">Auswahl</span></th>{% endif %}<th scope="col">Nr.</th><th scope="col">Titel</th><th scope="col" class="nur-mittel">Modul</th><th scope="col" class="nur-breit">Planung</th><th scope="col">Zustand</th><th scope="col" class="nur-breit">Bearbeiter</th><th scope="col" class="nur-mittel">Prio</th><th scope="col" class="nur-breit">Rev</th><th scope="col" class="nur-breit">Letzte Meldung</th></tr></thead>
   <tbody>
   {% for z in zeilen %}
     <tr>
+      {% if darf_verschieben %}<td><input type="checkbox" name="auftrag" value="{{ z.a.pk }}" form="verschiebe-auswahl" aria-label="{{ z.a.nummer }} auswählen"></td>{% endif %}
       <td><a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.nummer }}</a></td>
       <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a> {{ z.a|faellig_marke }}</td>
       <td class="nur-mittel">{{ z.a.modul.name|default:"–" }}</td>

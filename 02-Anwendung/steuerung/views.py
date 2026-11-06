@@ -92,10 +92,8 @@ def _fehler_anzeigen(request: HttpRequest, fehler: Exception) -> None:
 
 def _zurueck(request: HttpRequest, standard: str) -> HttpResponse:
     """Nach einer Aktion dorthin zurück, wo der Nutzer war (Überblick oder Auftrag)."""
-    ziel = request.POST.get("zurueck") or request.GET.get("zurueck") or ""
-    if ziel.startswith("/") and not ziel.startswith("//"):
-        return redirect(ziel)
-    return redirect(standard)
+    ziel = _pfad_oder_leer(request.POST.get("zurueck") or request.GET.get("zurueck") or "")
+    return redirect(ziel or standard)
 
 
 # --- Projekte -------------------------------------------------------------------------------
@@ -308,6 +306,7 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     """Board oder Liste mit Filtern."""
     ansicht = "liste" if request.GET.get("ansicht") == "liste" else "board"
     kontext["ansicht"] = ansicht
+    kontext["darf_verschieben"] = _akteur(request).ist_owner
     art = request.GET.get("art", "")
     if art in dict(Auftrag.TYPEN):
         liste = liste.filter(typ=art)
@@ -621,12 +620,10 @@ def _auftrag_kontext(request: HttpRequest, auftrag: Auftrag) -> dict:
         "meldungen": auftrag.meldungen.all()[:30],
         "ergebnis": ergebnis,
         "ergebnisse": auftrag.ergebnisse.all(),
-        "ereignisse": Ereignis.objects.filter(
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            # Der Verlauf ist nur anhängend: Was vor den Nummern je Projekt geschah, steht unter A-<id>.
-            objekt_kennung__in=(auftrag.nummer, auftrag.alte_nummer),
-        )[:50],
+        "ereignisse": dienst.auftrag_ereignisse(auftrag)[:50],
+        "fruehere_nummern": auftrag.fruehere_nummern.select_related("projekt"),
+        "darf_verschieben": _akteur(request).ist_owner,
+        "verschieben_gesperrt": dienst.verschieben_gesperrt(auftrag),
         "ist_bearbeiter": auftrag.bearbeiter_benutzer_id == request.user.pk,
         "revisionen": auftrag.revisionen.all(),
         "zurueck": request.GET.get("zurueck", ""),
@@ -710,6 +707,167 @@ def _folge_der_bearbeitung(auftrag: Auftrag) -> str:
             "den Entwurf und muss neu freigegeben und erneut übernommen werden."
         )
     return ""
+
+
+BEHALTEN = "__behalten"
+
+
+def _pfad_oder_leer(wert: str) -> str:
+    """Nur Pfade dieser Anwendung. Browser lesen einen Rückstrich wie „/“ und entfernen Tab und
+    Zeilenumbruch: „/<Tab>/host“ führte sonst nach außen."""
+    if not wert.startswith("/") or wert.startswith("//"):
+        return ""
+    return "" if "\\" in wert or any(ord(z) < 32 or ord(z) == 127 for z in wert) else wert
+
+
+def _zielgruppen(ziele: list[dict]) -> list[dict]:
+    """Zielauswahl ohne JavaScript: je Projekt eine Gruppe, Wert ``kennung|modulkennung``."""
+    return [
+        {
+            "titel": z["name"] + (" (archiviert)" if z["archiviert"] else ""),
+            "optionen": [
+                {"wert": f"{z['kennung']}|", "text": "ohne Modul / direkt im Projekt"},
+                *(
+                    {"wert": f"{z['kennung']}|{m['kennung']}", "text": m["pfad"]}
+                    for m in z["module"]
+                ),
+            ],
+        }
+        for z in ziele
+    ]
+
+
+def _verschiebe_zeile(post, auftrag: Auftrag) -> dict:
+    """Ein Eintrag für den Dienst aus den Formularfeldern: eigenes Ziel vor gemeinsamem Ziel."""
+    pk = auftrag.pk
+    ziel = post.get(f"ziel_{pk}") or post.get("ziel") or ""
+    kennung, _, modul = ziel.partition("|")
+    zeile = {
+        "auftrag": auftrag.nummer,
+        "revision": post.get(f"revision_{pk}", auftrag.revision_nr),
+        "projekt": kennung,
+        "modul": modul,
+    }
+    for feld in ("arbeitsort", "meilenstein"):
+        wert = post.get(f"{feld}_{pk}")
+        if wert is not None and wert != BEHALTEN:
+            zeile[feld] = wert
+    return zeile
+
+
+def _vorschau_zeilen(post, auftraege, ziele, vorschau) -> list[dict]:
+    """Was die Seite je Eintrag zeigt; die Auswahl im Ziel erscheint, sobald das Ziel feststeht."""
+    nach_kennung = {z["kennung"]: z for z in ziele}
+    plan = {e["id"]: e for e in (vorschau or {}).get("eintraege", []) if "id" in e}
+    zeilen = []
+    for a in auftraege:
+        e = plan.get(a.pk)
+        zeile = {
+            "a": a,
+            "e": e,
+            "revision": post.get(f"revision_{a.pk}", a.revision_nr),
+            "ziel": post.get(f"ziel_{a.pk}", ""),
+        }
+        nach = e and e.get("nach")
+        if nach:
+            z = nach_kennung[nach["projekt"]]
+            bleibt = nach["projekt"] == a.projekt.kennung
+            rev = a.aktuelle_revision
+            standard = BEHALTEN if bleibt else ""
+            orte = [
+                {
+                    "wert": o["kennung"],
+                    "text": o["name"] + ("" if o["bestaetigt"] else " (Vorschlag)"),
+                }
+                for o in z["arbeitsorte"]
+            ]
+            marken = [
+                {"wert": m["nummer"], "text": f"{m['nummer']} {m['name']}"}
+                for m in z["meilensteine"]
+            ]
+            bisher_ort = rev.arbeitsort.name if rev.arbeitsort else "keiner"
+            bisher_ms = a.meilenstein.name if a.meilenstein else "keiner"
+            zeile.update(
+                orte=[
+                    *([{"wert": BEHALTEN, "text": f"bisher: {bisher_ort}"}] if bleibt else []),
+                    {"wert": "", "text": "kein Arbeitsort (später wählen)"},
+                    *orte,
+                ],
+                ort_wahl=post.get(f"arbeitsort_{a.pk}", standard),
+                ort_waehlbar=not a.ist_endzustand,
+                marken=[
+                    *([{"wert": BEHALTEN, "text": f"bisher: {bisher_ms}"}] if bleibt else []),
+                    {"wert": "", "text": "kein Meilenstein"},
+                    *marken,
+                ],
+                marke_wahl=post.get(f"meilenstein_{a.pk}", standard),
+            )
+        zeilen.append(zeile)
+    return zeilen
+
+
+@login_required
+def verschieben(request: HttpRequest) -> HttpResponse:
+    """Auswahl → Ziel → Vorschau → „Jetzt verschieben“. Regeln und Prüfung stehen im Dienst; ohne
+    JavaScript bedienbar, Abbrechen ist ein Link und ändert nichts."""
+    akteur = _akteur(request)
+    daten = request.POST if request.method == "POST" else request.GET
+    zurueck = _pfad_oder_leer(daten.get("zurueck", ""))
+    weg = zurueck or reverse("projekte")
+    try:
+        ziele = dienst.verschiebeziele(akteur)
+    except dienst.KeinZugriff as fehler:
+        _fehler_anzeigen(request, fehler)
+        return redirect(weg)
+    ids = [int(x) for x in daten.getlist("auftrag") if x.isdecimal()]
+    auftraege = list(
+        Auftrag.objects.filter(pk__in=ids)
+        .select_related("projekt", "modul", "meilenstein")
+        .order_by("id")
+    )
+    if not auftraege:
+        messages.error(request, "Nichts ausgewählt. Einträge auf dem Board ankreuzen.")
+        return redirect(weg)
+    vorschau = None
+    if request.method == "POST":
+        zeilen = [_verschiebe_zeile(request.POST, a) for a in auftraege]
+        archiv = {
+            k.removeprefix("archiv_"): v for k, v in request.POST.items() if k.startswith("archiv_")
+        }
+        try:
+            if request.POST.get("aktion") == "ausfuehren":
+                ergebnis = dienst.verschiebung_ausfuehren(
+                    akteur, zeilen, archiv=archiv, pruefcode=request.POST.get("pruefcode", "")
+                )
+                request.session["verschiebe_ergebnis"] = {**ergebnis, "zurueck": zurueck}
+                return redirect("verschieben_ergebnis")
+            vorschau = dienst.verschiebung_pruefen(akteur, zeilen, archiv=archiv)
+        except dienst.VerschiebungAbgelehnt as fehler:
+            vorschau = fehler.vorschau
+            messages.error(request, str(fehler))
+        except dienst.DienstFehler as fehler:
+            _fehler_anzeigen(request, fehler)
+            return redirect(weg)
+    return render(
+        request,
+        "steuerung/verschieben.html",
+        {
+            "zeilen": _vorschau_zeilen(request.POST, auftraege, ziele, vorschau),
+            "gruppen": _zielgruppen(ziele),
+            "ziel": request.POST.get("ziel", ""),
+            "vorschau": vorschau,
+            "zurueck": zurueck,
+            "abbrechen": weg,
+        },
+    )
+
+
+@login_required
+def verschieben_ergebnis(request: HttpRequest) -> HttpResponse:
+    ergebnis = request.session.get("verschiebe_ergebnis")
+    if not ergebnis:
+        return redirect("projekte")
+    return render(request, "steuerung/verschieben_ergebnis.html", {"ergebnis": ergebnis})
 
 
 @login_required

@@ -2,13 +2,14 @@
 <div class="auftrag" id="auftrag-{{ auftrag.pk }}">
 <p class="zurueckzeile"><a href="{% url 'projekt_auftraege' kennung=auftrag.projekt.kennung %}">← Zurück zum Board</a></p>
 <header class="box auftragskopf" aria-labelledby="titel-{{ auftrag.pk }}">
-  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.projekt_nummer %} <span class="gedaempft klein" title="Frühere Nummer, sie gilt weiter">früher {{ auftrag.alte_nummer }}</span>{% endif %}{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span>{% if not auftrag.ist_endzustand %} {% if auftrag.faellig %}{{ auftrag|faellig_marke }}{% else %}<span>kein Termin</span>{% endif %}{% endif %}</p>
+  <p class="kopf"><span class="id">{{ auftrag.nummer }}</span>{% if auftrag.projekt_nummer %} <span class="gedaempft klein" title="Frühere Nummern, sie gelten weiter">früher {% for f in fruehere_nummern %}{{ f.nummer }}, {% endfor %}{{ auftrag.alte_nummer }}</span>{% endif %}{% if auftrag.typ == "issue" %} <span class="issue">Issue</span>{% endif %} {{ auftrag.zustand|zustand }} <span>{% if auftrag.modul %}Modul {{ auftrag.modul.name }}{% else %}ohne Modul{% endif %}</span> <span>{% if auftrag.meilenstein %}Meilenstein {{ auftrag.meilenstein.name }}{% else %}kein Meilenstein{% endif %}</span>{% if not auftrag.ist_endzustand %} {% if auftrag.faellig %}{{ auftrag|faellig_marke }}{% else %}<span>kein Termin</span>{% endif %}{% endif %}</p>
   <h1 class="auftragstitel" id="titel-{{ auftrag.pk }}">{{ auftrag.titel }}</h1>
   <div class="kopfknopf">{% include "steuerung/hauptknopf.html" with a=auftrag h=haupt ort="kopf" %}</div>
-  {% if weitere_aktionen or bearbeitbar %}
+  {% if weitere_aktionen or bearbeitbar or darf_verschieben %}
   <details class="weitere-aktionen">
     <summary>Weitere Aktionen</summary>
     <div class="weitere-liste">
+      {% if darf_verschieben %}{% if verschieben_gesperrt %}<p><span class="knopf zweit klein" aria-disabled="true">Verschieben – nicht möglich</span> <span class="gedaempft klein">{{ verschieben_gesperrt }}</span></p>{% else %}<p><a class="knopf zweit klein" href="{% url 'verschieben' %}?auftrag={{ auftrag.pk }}&amp;zurueck={{ request.path|urlencode }}">Verschieben</a></p>{% endif %}{% endif %}
       {% if bearbeitbar %}<p><a class="knopf zweit klein" href="{% url 'auftrag_bearbeiten' auftrag_id=auftrag.pk %}">Bearbeiten</a></p>
       <div>{% include "steuerung/faellig_form.html" with a=auftrag ort="kopf" %}<p class="gedaempft klein">Ab diesem Tag steht er oben in „Wartet auf dich“. Der Termin ändert weder Revision noch Freigabe.</p></div>{% endif %}
       {% for a in weitere_aktionen %}
@@ -47,7 +48,7 @@
   <dl class="felder">
     <dt>Ziel</dt><dd>{{ rev.ziel|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
     <dt>Nicht-Ziele</dt><dd>{{ rev.nicht_ziele|linebreaksbr|default:"<em>noch leer</em>" }}</dd>
-    <dt>Arbeitsort</dt><dd>{% if rev.arbeitsort %}{{ rev.arbeitsort.name }}{% if rev.arbeitsort.pfad %} · <code>{{ rev.arbeitsort.pfad }}</code>{% endif %}{% if not rev.arbeitsort.bestaetigt %} <span class="status warn">Vorschlag</span>{% endif %}{% else %}<em>noch leer</em>{% endif %}</dd>
+    <dt>Arbeitsort</dt><dd>{% if rev.arbeitsort %}{{ rev.arbeitsort.name }}{% if rev.arbeitsort.pfad %} · <code>{{ rev.arbeitsort.pfad }}</code>{% endif %}{% if not rev.arbeitsort.bestaetigt %} <span class="status warn">Vorschlag</span>{% endif %}{% if rev.arbeitsort.projekt_id != auftrag.projekt_id %} <span class="gedaempft klein">Ort der abgeschlossenen Arbeit, früheres Projekt {{ rev.arbeitsort.projekt.name }}</span>{% endif %}{% else %}<em>noch leer</em>{% endif %}</dd>
     <dt>Schreibumfang</dt><dd>{% for m in rev.muster %}<code>{{ m }}</code> {% empty %}<em>noch leer</em>{% endfor %}</dd>
     <dt>Kriterien</dt><dd>{% if rev.kriterien %}<ol class="kriterien">{% for k in rev.kriterien %}<li>{{ k }}</li>{% endfor %}</ol>{% else %}<em>noch leer</em>{% endif %}</dd>
   </dl>

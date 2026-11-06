@@ -357,12 +357,22 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                 "beschreibung": rev.beschreibung,
                 "ziel": rev.ziel,
                 "nicht_ziele": rev.nicht_ziele,
+                "fruehere_nummern": [f.nummer for f in auftrag.fruehere_nummern.all()],
                 "arbeitsort": (
                     {
                         "kennung": rev.arbeitsort.kennung,
                         "name": rev.arbeitsort.name,
-                        "rechner": rev.arbeitsort.rechner,
-                        "pfad": rev.arbeitsort.pfad,
+                        # Abgeschlossene Arbeit nach einem Umzug: Ort aus dem früheren Projekt,
+                        # ohne Rechner und Pfad: Der Schlüssel des Ziels gehört nicht dorthin.
+                        **(
+                            {"rechner": "", "pfad": "", "frueheres_projekt": True}
+                            if rev.arbeitsort.projekt_id != auftrag.projekt_id
+                            else {
+                                "rechner": rev.arbeitsort.rechner,
+                                "pfad": rev.arbeitsort.pfad,
+                                "frueheres_projekt": False,
+                            }
+                        ),
                     }
                     if rev.arbeitsort
                     else None
@@ -504,6 +514,57 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
     )
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
+def verschiebeziele(request: HttpRequest) -> JsonResponse:
+    """Alle Projekte, auch archivierte, mit Modulpfaden, Arbeitsorten und Meilensteinen."""
+    return JsonResponse({"ok": True, "ziele": dienst.verschiebeziele(request.akteur)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_behandeln
+def verschieben_pruefen(request: HttpRequest) -> JsonResponse:
+    """Vorschau einer Verschiebung; ändert nichts und braucht deshalb kein ``fred_sagte``."""
+    daten = _json(request)
+    plan = dienst.verschiebung_pruefen(
+        request.akteur, daten.get("eintraege"), archiv=daten.get("archiv")
+    )
+    return JsonResponse({"ok": True, **plan})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_fred_bestaetigt
+@_mit_wiederholungsschutz
+@_behandeln
+def verschieben(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Führt die geprüfte Verschiebung aus: alle Einträge oder keiner. ``pruefcode`` kommt aus der
+    Vorschau; ist inzwischen etwas anders, ergibt das 409 mit der neuen Vorschau."""
+    try:
+        ergebnis = dienst.verschiebung_ausfuehren(
+            request.akteur,
+            daten.get("eintraege"),
+            archiv=daten.get("archiv"),
+            pruefcode=str(daten.get("pruefcode", "")),
+        )
+    except dienst.VerschiebungAbgelehnt as fehler:
+        return JsonResponse(
+            {
+                "ok": False,
+                "fehler": str(fehler),
+                "konflikte": fehler.vorschau["konflikte"],
+                "vorschau": fehler.vorschau,
+            },
+            status=409,
+        )
+    return JsonResponse({"ok": True, **ergebnis})
 
 
 def _meilenstein(projekt: Projekt, wert) -> Meilenstein | None:

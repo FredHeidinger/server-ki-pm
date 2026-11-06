@@ -8,6 +8,7 @@ Regeln:
 """
 
 import hashlib
+import json
 import re
 import secrets
 import unicodedata
@@ -18,6 +19,7 @@ from django.apps import apps
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import IntegrityError, transaction
 from django.db.models import F, ProtectedError, Q
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -28,6 +30,7 @@ from .models import (
     ChatBindung,
     Ereignis,
     Ergebnis,
+    FruehereNummer,
     Meilenstein,
     Meldung,
     Modul,
@@ -951,6 +954,15 @@ def auftrag_id_aus_nummer(text) -> int:
         .first()
     )
     if pk is None:
+        # Nach einem Projektwechsel führt die alte Nummer weiter zum selben Eintrag.
+        pk = (
+            FruehereNummer.objects.filter(
+                projekt__kuerzel=treffer.group(1), projekt_nummer=int(treffer.group(2))
+            )
+            .values_list("auftrag_id", flat=True)
+            .first()
+        )
+    if pk is None:
         raise KeinZugriff("Nicht gefunden.")
     return pk
 
@@ -1039,20 +1051,26 @@ class Pruefpunkt:
     arbeitsort_wahl: bool = False
 
 
-def _ueberschneidungen(auftrag: Auftrag, revision: Revision) -> list[tuple[Auftrag, str, str]]:
-    """Andere belegende Aufträge im selben Arbeitsort mit überschneidenden Mustern."""
-    if revision.arbeitsort_id is None or not revision.muster:
+def _ueberschneidungen(
+    auftrag: Auftrag, revision: Revision, *, projekt: Projekt | None = None, ort_id=None
+) -> list[tuple[Auftrag, str, str]]:
+    """Andere belegende Aufträge im selben Arbeitsort mit überschneidenden Mustern; mit ``projekt``
+    und ``ort_id`` an einem Ziel, an dem der Auftrag noch nicht steht."""
+    ort_id = ort_id if ort_id is not None else revision.arbeitsort_id
+    if ort_id is None or not revision.muster:
         return []
     vorgaenger_ids = set(auftrag.abhaengigkeiten.values_list("vorgaenger_id", flat=True))
     treffer: list[tuple[Auftrag, str, str]] = []
     andere = (
-        Auftrag.objects.filter(projekt=auftrag.projekt, zustand__in=Auftrag.BELEGENDE_ZUSTAENDE)
+        Auftrag.objects.filter(
+            projekt=projekt or auftrag.projekt, zustand__in=Auftrag.BELEGENDE_ZUSTAENDE
+        )
         .exclude(pk=auftrag.pk)
         .exclude(pk__in=vorgaenger_ids)
     )
     for anderer in andere:
         rev = anderer.revisionen.filter(nummer=anderer.revision_nr).first()
-        if rev is None or rev.arbeitsort_id != revision.arbeitsort_id:
+        if rev is None or rev.arbeitsort_id != ort_id:
             continue
         for m1 in revision.muster:
             for m2 in rev.muster:
@@ -1485,6 +1503,601 @@ def vorgaenger_entfernen(akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag) 
             ereignis=f"Vorgänger {vorgaenger.nummer} entfernt",
             revision=str(auftrag.revision_nr),
         )
+
+
+# --- Aufträge: Verschieben ------------------------------------------------------------------
+
+ARCHIV_REAKTIVIEREN = "reaktivieren"
+ARCHIV_LASSEN = "im_archiv"
+
+
+class VerschiebungAbgelehnt(Konflikt):
+    """Die Prüfung ließ die Verschiebung nicht zu; ``vorschau`` nennt die Gründe je Eintrag."""
+
+    def __init__(self, text: str, vorschau: dict):
+        super().__init__(text)
+        self.vorschau = vorschau
+
+
+def modulpfad(modul: Modul | None) -> str:
+    """„Core / Bank“: das Modul samt seinen Elternmodulen; Kreise verhindert ``modul_aendern``."""
+    teile: list[str] = []
+    while modul is not None:
+        teile.insert(0, modul.name)
+        modul = modul.eltern
+    return " / ".join(teile)
+
+
+def verschiebeziele(akteur: Akteur) -> list[dict]:
+    """Alle Projekte, auch archivierte, mit dem, was sich dort zuordnen lässt."""
+    _planung_erforderlich(akteur, "Einträge verschieben")
+    return [
+        {
+            "kennung": p.kennung,
+            "kuerzel": p.kuerzel,
+            "name": p.name,
+            "archiviert": not p.aktiv,
+            "module": sorted(
+                (
+                    {"kennung": m.kennung, "pfad": modulpfad(m)}
+                    for m in p.module.filter(aktiv=True).select_related("eltern")
+                ),
+                key=lambda m: m["pfad"].lower(),
+            ),
+            "arbeitsorte": [
+                {"kennung": o.kennung, "name": o.name, "bestaetigt": o.bestaetigt}
+                for o in p.arbeitsorte.filter(aktiv=True).order_by("name")
+            ],
+            "meilensteine": [
+                {"nummer": m.nummer, "name": m.name} for m in p.meilensteine.all().order_by("pk")
+            ],
+        }
+        for p in Projekt.objects.order_by("-aktiv", "name")
+    ]
+
+
+def verschieben_gesperrt(auftrag: Auftrag) -> str:
+    """Warum dieser Eintrag gerade nicht verschoben werden kann, mit dem nächsten Schritt."""
+    if auftrag.zustand != Auftrag.IN_ARBEIT:
+        return ""
+    return (
+        f"{auftrag.nummer} ist In Arbeit bei {auftrag.bearbeiter_name}; unter einem laufenden "
+        "Bearbeiter wird nicht verschoben. Zuerst beenden oder übergeben: Der Bearbeiter reicht "
+        "sein Ergebnis ein oder meldet ein Hindernis; ist er weg, „Weitere Aktionen“ → "
+        "„Bearbeitung ist unklar“. Danach erneut verschieben."
+    )
+
+
+def auftrag_ereignisse(auftrag: Auftrag):
+    """Verlauf eines Eintrags über alle Projekte, in denen er stand; was vor den Nummern je Projekt
+    geschah, steht unter A-<id>. Der Verlauf ist nur anhängend und wird nie umgeschrieben."""
+    orte = Q(projekt=auftrag.projekt, objekt_kennung__in=(auftrag.nummer, auftrag.alte_nummer))
+    for frueher in auftrag.fruehere_nummern.select_related("projekt"):
+        orte |= Q(projekt=frueher.projekt, objekt_kennung__in=(frueher.nummer, auftrag.alte_nummer))
+    return Ereignis.objects.filter(orte, objekt_typ="Auftrag")
+
+
+def _ort_text(projekt: Projekt, modul: Modul | None) -> str:
+    return f"{projekt.name} › {modulpfad(modul)}" if modul else f"{projekt.name} › ohne Modul"
+
+
+def _nach_kennung_im_ziel(modell, projekt: Projekt, kennung: str):
+    return modell.objects.filter(projekt=projekt, kennung=kennung, aktiv=True).first()
+
+
+def _meilenstein_im_ziel(projekt: Projekt, wert: str) -> Meilenstein | None:
+    nummer = wert.strip().upper().removeprefix("M-")
+    if not nummer.isdecimal():
+        return None
+    return Meilenstein.objects.filter(projekt=projekt, pk=int(nummer)).first()
+
+
+def _zuordnungen_planen(roh: dict, a: Auftrag, ziel: Projekt, wechsel: bool, p: dict) -> None:
+    """Modul, Arbeitsort und Meilenstein des Ziels aus den ausdrücklichen Angaben; nichts wird
+    nach gleichem Namen erraten. Ohne Angabe bleibt es im selben Projekt, sonst wird es aufgehoben."""
+    aenderungen, konflikte = p["eintrag"]["aenderungen"], p["eintrag"]["konflikte"]
+    rev = a.aktuelle_revision
+    # Modul
+    modul = None if wechsel else a.modul
+    if roh.get("modul") is not None:
+        modul = None
+        if str(roh["modul"]).strip():
+            modul = _nach_kennung_im_ziel(Modul, ziel, str(roh["modul"]).strip())
+            if modul is None:
+                konflikte.append(f"Modul „{roh['modul']}“ gibt es in „{ziel.name}“ nicht (aktiv).")
+    if not konflikte and (modul.pk if modul else None) != a.modul_id:
+        alt, neu = modulpfad(a.modul) or "ohne Modul", modulpfad(modul) or "ohne Modul"
+        aenderungen.append(f"Modul: {alt} → {neu}")
+    # Arbeitsort: gehört zur Revision; Abgeschlossenes behält den Ort seiner Arbeit.
+    ort = None if wechsel else rev.arbeitsort
+    if a.ist_endzustand:
+        ort = rev.arbeitsort
+        if str(roh.get("arbeitsort") or "").strip():
+            konflikte.append(
+                f"{a.get_zustand_display()} behält den Arbeitsort der abgeschlossenen Arbeit; "
+                "die Angabe weglassen."
+            )
+        if wechsel and ort is not None:
+            aenderungen.append(
+                f"Arbeitsort „{ort.name}“ bleibt als früheres Projekt der abgeschlossenen Arbeit "
+                "stehen."
+            )
+    elif roh.get("arbeitsort") is not None:
+        ort = None
+        if str(roh["arbeitsort"]).strip():
+            ort = _nach_kennung_im_ziel(Arbeitsort, ziel, str(roh["arbeitsort"]).strip())
+            if ort is None:
+                konflikte.append(
+                    f"Arbeitsort „{roh['arbeitsort']}“ gibt es in „{ziel.name}“ nicht (aktiv)."
+                )
+    p["ort_aendert"] = not a.ist_endzustand and (ort.pk if ort else None) != rev.arbeitsort_id
+    if p["ort_aendert"]:
+        if ort is None:
+            aenderungen.append(
+                f"Arbeitsort „{rev.arbeitsort.name}“ aufgehoben; im Ziel später wählen."
+            )
+        else:
+            vorschlag = "" if ort.bestaetigt else " (Vorschlag, bleibt unbestätigt)"
+            aenderungen.append(f"Arbeitsort: „{ort.name}“{vorschlag}")
+        aenderungen.append(f"Neue Revision {a.revision_nr + 1}; frühere bleiben unverändert.")
+    # Meilenstein
+    ms = None if wechsel else a.meilenstein
+    if roh.get("meilenstein") is not None:
+        ms = None
+        if str(roh["meilenstein"]).strip():
+            ms = _meilenstein_im_ziel(ziel, str(roh["meilenstein"]))
+            if ms is None:
+                konflikte.append(
+                    f"Meilenstein „{roh['meilenstein']}“ gibt es in „{ziel.name}“ nicht."
+                )
+    if (ms.pk if ms else None) != a.meilenstein_id:
+        if ms is None:
+            aenderungen.append(
+                f"Meilenstein {a.meilenstein.nummer} „{a.meilenstein.name}“ aufgehoben."
+            )
+        else:
+            aenderungen.append(f"Meilenstein: {ms.nummer} „{ms.name}“")
+    p.update(modul=modul, ort=ort, meilenstein=ms)
+
+
+def _zustand_planen(a: Auftrag, wechsel: bool, p: dict) -> None:
+    """Folgen für Zustand, Freigabe und Bearbeiter; kein Weg führt in eine neue Arbeitsfreigabe."""
+    e = p["eintrag"]
+    if a.zustand == Auftrag.IN_ARBEIT:
+        e["konflikte"].append(verschieben_gesperrt(a))
+    elif a.zustand == Auftrag.FREIGEGEBEN:
+        # Nur die Planung zählt: Auf einen Vorgänger zu warten ist bei Freigegebenem normal.
+        planung_gueltig = all(q.erfuellt for q in freigabepruefung(a)[:5])
+        if wechsel or p["ort_aendert"] or not planung_gueltig:
+            e["zustand_danach"] = Auftrag.ENTWURF
+            e["aenderungen"].append("Freigabe erlischt; der Eintrag wird Entwurf.")
+        else:
+            e["aenderungen"].append("Freigabe bleibt bestehen.")
+    elif a.zustand == Auftrag.BLOCKIERT:
+        e["aenderungen"].append("Bleibt blockiert; Frage oder Hindernis bleibt offen.")
+        if a.bearbeiter_name:
+            e["aenderungen"].append(f"Bearbeiter {a.bearbeiter_name} bleibt.")
+        bindung = a.bearbeiter_bindung
+        if wechsel and bindung is not None and bindung.art != ChatBindung.ART_PC:
+            e["konflikte"].append(
+                f"Bearbeiter {a.bearbeiter_name} hat einen Projektschlüssel und erreicht das "
+                "Ziel nicht. Zuerst „Weitere Aktionen“ → „Bearbeitung ist unklar“; die Frage "
+                "bleibt im Verlauf. Danach erneut verschieben."
+            )
+        ort = p["ort"]
+        if ort is None or not ort.bestaetigt:
+            e["konflikte"].append(
+                "Blockierte Arbeit läuft nach der Antwort weiter: Im Ziel einen bestätigten "
+                "Arbeitsort wählen."
+            )
+    elif a.ist_endzustand:
+        e["aenderungen"].append("Abschluss, Revision und Ergebnisse bleiben unverändert.")
+    e["zustand_danach_text"] = dict(Auftrag.ZUSTAENDE)[e["zustand_danach"]]
+
+
+def _ueberschneidungen_planen(punkte: dict[int, dict]) -> None:
+    """Blockierte Arbeit läuft nach der Antwort ungeprüft weiter; darum zählt für sie der Stand nach
+    dieser Verschiebung: Mitgewählte stehen dort, wo der Plan sie hinstellt, nicht in der Datenbank."""
+    for pk, p in punkte.items():
+        a, ort = p["auftrag"], p.get("ort")
+        if (
+            a.zustand != Auftrag.BLOCKIERT
+            or ort is None
+            or not p["eintrag"]["aendert"]
+            or not (p["wechsel"] or p["ort_aendert"])
+        ):
+            continue
+        rev = a.aktuelle_revision
+        treffer = [
+            t
+            for t in _ueberschneidungen(a, rev, projekt=p["ziel"], ort_id=ort.pk)
+            if t[0].pk not in punkte
+        ]
+        vorgaenger = set(a.abhaengigkeiten.values_list("vorgaenger_id", flat=True))
+        for anderer_pk, q in punkte.items():
+            if (
+                anderer_pk == pk
+                or anderer_pk in vorgaenger
+                or q.get("ziel") != p["ziel"]
+                or q.get("ort") != ort
+                or q["eintrag"]["zustand_danach"] not in Auftrag.BELEGENDE_ZUSTAENDE
+            ):
+                continue
+            treffer.extend(
+                (q["auftrag"], m1, m2)
+                for m1 in rev.muster
+                for m2 in q["auftrag"].aktuelle_revision.muster
+                if muster_ueberschneiden(m1, m2)
+            )
+        for anderer, m1, m2 in treffer:
+            p["eintrag"]["konflikte"].append(
+                f"Überschneidung im Ziel mit {anderer.nummer} "
+                f"({anderer.get_zustand_display()}): „{m1}“ und „{m2}“. Nach der Antwort "
+                "schrieben zwei Bearbeiter in dieselben Dateien; anderen Arbeitsort wählen."
+            )
+
+
+def _abhaengigkeiten_planen(punkte: dict[int, dict]) -> list[Abhaengigkeit]:
+    """Abhängigkeiten gelten nur im selben Projekt: Gehen beide mit, bleiben sie, sonst werden sie
+    sichtbar aufgehoben. Ein freigegebener Nachfolger würde dadurch übernehmbar: das sperrt."""
+    aufheben: dict[int, Abhaengigkeit] = {}
+
+    def endprojekt(auftrag: Auftrag) -> int:
+        punkt = punkte.get(auftrag.pk)
+        return punkt["ziel"].pk if punkt and punkt.get("ziel") else auftrag.projekt_id
+
+    for pk, p in punkte.items():
+        if not p.get("wechsel"):
+            continue
+        for d in Abhaengigkeit.objects.filter(
+            Q(auftrag_id=pk) | Q(vorgaenger_id=pk)
+        ).select_related("auftrag__projekt", "vorgaenger__projekt"):
+            if endprojekt(d.auftrag) == endprojekt(d.vorgaenger):
+                continue
+            aufheben[d.pk] = d
+            nach, vor = d.auftrag, d.vorgaenger
+            e = p["eintrag"]
+            if pk == nach.pk:
+                e["aenderungen"].append(f"Abhängigkeit von Vorgänger {vor.nummer} aufgehoben.")
+            else:
+                e["aenderungen"].append(f"Abhängigkeit von Nachfolger {nach.nummer} aufgehoben.")
+            # Bleibt die andere Seite trotz Auswahl stehen, gehört es auch in ihre Vorschau.
+            punkt_anderer = punkte.get(nach.pk if pk == vor.pk else vor.pk)
+            if punkt_anderer and punkt_anderer.get("ziel") and not punkt_anderer["wechsel"]:
+                wer = vor.nummer if pk == vor.pk else nach.nummer
+                punkt_anderer["eintrag"]["aenderungen"].append(
+                    f"Abhängigkeit zu {wer} aufgehoben; {wer} wird verschoben."
+                )
+                punkt_anderer["eintrag"]["aendert"] = True
+            punkt_nach = punkte.get(nach.pk)
+            zustand_nach = punkt_nach["eintrag"]["zustand_danach"] if punkt_nach else nach.zustand
+            # Übernehmbar macht nur ein erledigter Vorgänger (freigabepruefung), kein abgebrochener.
+            if zustand_nach == Auftrag.FREIGEGEBEN and vor.zustand != Auftrag.ERLEDIGT:
+                e["konflikte"].append(
+                    f"{nach.nummer} ist freigegeben und wartet auf {vor.nummer}; ohne die "
+                    f"Abhängigkeit würde er übernehmbar. Zuerst die Freigabe von {nach.nummer} "
+                    "zurücknehmen oder ihn mitverschieben."
+                )
+    return list(aufheben.values())
+
+
+def _verschiebeplan(eintraege, archiv) -> tuple[dict, dict[int, dict], list[Abhaengigkeit]]:
+    """Die eine Prüfung für Vorschau und Ausführung. Ändert nichts."""
+    archiv = archiv if isinstance(archiv, dict) else {}
+    punkte: dict[int, dict] = {}
+    zeilen: list[dict] = []
+    allgemein: list[str] = []
+    for roh in eintraege if isinstance(eintraege, list) else []:
+        e = {"nummer": "", "aendert": False, "aenderungen": [], "konflikte": []}
+        zeilen.append(e)
+        if not isinstance(roh, dict):
+            e["konflikte"].append("Eintrag ist kein Objekt mit auftrag, revision und projekt.")
+            continue
+        e["nummer"] = str(roh.get("auftrag", ""))
+        try:
+            a = auftrag_holen_alle(auftrag_id_aus_nummer(roh.get("auftrag", "")))
+        except DienstFehler as fehler:
+            e["konflikte"].append(f"{e['nummer']}: {fehler}")
+            continue
+        if a.pk in punkte:
+            e["konflikte"].append(f"{a.nummer} ist doppelt ausgewählt.")
+            continue
+        e.update(
+            id=a.pk,
+            nummer=a.nummer,
+            alte_nummer=a.alte_nummer,
+            titel=a.titel,
+            art=a.typ,
+            zustand=a.zustand,
+            zustand_text=a.get_zustand_display(),
+            zustand_danach=a.zustand,
+            zustand_danach_text=a.get_zustand_display(),
+            revision=a.revision_nr,
+            bearbeiter=a.bearbeiter_name or None,
+            von={
+                "projekt": a.projekt.kennung,
+                "modul": a.modul.kennung if a.modul else None,
+                "archiviert": not a.projekt.aktiv,
+                "text": _ort_text(a.projekt, a.modul),
+            },
+            nach=None,
+        )
+        p = {"auftrag": a, "eintrag": e}
+        punkte[a.pk] = p
+        try:
+            if int(roh.get("revision", "")) != a.revision_nr:
+                e["konflikte"].append(
+                    f"Revision {roh['revision']} ist veraltet; aktuell ist {a.revision_nr}."
+                )
+        except (TypeError, ValueError):
+            e["konflikte"].append("Die Revision aus dem letzten Lesen fehlt.")
+        kennung = str(roh.get("projekt") or "").strip()
+        ziel = Projekt.objects.filter(kennung=kennung).first()
+        if ziel is None:
+            e["konflikte"].append(
+                f"Zielprojekt „{kennung}“ gibt es nicht." if kennung else "Das Ziel fehlt noch."
+            )
+            continue
+        wechsel = ziel.pk != a.projekt_id
+        p.update(ziel=ziel, wechsel=wechsel)
+        _zuordnungen_planen(roh, a, ziel, wechsel, p)
+        modul = p["modul"]
+        e["nach"] = {
+            "projekt": ziel.kennung,
+            "modul": modul.kennung if modul else None,
+            "archiviert": not ziel.aktiv,
+            "text": _ort_text(ziel, modul),
+        }
+        e["aendert"] = bool(wechsel or e["aenderungen"])
+        if not e["aendert"]:
+            continue
+        _zustand_planen(a, wechsel, p)
+        if wechsel:
+            e["aenderungen"].insert(
+                0, f"Neue Nummer in „{ziel.name}“; {a.nummer} führt weiter hierher."
+            )
+    aufheben = _abhaengigkeiten_planen(punkte)
+    _ueberschneidungen_planen(punkte)
+    archivziele: list[dict] = []
+    folgen: list[str] = []
+    for p in punkte.values():
+        ziel = p.get("ziel")
+        if ziel is None or ziel.aktiv or not p.get("wechsel"):
+            continue
+        if any(z["kennung"] == ziel.kennung for z in archivziele):
+            continue
+        wahl = str(archiv.get(ziel.kennung) or "")
+        archivziele.append({"kennung": ziel.kennung, "name": ziel.name, "wahl": wahl})
+        if wahl not in (ARCHIV_REAKTIVIEREN, ARCHIV_LASSEN):
+            allgemein.append(
+                f"„{ziel.name}“ ist archiviert: Reaktivieren oder ausdrücklich im Archiv lassen; "
+                "sonst verschwände der Eintrag unsichtbar."
+            )
+        if wahl != ARCHIV_LASSEN:
+            for w in _alte_freigaben(ziel, punkte):
+                folgen.append(
+                    f"{w.nummer} „{w.titel}“ in „{ziel.name}“: Freigabe erlischt beim "
+                    "Reaktivieren, der Eintrag wird Entwurf."
+                )
+                if w.pk in punkte:
+                    e = punkte[w.pk]["eintrag"]
+                    e["aenderungen"] = [t for t in e["aenderungen"] if "Freigabe bleibt" not in t]
+                    e["aenderungen"].append("Freigabe erlischt beim Reaktivieren des Projekts.")
+                    e.update(
+                        aendert=True,
+                        zustand_danach=Auftrag.ENTWURF,
+                        zustand_danach_text=dict(Auftrag.ZUSTAENDE)[Auftrag.ENTWURF],
+                    )
+    for p in punkte.values():
+        ziel = p.get("ziel")
+        if (
+            ziel is not None
+            and not ziel.aktiv
+            and p.get("wechsel")
+            and p["auftrag"].zustand == Auftrag.BLOCKIERT
+            and archiv.get(ziel.kennung) == ARCHIV_LASSEN
+        ):
+            p["eintrag"]["konflikte"].append(
+                "Blockierte Arbeit läuft nach der Antwort weiter und gehört nicht ins Archiv: "
+                f"„{ziel.name}“ reaktivieren oder ein anderes Ziel wählen."
+            )
+    if not zeilen:
+        allgemein.append("Nichts ausgewählt.")
+    elif not any(e["aendert"] for e in zeilen) and not any(e["konflikte"] for e in zeilen):
+        allgemein.append("Alle ausgewählten Einträge stehen schon am Ziel.")
+    konflikte = [*allgemein, *(k for e in zeilen for k in e["konflikte"])]
+    plan = {
+        "eintraege": zeilen,
+        "archivziele": archivziele,
+        "reaktivierung_folgen": folgen,
+        "konflikte": konflikte,
+        "ausfuehrbar": not konflikte,
+    }
+    plan["pruefcode"] = hashlib.sha256(
+        json.dumps(plan, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return plan, punkte, aufheben
+
+
+def _alte_freigaben(ziel: Projekt, punkte: dict[int, dict]) -> list[Auftrag]:
+    """Freigegebenes im archivierten Ziel: Reaktivieren machte es sofort übernehmbar, obwohl dabei
+    keine alte Arbeit anlaufen soll. Was das Ziel gerade verlässt, regelt seine eigene Zeile."""
+    gehen = [pk for pk, p in punkte.items() if p.get("wechsel")]
+    return list(
+        ziel.auftraege.filter(zustand=Auftrag.FREIGEGEBEN)
+        .exclude(pk__in=gehen)
+        .select_related("projekt")
+        .order_by("id")
+    )
+
+
+def auftrag_holen_alle(auftrag_id: int) -> Auftrag:
+    """Für Owner und Assistent, die alle Projekte sehen; die Befugnis ist vorher geprüft."""
+    auftrag = (
+        Auftrag.objects.select_related(
+            "projekt", "modul__eltern", "meilenstein", "bearbeiter_bindung"
+        )
+        .filter(pk=auftrag_id)
+        .first()
+    )
+    if auftrag is None:
+        raise KeinZugriff("Nicht gefunden.")
+    return auftrag
+
+
+def verschiebung_pruefen(akteur: Akteur, eintraege, *, archiv=None) -> dict:
+    """Vorschau: was mit jedem Eintrag geschähe und was dagegen spricht. Ändert nichts. Der
+    ``pruefcode`` bindet die Ausführung an genau diese Vorschau."""
+    _planung_erforderlich(akteur, "Einträge verschieben")
+    return _verschiebeplan(eintraege, archiv)[0]
+
+
+def verschiebung_ausfuehren(akteur: Akteur, eintraege, *, archiv=None, pruefcode: str = "") -> dict:
+    """Alle oder keiner: Die Prüfung läuft in derselben Transaktion erneut; hat sich seit der
+    Vorschau etwas geändert, geschieht nichts."""
+    _planung_erforderlich(akteur, "Einträge verschieben")
+    with transaction.atomic():
+        plan, punkte, aufheben = _verschiebeplan(eintraege, archiv)
+        if not plan["ausfuehrbar"]:
+            raise VerschiebungAbgelehnt("Nichts verschoben: " + " ".join(plan["konflikte"]), plan)
+        if pruefcode != plan["pruefcode"]:
+            raise VerschiebungAbgelehnt(
+                "Nichts verschoben: Angaben oder Lage haben sich seit der Vorschau geändert; "
+                "bitte neu prüfen.",
+                plan,
+            )
+        reaktiviert = []
+        for z in plan["archivziele"]:
+            if z["wahl"] == ARCHIV_REAKTIVIEREN:
+                ziel = Projekt.objects.get(kennung=z["kennung"])
+                for w in _alte_freigaben(ziel, punkte):
+                    Auftrag.objects.filter(pk=w.pk).update(
+                        zustand=Auftrag.ENTWURF, freigegeben_am=None, aktualisiert_am=timezone.now()
+                    )
+                    _ereignis(
+                        akteur,
+                        projekt=ziel,
+                        objekt_typ="Auftrag",
+                        objekt_kennung=w.nummer,
+                        ereignis="Freigabe erloschen",
+                        anlass="Projekt reaktiviert; alte Arbeit läuft nicht von selbst wieder an.",
+                        revision=str(w.revision_nr),
+                    )
+                projekt_archivieren(akteur, ziel, aktiv=True)
+                reaktiviert.append(z["kennung"])
+        for d in aufheben:
+            d.delete()
+        verschoben = [
+            _verschieben_anwenden(akteur, p) for p in punkte.values() if p["eintrag"]["aendert"]
+        ]
+        for d in aufheben:
+            for bleibt, weg in ((d.auftrag, d.vorgaenger), (d.vorgaenger, d.auftrag)):
+                if bleibt.pk not in punkte:
+                    _ereignis(
+                        akteur,
+                        projekt=bleibt.projekt,
+                        objekt_typ="Auftrag",
+                        objekt_kennung=bleibt.nummer,
+                        ereignis=f"Abhängigkeit zu {weg.nummer} aufgehoben",
+                        anlass=f"{weg.nummer} wurde verschoben. Grund der Abhängigkeit: {d.grund}"
+                        if d.grund
+                        else f"{weg.nummer} wurde verschoben.",
+                        revision=str(bleibt.revision_nr),
+                    )
+    return {
+        "verschoben": verschoben,
+        "unveraendert": [
+            p["eintrag"]["nummer"] for p in punkte.values() if not p["eintrag"]["aendert"]
+        ],
+        "reaktiviert": reaktiviert,
+    }
+
+
+def _verschieben_anwenden(akteur: Akteur, p: dict) -> dict:
+    """Ein geprüfter Eintrag. ``update`` statt ``save``: „zuletzt erledigt“ bleibt, wie es war."""
+    a, e, ziel = p["auftrag"], p["eintrag"], p["ziel"]
+    quelle, alt = a.projekt, a.nummer
+    felder: dict = {"modul": p["modul"], "meilenstein": p["meilenstein"]}
+    neu = alt
+    if p["wechsel"]:
+        if a.projekt_nummer is not None:
+            FruehereNummer.objects.create(
+                auftrag=a, projekt=quelle, projekt_nummer=a.projekt_nummer
+            )
+        # Die Transaktion hält die Schreibsperre (IMMEDIATE): Zwei Umzüge bekommen nie dieselbe Zahl.
+        Projekt.objects.filter(pk=ziel.pk).update(naechste_nummer=F("naechste_nummer") + 1)
+        nummer = Projekt.objects.values_list("naechste_nummer", flat=True).get(pk=ziel.pk) - 1
+        felder.update(projekt=ziel, projekt_nummer=nummer)
+        neu = f"{ziel.kuerzel}-{nummer}"
+    revision = a.revision_nr
+    if p["ort_aendert"]:
+        rev = a.aktuelle_revision
+        revision += 1
+        Revision.objects.create(
+            auftrag=a,
+            nummer=revision,
+            beschreibung=rev.beschreibung,
+            ziel=rev.ziel,
+            nicht_ziele=rev.nicht_ziele,
+            arbeitsort=p["ort"],
+            schreibumfang=rev.schreibumfang,
+            quellen=rev.quellen,
+            abnahmekriterien=rev.abnahmekriterien,
+            erstellt_von_name=akteur.name,
+            anlass=f"Verschoben: {e['von']['text']} → {e['nach']['text']}"[:200],
+        )
+        felder.update(revision_nr=revision, freigegeben_am=None)
+    if e["zustand_danach"] != a.zustand:
+        felder.update(
+            zustand=e["zustand_danach"], freigegeben_am=None, aktualisiert_am=timezone.now()
+        )
+    Auftrag.objects.filter(pk=a.pk).update(**felder)
+    anlass = f"{e['von']['text']} → {e['nach']['text']}; " + " ".join(e["aenderungen"])
+    if p["wechsel"]:
+        anlass = f"{alt} → {neu}; {anlass}"
+        _ereignis(
+            akteur,
+            projekt=quelle,
+            objekt_typ="Auftrag",
+            objekt_kennung=alt,
+            ereignis=f"Verschoben nach {neu} ({ziel.name})"[:120],
+            anlass=anlass,
+            revision=str(revision),
+        )
+        _ereignis(
+            akteur,
+            projekt=ziel,
+            objekt_typ="Auftrag",
+            objekt_kennung=neu,
+            ereignis=f"Hierher verschoben von {alt} ({quelle.name})"[:120],
+            anlass=anlass,
+            revision=str(revision),
+        )
+    else:
+        _ereignis(
+            akteur,
+            projekt=quelle,
+            objekt_typ="Auftrag",
+            objekt_kennung=alt,
+            ereignis="Zuordnung im Projekt geändert",
+            anlass=anlass,
+            revision=str(revision),
+        )
+    return {
+        "id": a.pk,
+        "alt": alt,
+        "neu": neu,
+        "alte_nummer": a.alte_nummer,
+        "titel": a.titel,
+        "art": a.typ,
+        "zustand": e["zustand_danach"],
+        "zustand_text": e["zustand_danach_text"],
+        "revision": revision,
+        "von": e["von"],
+        "nach": e["nach"],
+        "aenderungen": e["aenderungen"],
+        "adresse": reverse("auftrag_detail", kwargs={"auftrag_id": a.pk}),
+    }
 
 
 # --- Aufträge: Zustandswechsel durch Menschen ----------------------------------------------
