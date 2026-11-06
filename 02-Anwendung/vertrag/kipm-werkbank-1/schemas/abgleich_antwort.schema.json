@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/abgleich_antwort.schema.json",
+  "title": "GET abgleich (eine Seite)",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "server_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "server_zeit": {
+      "$ref": "gemeinsam.schema.json#/$defs/zeit"
+    },
+    "abruf_intervall_s": {
+      "const": 10
+    },
+    "lebenszeichen_max_s": {
+      "const": 30
+    },
+    "warnung_nach_s": {
+      "const": 90
+    },
+    "seite": {
+      "type": "object",
+      "properties": {
+        "groesse": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "naechste": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "groesse",
+        "naechste"
+      ],
+      "additionalProperties": false
+    },
+    "zuweisungen": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "auftrag_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "nummer": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "revision": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "zuweisung_version": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "projektbindung_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "projektbindung_version": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "freigegeben": {
+            "type": "boolean"
+          },
+          "ausfuehrung_id": {
+            "oneOf": [
+              {
+                "$ref": "gemeinsam.schema.json#/$defs/uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "auftrag_id",
+          "nummer",
+          "revision",
+          "zuweisung_version",
+          "projektbindung_id",
+          "projektbindung_version",
+          "freigegeben",
+          "ausfuehrung_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "aktionen": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "aktion_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/uuid"
+          },
+          "art": {
+            "$ref": "gemeinsam.schema.json#/$defs/aktionsart"
+          },
+          "zustand": {
+            "$ref": "gemeinsam.schema.json#/$defs/aktionszustand"
+          },
+          "quelle": {
+            "$ref": "gemeinsam.schema.json#/$defs/quelle"
+          },
+          "erwarteter_zustand": {
+            "$ref": "gemeinsam.schema.json#/$defs/technischer_zustand"
+          },
+          "bezug": {
+            "type": "object",
+            "properties": {
+              "frage_id": {
+                "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+              },
+              "freigabe_id": {
+                "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+              },
+              "planfassung": {
+                "$ref": "gemeinsam.schema.json#/$defs/planfassung"
+              },
+              "schrittposition": {
+                "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+              },
+              "pakete": {
+                "type": "array",
+                "items": {
+                  "$ref": "gemeinsam.schema.json#/$defs/paket"
+                }
+              },
+              "kandidaten": {
+                "type": "array",
+                "items": {
+                  "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "antworttext": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "owner": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "erstellt_am": {
+            "$ref": "gemeinsam.schema.json#/$defs/zeit"
+          },
+          "inhaltshash": {
+            "$ref": "gemeinsam.schema.json#/$defs/sha256"
+          }
+        },
+        "required": [
+          "aktion_id",
+          "art",
+          "zustand",
+          "quelle",
+          "erwarteter_zustand",
+          "bezug",
+          "owner",
+          "erstellt_am",
+          "inhaltshash"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "halte": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "ausfuehrung_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/uuid"
+          },
+          "zweck": {
+            "$ref": "gemeinsam.schema.json#/$defs/haltzweck"
+          },
+          "quelle": {
+            "$ref": "gemeinsam.schema.json#/$defs/quelle"
+          }
+        },
+        "required": [
+          "ausfuehrung_id",
+          "zweck",
+          "quelle"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "konflikte": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "ausfuehrung_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/uuid"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+          },
+          "text": {
+            "$ref": "gemeinsam.schema.json#/$defs/text"
+          }
+        },
+        "required": [
+          "ausfuehrung_id",
+          "code",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "vertrag",
+    "server_id",
+    "server_zeit",
+    "abruf_intervall_s",
+    "lebenszeichen_max_s",
+    "warnung_nach_s",
+    "seite",
+    "zuweisungen",
+    "aktionen",
+    "halte",
+    "konflikte"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,62 @@
+{
+  "snapshot_version": 1,
+  "auftrag_id": 25,
+  "nummer": "KIPM-25",
+  "titel": "Beispielauftrag",
+  "revision": 4,
+  "beschreibung": "Beispielbeschreibung.",
+  "ziel": "Beispielziel.",
+  "nicht_ziele": [
+    "Keine Veröffentlichung."
+  ],
+  "schreibumfang": [
+    "02-Anwendung/steuerung/"
+  ],
+  "arbeitsort": {
+    "id": 7,
+    "name": "Anwendung",
+    "beschreibung": "Ordner 02-Anwendung"
+  },
+  "abnahmekriterien": [
+    {
+      "id": "1",
+      "text": "Tests grün."
+    },
+    {
+      "id": "AK-2",
+      "text": "Lint sauber."
+    }
+  ],
+  "quellenhinweise": [
+    "PLAYBOOK.md"
+  ],
+  "profil": {
+    "fassung": 3,
+    "text": "Projektprofil."
+  },
+  "entscheidungen": [
+    {
+      "id": 11,
+      "version": 1,
+      "titel": "Ablauf",
+      "entscheidung": "Ohne Abnahme.",
+      "warum": "Schlank."
+    }
+  ],
+  "texte": [
+    {
+      "id": 5,
+      "version": 2,
+      "titel": "Notiz",
+      "inhalt": "Text."
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "version": 1,
+      "titel": "Doku",
+      "url": "https://example.invalid/doku"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+[
+  {
+    "json": {
+      "b": 1,
+      "a": 2
+    },
+    "kanonisch": "{\"a\":2,\"b\":1}",
+    "sha256": "d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+  },
+  {
+    "json": {
+      "text": "ä€\n",
+      "liste": [
+        3,
+        {
+          "z": null,
+          "y": true
+        }
+      ]
+    },
+    "kanonisch": "{\"liste\":[3,{\"y\":true,\"z\":null}],\"text\":\"ä€\\n\"}",
+    "sha256": "a1d40d165834a929bcb5d2046f3abfbc53a3ed61c29819f66e7abc702bf74667"
+  },
+  {
+    "json": [],
+    "kanonisch": "[]",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "json": {
+      "tief": {
+        "b": {
+          "d": 4,
+          "c": 3
+        },
+        "a": 0
+      },
+      "zahl": 9007199254740991
+    },
+    "kanonisch": "{\"tief\":{\"a\":0,\"b\":{\"c\":3,\"d\":4}},\"zahl\":9007199254740991}",
+    "sha256": "4ab60dda6b7776b3dcdb5867923e1d13a6d3869580c06daa75fee7ff54d55388"
+  },
+  {
+    "json": "nur ein Text",
+    "kanonisch": "\"nur ein Text\"",
+    "sha256": "38b237a9a79f0c595e263ba0ecbcfc770e49320fe755a62ab30afb0c19a271a1"
+  }
+]

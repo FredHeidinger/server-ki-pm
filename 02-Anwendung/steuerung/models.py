@@ -8,6 +8,8 @@ Release, ReleaseKomponente, Installation, Nachweis, Unterlagenzuordnung, Abrufst
 ExterneAktion, Besuchsmarke) bleiben mit ihren Daten stehen; kein Code liest oder schreibt sie.
 """
 
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -116,9 +118,13 @@ class ChatBindung(models.Model):
     ROLLEN = [(ROLLE_BEARBEITER, "Bearbeiter")]
     ART_PROJEKT = "projekt"
     ART_PC = "pc"
+    # Schlüssel einer KI-Werkbank: weder Owner noch Assistent, nur die Werkbank-Schnittstelle
+    # (``/api/werkbank/``); die erlaubten Projekte stehen an ``WerkbankInstanz``.
+    ART_WERKBANK = "werkbank"
     ARTEN = [
         (ART_PROJEKT, "Chat-Schlüssel für ein Projekt"),
         (ART_PC, "PC-Zugang für alle Projekte"),
+        (ART_WERKBANK, "Zugang einer KI-Werkbank"),
     ]
 
     art = models.CharField("Art", max_length=10, choices=ARTEN, default=ART_PROJEKT)
@@ -144,6 +150,8 @@ class ChatBindung(models.Model):
         ordering = ["name"]
 
     def __str__(self) -> str:
+        if self.art == self.ART_WERKBANK:
+            return f"{self.name} (Werkbank)"
         return f"{self.name} ({self.projekt.kennung if self.projekt else 'alle Projekte'})"
 
     @property
@@ -200,6 +208,10 @@ class Auftrag(models.Model):
     TYP_AUFTRAG = "auftrag"
     TYP_ISSUE = "issue"
     TYPEN = [(TYP_AUFTRAG, "Auftrag"), (TYP_ISSUE, "Issue")]
+    # Wer den Auftrag bearbeitet: ein Chat (Bestand) oder die KI-Werkbank (Werkbank-Anbindung).
+    WEG_CHAT = "chat"
+    WEG_WERKBANK = "werkbank"
+    WEGE = [(WEG_CHAT, "Chat"), (WEG_WERKBANK, "Werkbank")]
 
     projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="auftraege")
     modul = models.ForeignKey(
@@ -219,6 +231,9 @@ class Auftrag(models.Model):
         choices=TYPEN,
         default=TYP_AUFTRAG,
         help_text="Issue: Fehler oder Problem",
+    )
+    ausfuehrungsweg = models.CharField(
+        "Ausführungsweg", max_length=10, choices=WEGE, default=WEG_CHAT
     )
     revision_nr = models.PositiveIntegerField("Aktuelle Revision", default=0)
     abgeleitet_von = models.ForeignKey(
@@ -1253,3 +1268,291 @@ class Kontextbezug(models.Model):
     manifest = models.JSONField()
     hash = models.CharField(max_length=64)
     akteur_name = models.CharField(max_length=120)
+
+
+# --- Werkbank-Anbindung (Vertrag kipm-werkbank/1) -------------------------------------------
+# Nur Datenhaltung: Die Regeln stehen in ``steuerung.werkbank``.
+
+
+class ServerKennung(models.Model):
+    """Genau eine Zeile: die dauerhafte ``server_id`` dieser Installation. Sie liegt in der
+    Datenbank und wandert damit durch Sicherung und Wiederherstellung."""
+
+    server_id = models.UUIDField("Server-Kennung", default=uuid.uuid4, editable=False, unique=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def holen(cls) -> "ServerKennung":
+        return cls.objects.get_or_create(pk=1)[0]
+
+
+class WerkbankInstanz(models.Model):
+    """A. Eine registrierte KI-Werkbank (ein Dienst auf einem PC) mit eigenem Zugang."""
+
+    werkbank_id = models.UUIDField("Werkbank-Kennung", default=uuid.uuid4, unique=True)
+    name = models.CharField("Name", max_length=120)
+    bindung = models.OneToOneField(
+        ChatBindung, null=True, blank=True, on_delete=models.PROTECT, related_name="werkbank"
+    )
+    aktiv = models.BooleanField("Aktiv", default=True)
+    erlaubte_projekte = models.ManyToManyField(Projekt, blank=True, related_name="werkbaenke")
+    letzter_kontakt = models.DateTimeField("Letzter Kontakt", null=True, blank=True)
+    faehigkeiten = models.JSONField("Fähigkeiten", default=dict, blank=True)
+    versionen = models.JSONField("Versionen", default=dict, blank=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class WerkbankProjektbindung(models.Model):
+    """B. Projekt und bestätigter Arbeitsort einer Instanz samt gemeldeter Bereitschaft."""
+
+    instanz = models.ForeignKey(WerkbankInstanz, on_delete=models.CASCADE, related_name="projekte")
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="werkbankbindungen")
+    arbeitsort = models.ForeignKey(
+        Arbeitsort, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    version = models.PositiveIntegerField("Bindungsfassung", default=1)
+    repo_fingerabdruck = models.CharField(max_length=128, blank=True)
+    bereit = models.BooleanField("Bereit", default=False)
+    bereit_gruende = models.JSONField(default=list, blank=True)
+    bereit_gemeldet_am = models.DateTimeField(null=True, blank=True)
+    konfig_fingerabdruecke = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instanz", "projekt"], name="werkbankbindung_projekt_je_instanz"
+            )
+        ]
+
+
+class WerkbankZuweisung(models.Model):
+    """C. Das Ausführungsziel eines Auftrags: genau eines je Auftrag."""
+
+    auftrag = models.OneToOneField(Auftrag, on_delete=models.PROTECT, related_name="zuweisung")
+    instanz = models.ForeignKey(WerkbankInstanz, on_delete=models.PROTECT, related_name="+")
+    projektbindung = models.ForeignKey(
+        WerkbankProjektbindung, on_delete=models.PROTECT, related_name="zuweisungen"
+    )
+    version = models.PositiveIntegerField("Zuweisungsfassung", default=1)
+    # Hash der fachlichen Kontextbasis, die die Freigabe gebunden hat; leer = nicht freigegeben.
+    kontext_sha256 = models.CharField("Gebundene Kontextbasis", max_length=64, blank=True)
+    geaendert_am = models.DateTimeField(auto_now=True)
+    geaendert_von = models.CharField(max_length=120, blank=True)
+    # Änderungsnachweis: das Ereignis im Verlauf, das die letzte Änderung festhält.
+    ereignis = models.ForeignKey(
+        "Ereignis", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+
+#: Technische Zustände einer Ausführung, in denen sie als aktiv gilt (Vertrag, Technischer Zustand).
+AUSFUEHRUNG_AKTIV = (
+    "plant",
+    "laeuft",
+    "wartet_antwort",
+    "wartet_freigabe",
+    "fehler",
+    "unklar",
+    "offline",
+    "halt_angefordert",
+    "angehalten",
+    "abbruch_angefordert",
+    "abschluss_gemeldet",
+)
+
+
+class WerkbankAusfuehrung(models.Model):
+    """D. Eine technische Ausführung eines Auftrags auf einer Werkbank."""
+
+    AKTIVE_ZUSTAENDE = AUSFUEHRUNG_AKTIV
+    ZUSTAENDE = [(z, z) for z in (*AUSFUEHRUNG_AKTIV, "abgebrochen", "abgeschlossen", "beendet")]
+    HALT_ZWECKE = [
+        ("", "kein Halt"),
+        ("bearbeitung_aendern", "Bearbeitung ändern"),
+        ("abbrechen", "Abbrechen"),
+        ("kontext_veraltet", "Kontext veraltet"),
+    ]
+
+    ausfuehrung_id = models.UUIDField("Ausführung", default=uuid.uuid4, unique=True)
+    auftrag = models.ForeignKey(Auftrag, on_delete=models.PROTECT, related_name="ausfuehrungen")
+    revision = models.PositiveIntegerField()
+    zuweisung = models.ForeignKey(
+        WerkbankZuweisung, on_delete=models.PROTECT, related_name="ausfuehrungen"
+    )
+    zuweisung_version = models.PositiveIntegerField()
+    projektbindung = models.ForeignKey(
+        WerkbankProjektbindung, on_delete=models.PROTECT, related_name="ausfuehrungen"
+    )
+    projektbindung_version = models.PositiveIntegerField()
+    snapshot = models.JSONField(default=dict)
+    snapshot_sha256 = models.CharField(max_length=64)
+    zustand = models.CharField(max_length=24, choices=ZUSTAENDE, default="plant")
+    statusversion = models.PositiveIntegerField(default=0)
+    # Bestätigte Planfassung; vor dem ersten Plan „vorplanung“ (Schrittschlüssel, Vertrag 4.5).
+    planfassung = models.CharField(max_length=80, default="vorplanung")
+    pakete = models.JSONField(default=list, blank=True)
+    bedarf = models.JSONField(default=list, blank=True)
+    nachweise = models.JSONField(default=list, blank=True)
+    halt_zweck = models.CharField(max_length=24, choices=HALT_ZWECKE, blank=True, default="")
+    halt_angefordert_am = models.DateTimeField(null=True, blank=True)
+    halt_bestaetigt_am = models.DateTimeField(null=True, blank=True)
+    abschluss_bestaetigt_am = models.DateTimeField(null=True, blank=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            # Keine andere aktive Ausführung desselben Auftrags.
+            models.UniqueConstraint(
+                fields=["auftrag"],
+                condition=models.Q(zustand__in=AUSFUEHRUNG_AKTIV),
+                name="werkbankausfuehrung_eine_aktive_je_auftrag",
+            )
+        ]
+
+
+class WerkbankOperation(models.Model):
+    """F. Eine bekannte Operation der Werkbank samt gespeichertem Ausgang (Wiederholungsschutz,
+    Schrittschlüssel und Versuche nach Vertrag 4.5)."""
+
+    ARTEN = [("uebernehmen", "übernehmen"), ("schritt", "Schritt"), ("ereignis", "Ereignis")]
+    KLAERUNG = [("ungeklaert", "nicht abschließend geklärt"), ("geklaert", "geklärt")]
+
+    instanz = models.ForeignKey(
+        WerkbankInstanz, on_delete=models.CASCADE, related_name="operationen"
+    )
+    operation_id = models.UUIDField()
+    art = models.CharField(max_length=12, choices=ARTEN)
+    nutzlast_sha256 = models.CharField(max_length=64)
+    quelle = models.JSONField(default=dict, blank=True)
+    ausfuehrung = models.ForeignKey(
+        WerkbankAusfuehrung,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="operationen",
+    )
+    # Schrittschlüssel (mit ``ausfuehrung``) und Versuch; nur bei art „schritt“.
+    planfassung = models.CharField(max_length=80, blank=True)
+    paket = models.CharField(max_length=80, blank=True)
+    phase = models.CharField(max_length=32, blank=True)
+    position = models.PositiveIntegerField(null=True, blank=True)
+    versuch_nr = models.PositiveIntegerField(null=True, blank=True)
+    eingabe_sha256 = models.CharField(max_length=64, blank=True)
+    klaerung = models.CharField(max_length=12, choices=KLAERUNG, default="ungeklaert")
+    # Wie ein geklärter Versuch ausging: „erfolg“ oder „fehlschlag“ (nur der Fehlschlag erlaubt
+    # einen neuen Versuch, Vertrag 4.5).
+    ausgang_art = models.CharField(max_length=12, blank=True, default="")
+    ausgang_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    ausgang = models.JSONField(default=dict, blank=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instanz", "operation_id"], name="werkbankoperation_id_je_instanz"
+            ),
+            models.UniqueConstraint(
+                fields=["ausfuehrung", "planfassung", "paket", "phase", "position", "versuch_nr"],
+                condition=models.Q(art="schritt"),
+                name="werkbankoperation_versuch_je_schritt",
+            ),
+            models.UniqueConstraint(
+                fields=["ausfuehrung", "planfassung", "paket", "phase", "position"],
+                condition=models.Q(art="schritt", klaerung="ungeklaert"),
+                name="werkbankoperation_ein_ungeklaerter_versuch",
+            ),
+        ]
+
+
+class WerkbankAktion(models.Model):
+    """E. Eine menschliche Aktion von Fred; wirkt höchstens einmal (Vertrag 4.7)."""
+
+    ARTEN = [
+        (a, a)
+        for a in (
+            "antworten",
+            "start_freigeben",
+            "uebernahme_freigeben",
+            "weiterbauen",
+            "bearbeitung_beenden",
+            "abbrechen",
+        )
+    ]
+    ZUSTAENDE = [
+        (z, z)
+        for z in ("ausstehend", "angenommen", "ausgefuehrt", "veraltet", "fehlgeschlagen", "unklar")
+    ]
+
+    aktion_id = models.UUIDField("Aktion", default=uuid.uuid4, unique=True)
+    ausfuehrung = models.ForeignKey(
+        WerkbankAusfuehrung, on_delete=models.PROTECT, related_name="aktionen"
+    )
+    art = models.CharField(max_length=24, choices=ARTEN)
+    revision = models.PositiveIntegerField()
+    zuweisung_version = models.PositiveIntegerField()
+    projektbindung_version = models.PositiveIntegerField()
+    erwarteter_zustand = models.CharField(max_length=24)
+    # Konkrete Frage, Schrittposition, Planfassung oder Kandidaten.
+    ziel = models.JSONField(default=dict, blank=True)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    erstellt_am = models.DateTimeField(auto_now_add=True)
+    zustand = models.CharField(max_length=14, choices=ZUSTAENDE, default="ausstehend")
+    bearbeitungszustand = models.CharField(max_length=24, blank=True)
+    ergebnis = models.JSONField(default=dict, blank=True)
+    # Die Operation, die diese Aktion verwendet hat; jede Aktion nur einmal.
+    operation = models.OneToOneField(
+        WerkbankOperation, null=True, blank=True, on_delete=models.PROTECT, related_name="aktion"
+    )
+
+
+class WerkbankEreignis(models.Model):
+    """G. Eine technische Rückmeldung der Werkbank, original aufbewahrt."""
+
+    VERARBEITUNG = [
+        ("offen", "offen"),
+        ("angewendet", "angewendet"),
+        ("historisch", "historisch quittiert"),
+        ("abgelehnt", "abgelehnt"),
+    ]
+
+    instanz = models.ForeignKey(
+        WerkbankInstanz, on_delete=models.CASCADE, related_name="ereignisse"
+    )
+    ereignis_id = models.UUIDField()
+    art = models.CharField(max_length=32)
+    ausfuehrung = models.ForeignKey(
+        WerkbankAusfuehrung,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ereignisse",
+    )
+    projektbindung = models.ForeignKey(
+        WerkbankProjektbindung, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    sequenz = models.PositiveIntegerField()
+    statusversion = models.PositiveIntegerField(null=True, blank=True)
+    inhalt_sha256 = models.CharField(max_length=64)
+    rueckmeldung = models.JSONField("Originalmeldung", default=dict, blank=True)
+    operation = models.ForeignKey(
+        WerkbankOperation, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    verarbeitung = models.CharField(max_length=12, choices=VERARBEITUNG, default="offen")
+    empfangen_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instanz", "ereignis_id"], name="werkbankereignis_id_je_instanz"
+            ),
+            models.UniqueConstraint(
+                fields=["ausfuehrung", "sequenz"],
+                condition=models.Q(ausfuehrung__isnull=False),
+                name="werkbankereignis_sequenz_je_ausfuehrung",
+            ),
+        ]

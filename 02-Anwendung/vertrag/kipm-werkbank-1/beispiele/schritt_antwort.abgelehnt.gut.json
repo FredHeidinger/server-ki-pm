@@ -1,0 +1,10 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "0b9a7c3e-6d21-4e58-9f04-7a1c5e8d2b10",
+  "erlaubt": false,
+  "grund_code": "HALT_ANGEFORDERT",
+  "text": "Ein Halt ist angefordert.",
+  "naechste_handlung": "Keine neuen Schritte starten; Stillstand melden.",
+  "autorisierung_id": null,
+  "statusversion": 5
+}

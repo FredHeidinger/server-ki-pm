@@ -60,7 +60,7 @@ def _version(akteur: Akteur, projekt: Projekt, objekt_typ: str, objekt, daten: d
     letzte = Objektversion.objects.filter(objekt_typ=objekt_typ, objekt_id=objekt.pk).aggregate(
         m=Max("nummer")
     )["m"]
-    return Objektversion.objects.create(
+    version = Objektversion.objects.create(
         projekt=projekt,
         objekt_typ=objekt_typ,
         objekt_id=objekt.pk,
@@ -68,6 +68,12 @@ def _version(akteur: Akteur, projekt: Projekt, objekt_typ: str, objekt, daten: d
         daten=daten,
         akteur_name=akteur.name,
     )
+    if objekt_typ in ("Projektprofil", "Entscheidung", "Unterlage"):
+        from . import werkbank_aktionen
+
+        # Eine Änderung des Kontexts einer laufenden Werkbank-Ausführung fordert einen Halt an.
+        werkbank_aktionen.kontext_geaendert(akteur, projekt)
+    return version
 
 
 def _gleiches_projekt(projekt: Projekt, *objekte) -> None:

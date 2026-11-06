@@ -1,0 +1,76 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "3e0d8f6b-9054-4b8c-8237-0d4f8b1a5e13",
+  "art": "ereignisse",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+    "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+  },
+  "nutzlast": {
+    "ereignis_id": "f4a6b8c0-3d5e-4f70-8a92-1c3d4e5f6020",
+    "sequenz": 20,
+    "statusversion": 15,
+    "ereignis": {
+      "art": "abschluss_bericht",
+      "daten": {
+        "planfassung": "67eeac392652c4cb4a2fe3d86d8a0b8ec4eefe41580a0212aa98220787aff884",
+        "kriterien": [
+          {
+            "kriterium_id": "AK-1",
+            "behandlung": "erfuellt",
+            "nachweis": "pytest: 120 bestanden",
+            "commit": "9f3a1c2d"
+          },
+          {
+            "kriterium_id": "AK-2",
+            "behandlung": "bereits_erfuellt",
+            "nachweis": "ruff sauber am Commit",
+            "commit": "4dd729b"
+          }
+        ],
+        "paketplan": [
+          {
+            "paket": "P1",
+            "titel": "Umbau",
+            "zustand": "erledigt"
+          }
+        ],
+        "integrationen": [
+          {
+            "paket": "P1",
+            "commit": "9f3a1c2d",
+            "kandidat": "kandidat-1"
+          }
+        ],
+        "pruefungen": [
+          {
+            "paket": "P1",
+            "art": "test",
+            "ergebnis": "bestanden",
+            "beschreibung": "pytest grün"
+          }
+        ],
+        "gesamtpruefung": {
+          "paket": "root",
+          "art": "gesamt",
+          "ergebnis": "bestanden",
+          "beschreibung": "Gesamtlauf grün"
+        },
+        "offene_arbeiten": [],
+        "ungeklaerte_wirkungen": [],
+        "kosten": {
+          "bezugsrahmen": "Werkbank-Kostenregel dieses Laufs",
+          "text": "innerhalb der Grenze"
+        }
+      }
+    }
+  },
+  "inhaltshash": "46c8b25bbf4fb822deb86764516f9758be04c6717bd84f285227a20e1e44a88a"
+}

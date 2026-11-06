@@ -762,6 +762,8 @@ def endpunkt(request: HttpRequest, schluessel: str = "") -> HttpResponse:
     if not schluessel:
         kopf = request.headers.get("Authorization", "")
         schluessel = kopf[7:] if kopf.startswith("Bearer ") else ""
+    if schluessel and dienst.werkbank_bindung_finden(schluessel) is not None:
+        return _fehlerantwort(403, -32001, dienst.WERKBANK_ABWEISUNG)
     if not schluessel or dienst.bindung_pruefen(schluessel) is None:
         return _fehlerantwort(
             401, -32001, "Link oder Schlüssel ungültig, abgelaufen oder widerrufen."

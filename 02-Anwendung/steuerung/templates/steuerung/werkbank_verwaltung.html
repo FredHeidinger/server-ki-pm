@@ -1,0 +1,53 @@
+<section id="werkbank" class="box{% if neue_werkbank %} warn{% endif %}" aria-labelledby="h-werkbank">
+  <h2 id="h-werkbank">KI-Werkbänke</h2>
+  <p class="gedaempft">Eine Werkbank arbeitet freigegebene Aufträge auf einem PC selbst ab und meldet nur Fakten an KI-PM zurück. Sie meldet sich bei diesem Server mit einem eigenen Schlüssel an, der nur für die Werkbank-Schnittstelle gilt. Ob sie bereit ist, meldet sie selbst; KI-PM prüft das nicht noch einmal.</p>
+  {% if neue_werkbank %}
+  <div role="alert" class="box warn">
+    <p><strong>{{ neue_werkbank.name }}</strong> ist angelegt. Den Schlüssel in die Einstellungen der Werkbank eintragen; er wird nur jetzt angezeigt.</p>
+    <ol class="anleitung">
+      <li>Server-Adresse: <code>{{ werkbank_adresse }}</code></li>
+      <li>Schlüssel: <pre id="werkbank-schluessel">{{ neue_werkbank.schluessel }}</pre><button type="button" class="knopf klein" data-kopieren="werkbank-schluessel">Schlüssel kopieren</button></li>
+      <li>Nicht weitergeben und nicht in Screenshots zeigen. Ging etwas schief: unten löschen oder widerrufen und neu anlegen.</li>
+    </ol>
+  </div>
+  {% endif %}
+  {% if werkbaenke %}
+  <ul class="eingang">{% for w in werkbaenke %}
+    <li class="eintrag">
+      <p class="eintragtitel">{{ w.name }}
+        {% if w.gesperrt %}<span class="status aus">Zugang widerrufen</span>{% elif w.aktiv %}<span class="status ok">aktiv</span>{% else %}<span class="status warn">abgeschaltet</span>{% endif %}
+        {% if w.keine_antwort %}<span class="status bad">keine Antwort seit mehr als 90 Sekunden</span>{% endif %}</p>
+      <p class="eintragtext">Letzter Kontakt: {% if w.letzter_kontakt %}{{ w.letzter_kontakt|date:"d.m.Y H:i:s" }}{% else %}noch nie{% endif %} · erlaubte Projekte: {% for p in w.erlaubte_projekte.all %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% empty %}keine{% endfor %}</p>
+      {% for b in w.projekte.all %}
+      <p class="eintragtext">{{ b.projekt.name }}: {% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nichts gemeldet</span>{% endif %}
+        {% if b.bereit_gemeldet_am %}<span class="gedaempft klein">gemeldet {{ b.bereit_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
+        {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}</p>
+      {% endfor %}
+      <div class="eintragaktionen">
+        {% if not w.gesperrt %}
+        <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='aktiv' %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="{% if w.aktiv %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if w.aktiv %}Abschalten{% else %}Einschalten{% endif %}</button></form>
+        <details class="mehr"><summary>Erlaubte Projekte</summary>
+          <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='projekte' %}" class="formular klein">{% csrf_token %}
+            {% for p in werkbank_projekte %}<label><input type="checkbox" name="projekt" value="{{ p.pk }}"{% if p.pk in w.erlaubt_ids %} checked{% endif %}> {{ p.name }}</label><br>{% endfor %}
+            <button type="submit" class="knopf klein">Speichern</button></form></details>
+        {% endif %}
+        {% if w.loeschbar %}
+        <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='loeschen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Löschen</button></form>
+        {% elif not w.gesperrt %}
+        <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='widerrufen' %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr" title="Hat schon gearbeitet; bleibt für den Verlauf">Zugang widerrufen</button></form>
+        {% else %}<span class="gedaempft klein">bleibt für den Verlauf</span>{% endif %}
+      </div>
+    </li>{% endfor %}</ul>
+  {% else %}<p class="gedaempft">Noch keine Werkbank angelegt.</p>{% endif %}
+  {% if werkbank_projekte %}
+  <details class="mehr"{% if not werkbaenke %} open{% endif %}><summary>Neue Werkbank anlegen</summary>
+    <form method="post" action="{% url 'werkbank_anlegen' %}" class="formular klein" autocomplete="off">{% csrf_token %}
+      <label>Name (zum Beispiel der Rechner)<br><input type="text" name="name" maxlength="120" required></label>
+      <fieldset><legend>Welche Projekte darf sie erreichen?</legend>
+        {% for p in werkbank_projekte %}<label><input type="checkbox" name="projekt" value="{{ p.pk }}"> {{ p.name }}</label><br>{% endfor %}</fieldset>
+      <label>Schlüssel gültig (Tage)<br><input type="number" name="tage" value="90" min="1" max="365"></label>
+      <button type="submit" class="knopf">Werkbank anlegen</button>
+    </form>
+  </details>
+  {% endif %}
+</section>

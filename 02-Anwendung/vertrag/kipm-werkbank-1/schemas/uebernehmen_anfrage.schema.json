@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/uebernehmen_anfrage.schema.json",
+  "title": "POST uebernehmen",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "art": {
+      "const": "uebernehmen"
+    },
+    "quelle": {
+      "$ref": "gemeinsam.schema.json#/$defs/quelle_vor_uebernahme"
+    },
+    "nutzlast": {
+      "type": "object",
+      "properties": {
+        "repo_fingerabdruck": {
+          "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+        },
+        "konfig_fingerabdruecke": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z_]{1,32}$"
+          },
+          "additionalProperties": {
+            "$ref": "gemeinsam.schema.json#/$defs/sha256"
+          }
+        },
+        "faehigkeiten": {
+          "type": "array",
+          "items": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "maxItems": 50
+        },
+        "werkbank_version": {
+          "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+        }
+      },
+      "required": [
+        "repo_fingerabdruck",
+        "konfig_fingerabdruecke",
+        "faehigkeiten",
+        "werkbank_version"
+      ],
+      "additionalProperties": false
+    },
+    "inhaltshash": {
+      "$ref": "gemeinsam.schema.json#/$defs/sha256"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "art",
+    "quelle",
+    "nutzlast",
+    "inhaltshash"
+  ],
+  "additionalProperties": false
+}

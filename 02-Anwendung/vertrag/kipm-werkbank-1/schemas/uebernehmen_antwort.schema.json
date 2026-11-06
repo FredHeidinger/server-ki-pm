@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/uebernehmen_antwort.schema.json",
+  "title": "Antwort auf uebernehmen",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "ergebnis": {
+      "enum": [
+        "uebernommen",
+        "wiederholt"
+      ]
+    },
+    "quelle": {
+      "$ref": "gemeinsam.schema.json#/$defs/quelle"
+    },
+    "statusversion": {
+      "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+    },
+    "snapshot": {
+      "$ref": "auftragssnapshot.schema.json"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "ergebnis",
+    "quelle",
+    "statusversion",
+    "snapshot"
+  ],
+  "additionalProperties": false
+}

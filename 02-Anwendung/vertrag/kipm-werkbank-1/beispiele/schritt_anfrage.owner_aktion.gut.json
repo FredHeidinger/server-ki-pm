@@ -1,0 +1,30 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "1c8b6d4f-7e32-4f69-a015-8b2d6f9e3c11",
+  "art": "schritt",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+    "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+  },
+  "nutzlast": {
+    "schritt": {
+      "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+      "planfassung": "67eeac392652c4cb4a2fe3d86d8a0b8ec4eefe41580a0212aa98220787aff884",
+      "paket": "P2",
+      "phase": "bauen",
+      "position": 3
+    },
+    "versuch_nr": 2,
+    "eingabehash": "30a93b61151565c18f57738bb790db3f30ee11f258220d329b83fc9766bb5de5",
+    "wirkung": "integrieren",
+    "owner_aktion_id": "d2e4f6a8-1b3c-4d5e-8f70-9a1b2c3d4e04"
+  },
+  "inhaltshash": "881167a412c8108ef403f23f0ebca3cb02c32e9df8eab554592a1974bc43451e"
+}

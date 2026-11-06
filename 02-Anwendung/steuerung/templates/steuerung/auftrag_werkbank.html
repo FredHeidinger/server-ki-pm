@@ -1,0 +1,103 @@
+{% comment %}Abschnitt „Ausführung“ am Auftrag; erwartet auftrag und werkbank (views_werkbank.auftrag_daten).{% endcomment %}
+{% with w=werkbank z=werkbank.zuweisung ausf=werkbank.ausfuehrung %}
+<section class="box{% if w.bedarf %} warn{% endif %}" id="werkbank" aria-labelledby="h-werkbank-{{ auftrag.pk }}">
+  <h2 id="h-werkbank-{{ auftrag.pk }}">Ausführung</h2>
+  <p>Ausführungsweg: <strong>{% if z %}Werkbank {{ z.instanz.name }}{% else %}Chat{% endif %}</strong>
+    {% if z %}<span class="gedaempft klein">· Zuweisungsfassung {{ z.version }}</span>
+    {% if w.keine_antwort %}<span class="status bad">keine Antwort seit mehr als 90 Sekunden</span>{% endif %}
+    {% if w.warten_auf_werkbank %}<span class="status ok">freigegeben, Kontext gebunden: wartet auf die Werkbank</span>
+    {% elif auftrag.zustand == "FREIGEGEBEN" %}<span class="status warn">Freigabe ohne gebundenen Kontext</span>{% endif %}{% endif %}</p>
+  {% if z and w.bereit %}<p class="gedaempft klein">Bereitschaft laut Werkbank:
+    {% if w.bereit.bereit %}<span class="status ok">bereit</span>{% elif w.bereit.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% for g in w.bereit.bereit_gruende %} · {{ g }}{% endfor %}{% else %}<span class="status aus">noch nichts gemeldet</span>{% endif %}
+    · vorbereitet ist das Projekt, vorgeprüft der Auftrag; technische Pakete prüft die Werkbank selbst.</p>{% endif %}
+
+  {% if w.darf_zuweisen %}
+  <form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="aktion">{% csrf_token %}
+    <label>Werkbank<br><select name="ziel" required>{% for t in w.ziele %}<option value="{{ t.pk }}"{% if z and z.projektbindung_id == t.pk %} selected{% endif %}>{{ t.instanz.name }}{% if not t.bereit %} (nicht bereit){% endif %}</option>{% endfor %}</select></label>
+    <div class="knopfzeile">
+      {% if auftrag.zustand == "ENTWURF" %}<button type="submit" name="freigeben" value="1" class="knopf">Freigeben und Werkbank zuweisen</button>{% endif %}
+      <button type="submit" class="knopf zweit">{% if z %}Ziel wechseln{% else %}Nur zuweisen{% endif %}</button>
+    </div>
+    <p class="gedaempft klein">Zuweisen reserviert nur das Ziel; die Werkbank übernimmt erst nach der Freigabe. Ein Zielwechsel nimmt die Freigabe zurück.</p>
+  </form>
+  {% elif w.ziele and not z %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Werkbank zuweisen – nicht möglich</span> In diesem Zustand ({{ auftrag.get_zustand_display }}) ändert sich das Ziel nicht.</p>{% endif %}
+  {% if z %}
+    {% if w.darf_aufheben %}<form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="wahl" value="aufheben"><button type="submit" class="knopf zweit klein">Zuweisung aufheben</button></form>
+    {% else %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Zuweisung aufheben – nicht möglich</span> Es gab schon eine Ausführung; sie bleibt für den Verlauf. Über „Bearbeitung ändern“ geht der Auftrag zurück in den Entwurf.</p>{% endif %}
+  {% endif %}
+
+  {% if ausf %}
+  <h3>Ausführung {{ ausf.ausfuehrung_id|stringformat:"s"|slice:":8" }}</h3>
+  <p><span class="status {% if ausf.zustand == 'abschluss_gemeldet' or ausf.zustand == 'abgeschlossen' %}ok{% elif w.bedarf or ausf.zustand == 'fehler' or ausf.zustand == 'unklar' %}bad{% elif ausf.zustand == 'offline' or ausf.halt_zweck %}warn{% endif %}">{{ w.zustand_text }}</span>
+    <span class="gedaempft klein">· Statusversion {{ ausf.statusversion }} · Revision {{ ausf.revision }}{% if ausf.halt_zweck == "kontext_veraltet" %} · Kontext veraltet: neue Freigabe nötig{% endif %}</span></p>
+  {% if w.pakete %}<p>{{ w.pakete_erledigt }} von {{ w.pakete|length }} Paketen erledigt · {{ w.schritte_gesamt }} Schritt{{ w.schritte_gesamt|pluralize:",e" }} autorisiert</p>{% endif %}
+
+  {% for b in w.bedarf %}
+  <div class="box warn">
+    {% if b.typ == "frage" %}
+      <p><strong>Rückfrage{% if b.paket %} zu {{ b.paket }}{% endif %}:</strong> {{ b.text }}</p>
+      {% if w.halt_moeglich or not ausf.halt_zweck %}
+      <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="aktion">{% csrf_token %}
+        <input type="hidden" name="art" value="antworten"><input type="hidden" name="frage_id" value="{{ b.frage_id }}"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}">
+        <label>Deine Antwort<br><textarea name="text" rows="3" required></textarea></label>
+        <button type="submit" class="knopf">Antwort senden</button></form>
+      {% endif %}
+    {% elif b.typ == "freigabe" %}
+      <p><strong>Freigabe nötig ({% if b.art == "start" %}Start{% else %}Übernahme{% endif %}):</strong> {{ b.grund }}</p>
+      {% if b.pakete %}<p class="klein">Betroffene Pakete: {{ b.pakete|join:", " }}</p>{% endif %}
+      {% if b.kandidaten %}<p class="klein">Kandidaten: {{ b.kandidaten|join:", " }}</p>{% endif %}
+      {% if b.pruefstand %}<p class="klein">Prüfstand: {{ b.pruefstand }}</p>{% endif %}
+      <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="aktion">{% csrf_token %}
+        <input type="hidden" name="art" value="{% if b.art == 'start' %}start_freigeben{% else %}uebernahme_freigeben{% endif %}"><input type="hidden" name="freigabe_id" value="{{ b.freigabe_id }}"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}">
+        <button type="submit" class="knopf">{% if b.art == "start" %}Start freigeben{% else %}Übernahme freigeben{% endif %}</button></form>
+    {% elif b.typ == "kontext_veraltet" %}
+      <p><strong>Kontext veraltet:</strong> {{ b.grund }} Neue Schritte sind gesperrt. Nach dem bestätigten Halt geht der Auftrag in den Entwurf; danach neu freigeben.</p>
+    {% else %}
+      <p><strong>{% if b.typ == "unklar" %}Ausgang unklar{% else %}Fehler{% endif %}{% if b.paket %} bei {{ b.paket }}{% endif %}:</strong> {{ b.text }} <span class="gedaempft klein">({{ b.code }})</span></p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if w.kann_weiterbauen and not ausf.halt_zweck %}
+  <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="weiterbauen"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf">Weiterbauen</button> <span class="gedaempft klein">Du bestätigst damit, dass es nach dem Fehler oder unklaren Ausgang weitergehen soll.</span></form>
+  {% endif %}
+
+  <details class="mehr">
+    <summary>Bauplan ({{ w.pakete|length }} Paket{{ w.pakete|length|pluralize:",e" }})</summary>
+    {% if w.pakete %}
+    <div class="tabellenrahmen"><table class="klein">
+      <thead><tr><th scope="col">Paket</th><th scope="col">Stand</th><th scope="col">Versuche</th><th scope="col">Schritte</th><th scope="col">Hinweis</th></tr></thead>
+      <tbody>{% for p in w.pakete %}<tr><td>{{ p.paket }}{% if p.titel %} · {{ p.titel }}{% endif %}</td><td>{{ p.zustand|default:"offen" }}</td><td>{{ p.versuche|default:"–" }}</td><td>{{ p.schritte }}</td><td>{% if p.handlungsbedarf %}<span class="status warn">Handlungsbedarf</span> {% endif %}{{ p.text }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="gedaempft">Noch kein Plan bestätigt.</p>{% endif %}
+    {% if w.abschluss %}
+    <h4>Abschluss</h4>
+    <ul class="klein">
+      {% for i in w.abschluss.integrationen %}<li>Integriert: {{ i.paket }} @ <code>{{ i.commit }}</code>{% if i.kandidat %} (Kandidat {{ i.kandidat }}){% endif %}</li>{% endfor %}
+      {% for pr in w.abschluss.pruefungen %}<li>{{ pr.paket }} · {{ pr.art }}: <span class="status {% if pr.ergebnis == 'bestanden' %}ok{% else %}bad{% endif %}">{{ pr.ergebnis }}</span> {{ pr.beschreibung }}</li>{% endfor %}
+      {% if w.abschluss.gesamtpruefung %}<li>Gesamtprüfung: <span class="status ok">{{ w.abschluss.gesamtpruefung.ergebnis }}</span> {{ w.abschluss.gesamtpruefung.beschreibung }}</li>{% endif %}
+      {% if w.abschluss.kosten %}<li>Kosten ({{ w.abschluss.kosten.bezugsrahmen }}): {{ w.abschluss.kosten.text }}</li>{% endif %}
+    </ul>
+    <p class="gedaempft klein">Angaben der Werkbank. KI-PM prüft Vollständigkeit und Herkunft, führt aber keine Tests selbst aus.</p>
+    {% endif %}
+  </details>
+
+  {% if w.aktionen %}
+  <details class="mehr"><summary>Deine Aktionen ({{ w.aktionen|length }})</summary>
+    <ul class="klein">{% for a in w.aktionen %}<li>{{ a.erstellt_am|date:"d.m. H:i" }} · {{ a.name_text }}: <span class="status {% if a.zustand == 'ausgefuehrt' %}ok{% elif a.zustand == 'ausstehend' or a.zustand == 'angenommen' %}warn{% else %}aus{% endif %}">{{ a.zustand_text }}</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  {% if w.aktiv %}
+  <div class="knopfzeile">
+    {% if w.halt_moeglich %}
+    <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="bearbeitung_beenden"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf zweit klein">Bearbeitung ändern</button></form>
+    <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="abbrechen"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf zweit klein gefahr">Abbrechen</button></form>
+    {% else %}
+    <span class="knopf zweit klein" aria-disabled="true">Bearbeitung ändern – nicht möglich</span> <span class="knopf zweit klein" aria-disabled="true">Abbrechen – nicht möglich</span> <span class="gedaempft klein">{{ w.halt_grund }}</span>
+    {% endif %}
+  </div>
+  <p class="gedaempft klein">Beides hält die Werkbank erst an: „angefordert“ heißt noch nicht „bestätigt“. Erst nach dem bestätigten Stillstand geht der Auftrag in den Entwurf beziehungsweise wird abgebrochen. Bereits integrierte Commits bleiben bestehen.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endwith %}

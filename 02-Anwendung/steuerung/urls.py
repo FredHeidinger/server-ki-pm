@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api, mcp, views, views_akte
+from . import api, mcp, views, views_akte, views_werkbank, werkbank_api
 
 urlpatterns = [
     path("anmelden/", views.Anmelden.as_view(), name="anmelden"),
@@ -117,6 +117,22 @@ urlpatterns = [
     ),
     # Verbindungen
     path("verbindungen/", views.verbindungen, name="verbindungen"),
+    path("verbindungen/werkbank/neu/", views_werkbank.werkbank_anlegen, name="werkbank_anlegen"),
+    path(
+        "verbindungen/werkbank/<int:instanz_id>/<slug:wahl>/",
+        views_werkbank.werkbank_pflegen,
+        name="werkbank_pflegen",
+    ),
+    path(
+        "auftraege/<int:auftrag_id>/werkbank/",
+        views_werkbank.auftrag_zuweisen,
+        name="auftrag_zuweisen",
+    ),
+    path(
+        "ausfuehrungen/<int:ausfuehrung_id>/aktion/",
+        views_werkbank.ausfuehrung_aktion,
+        name="ausfuehrung_aktion",
+    ),
     path("verbindungen/zugang/neu/", views.zugang_neu, name="zugang_neu"),
     path("verbindungen/github/verbinden/", views.github_verbinden, name="github_verbinden"),
     path("verbindungen/github/pruefen/", views.github_pruefen, name="github_pruefen"),
@@ -149,6 +165,15 @@ urlpatterns = [
     # MCP-Endpunkt und HTTP-Schnittstelle für Zugänge
     path("mcp/", mcp.endpunkt, name="mcp"),
     path("mcp/<str:schluessel>/", mcp.endpunkt, name="mcp_link"),
+    path("api/werkbank/v1/abgleich/", werkbank_api.abgleich, name="werkbank_abgleich"),
+    path(
+        "api/werkbank/v1/operationen/<str:operation_id>/",
+        werkbank_api.operationen,
+        name="werkbank_operationen",
+    ),
+    path("api/werkbank/v1/uebernehmen/", werkbank_api.uebernehmen, name="werkbank_uebernehmen"),
+    path("api/werkbank/v1/schritt/", werkbank_api.schritt, name="werkbank_schritt"),
+    path("api/werkbank/v1/ereignisse/", werkbank_api.ereignisse, name="werkbank_ereignisse"),
     path("api/projekt/", api.projekt_lesen, name="api_projekt"),
     path("api/projekte/", api.projekte, name="api_projekte"),
     path("api/projekt/akte/", api.projektakte, name="api_projektakte"),

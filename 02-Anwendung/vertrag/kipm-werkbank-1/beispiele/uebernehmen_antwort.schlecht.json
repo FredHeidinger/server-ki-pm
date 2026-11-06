@@ -1,0 +1,79 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "0b9a7c3e-6d21-4e58-9f04-7a1c5e8d2b10",
+  "ergebnis": "fertig",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+    "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+  },
+  "statusversion": 1,
+  "snapshot": {
+    "snapshot_version": 1,
+    "auftrag_id": 25,
+    "nummer": "KIPM-25",
+    "titel": "Beispielauftrag",
+    "revision": 4,
+    "beschreibung": "Beispielbeschreibung.",
+    "ziel": "Beispielziel.",
+    "nicht_ziele": [
+      "Keine Veröffentlichung."
+    ],
+    "schreibumfang": [
+      "02-Anwendung/steuerung/"
+    ],
+    "arbeitsort": {
+      "id": 7,
+      "name": "Anwendung",
+      "beschreibung": "Ordner 02-Anwendung"
+    },
+    "abnahmekriterien": [
+      {
+        "id": "AK-1",
+        "text": "Tests grün."
+      },
+      {
+        "id": "AK-2",
+        "text": "Lint sauber."
+      }
+    ],
+    "quellenhinweise": [
+      "PLAYBOOK.md"
+    ],
+    "profil": {
+      "fassung": 3,
+      "text": "Projektprofil."
+    },
+    "entscheidungen": [
+      {
+        "id": 11,
+        "version": 1,
+        "titel": "Ablauf",
+        "entscheidung": "Ohne Abnahme.",
+        "warum": "Schlank."
+      }
+    ],
+    "texte": [
+      {
+        "id": 5,
+        "version": 2,
+        "titel": "Notiz",
+        "inhalt": "Text."
+      }
+    ],
+    "links": [
+      {
+        "id": 6,
+        "version": 1,
+        "titel": "Doku",
+        "url": "https://example.invalid/doku"
+      }
+    ]
+  }
+}

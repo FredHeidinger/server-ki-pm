@@ -7,6 +7,7 @@ Regeln:
   ``Konflikt`` ist ein DienstFehler für konkurrierende oder veraltete Anfragen.
 """
 
+import functools
 import hashlib
 import json
 import re
@@ -24,6 +25,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from .models import (
+    AUSFUEHRUNG_AKTIV,
     Abhaengigkeit,
     Arbeitsort,
     Auftrag,
@@ -37,6 +39,7 @@ from .models import (
     OrdnerAnfrage,
     Projekt,
     Revision,
+    WerkbankAusfuehrung,
 )
 
 KUERZEL_MUSTER = re.compile(r"[A-Z][A-Z0-9]{1,7}")
@@ -150,6 +153,36 @@ def _bearbeiter_abloesen(auftrag: Auftrag) -> None:
     auftrag.bearbeiter_bindung = None
     auftrag.bearbeiter_benutzer = None
     auftrag.bearbeiter_name = ""
+
+
+def _werkbank_aktiv(auftrag: Auftrag) -> bool:
+    """Läuft der Auftrag gerade in einer aktiven Ausführung einer KI-Werkbank?"""
+    return WerkbankAusfuehrung.objects.filter(
+        auftrag_id=auftrag.pk, zustand__in=AUSFUEHRUNG_AKTIV
+    ).exists()
+
+
+def _ohne_aktive_werkbank(handlung: str):
+    """Aktive Werkbank-Aufträge ändern nur die Werkbank-Aktionen (Antworten, Bearbeitung ändern,
+    Abbrechen): Dieser alte Weg darf sie weder neu planen, verschieben, entkoppeln noch
+    vorzeitig abschließen (Auftrag 7.2). Termine und Meilensteine bleiben änderbar."""
+
+    def deko(funktion):
+        @functools.wraps(funktion)
+        def innen(akteur, auftrag, *args, **kwargs):
+            # Prüfung und Wirkung teilen eine Transaktion (BEGIN IMMEDIATE): Startet die Werkbank
+            # dazwischen, sieht die Prüfung das, statt dass die Wirkung eine laufende Ausführung trifft.
+            with transaction.atomic():
+                if _werkbank_aktiv(auftrag):
+                    raise Konflikt(
+                        f"{auftrag.nummer} läuft auf einer KI-Werkbank: {handlung} geht nur über die "
+                        "Aktionen der Werkbank-Ausführung (Antworten, Bearbeitung ändern, Abbrechen)."
+                    )
+                return funktion(akteur, auftrag, *args, **kwargs)
+
+        return innen
+
+    return deko
 
 
 def _owner_erforderlich(akteur: Akteur, handlung: str) -> None:
@@ -616,6 +649,13 @@ def projekt_archivieren(akteur: Akteur, projekt: Projekt, *, aktiv: bool = False
         if projekt.aktiv == aktiv:
             return projekt
         if not aktiv:
+            if WerkbankAusfuehrung.objects.filter(
+                auftrag__projekt=projekt, zustand__in=AUSFUEHRUNG_AKTIV
+            ).exists():
+                raise Konflikt(
+                    f"„{projekt.name}“ hat eine laufende Werkbank-Ausführung; zuerst abschließen "
+                    "oder abbrechen."
+                )
             laufend = ", ".join(a.nummer for a in laufende_eintraege(projekt))
             if laufend:
                 raise Konflikt(
@@ -705,6 +745,9 @@ def arbeitsort_aendern(
         )
         if "bestätigt" in geaendert:
             _abgedeckte_anfragen_erledigen()
+        from . import werkbank_aktionen
+
+        werkbank_aktionen.kontext_geaendert(akteur, ort.projekt)
     return ort
 
 
@@ -816,12 +859,18 @@ BINDUNG_VERWEISE = (
     ("Installation", "bindung"),
     ("Nachweis", "bindung"),
     ("ExterneAktion", "bindung"),
+    ("WerkbankInstanz", "bindung"),  # eigene Regel in bindung_benutzt
 )
 
 
 def bindung_benutzt(bindung: ChatBindung) -> bool:
     """Hängen Aufträge, Meldungen, Ergebnisse oder frühere Meldungen an dem Zugang, bleibt er für
-    den Verlauf."""
+    den Verlauf. Bei einer Werkbank zählt deren Verwaltung (``werkbank.instanz_benutzt``)."""
+    if bindung.art == ChatBindung.ART_WERKBANK:
+        from . import werkbank
+
+        instanz = getattr(bindung, "werkbank", None)
+        return instanz is not None and werkbank.instanz_benutzt(instanz)
     return any(
         apps.get_model("steuerung", modell).objects.filter(**{feld: bindung}).exists()
         for modell, feld in BINDUNG_VERWEISE
@@ -831,6 +880,13 @@ def bindung_benutzt(bindung: ChatBindung) -> bool:
 def bindung_loeschen(akteur: Akteur, bindung: ChatBindung) -> None:
     """Unbenutzten Zugang endgültig löschen; benutzte werden nur widerrufen (Archiv)."""
     _owner_erforderlich(akteur, "Zugänge löschen")
+    if bindung.art == ChatBindung.ART_WERKBANK:
+        from . import werkbank
+
+        instanz = getattr(bindung, "werkbank", None)
+        if instanz is not None:
+            werkbank.instanz_loeschen(akteur, instanz)
+            return
     if bindung_benutzt(bindung):
         raise DienstFehler(
             f"„{bindung.name}“ hat schon an Aufträgen gearbeitet und bleibt für den Verlauf "
@@ -909,16 +965,15 @@ def ordner_verwerfen(akteur: Akteur, anfrage: OrdnerAnfrage) -> None:
 
 
 def bindung_pruefen(schluessel: str) -> ChatBindung | None:
-    """Schlüssel prüfen und „zuletzt aktiv“ vermerken; gibt die aktive Bindung zurück oder None."""
+    """Schlüssel prüfen und „zuletzt aktiv“ vermerken; gibt die aktive Bindung zurück oder None.
+    Ein Werkbank-Schlüssel gilt hier nie: Chat-Wege liefert er nicht."""
     bindung = bindung_finden(schluessel)
     if bindung is not None:
         ChatBindung.objects.filter(pk=bindung.pk).update(zuletzt_aktiv=timezone.now())
     return bindung
 
 
-def bindung_finden(schluessel: str) -> ChatBindung | None:
-    """Schlüssel nur lesend prüfen; gibt die aktive Bindung zurück oder None. Nie Details nach
-    außen."""
+def _bindung_laden(schluessel: str) -> ChatBindung | None:
     teile = (schluessel or "").strip().split("_", 2)
     if len(teile) != 3 or teile[0] != "kipm":
         return None
@@ -930,6 +985,29 @@ def bindung_finden(schluessel: str) -> ChatBindung | None:
     if not secrets.compare_digest(bindung.schluessel_hash, _schluessel_hash(schluessel.strip())):
         return None
     return bindung
+
+
+def bindung_finden(schluessel: str) -> ChatBindung | None:
+    """Schlüssel nur lesend prüfen; gibt die aktive Chat- oder PC-Bindung zurück oder None. Nie
+    Details nach außen. Werkbank-Schlüssel liefert nur ``werkbank_bindung_finden``."""
+    bindung = _bindung_laden(schluessel)
+    if bindung is None or bindung.art == ChatBindung.ART_WERKBANK:
+        return None
+    return bindung
+
+
+def werkbank_bindung_finden(schluessel: str) -> ChatBindung | None:
+    """Die aktive Bindung der Art „werkbank“ zu diesem Schlüssel, sonst None (nur lesend). Auch
+    die Chat-Wege nutzen das, um einen Werkbank-Schlüssel verständlich abzuweisen."""
+    bindung = _bindung_laden(schluessel)
+    return bindung if bindung is not None and bindung.art == ChatBindung.ART_WERKBANK else None
+
+
+WERKBANK_ABWEISUNG = (
+    "Dieser Schlüssel gehört einer KI-Werkbank und gilt nur für die Werkbank-Schnittstelle "
+    "(/api/werkbank/). Für einen Chat legt der Owner unter „Konto & KI verbinden“ einen "
+    "eigenen Zugang an."
+)
 
 
 # --- Aufträge: Sicht und Reifegrad ----------------------------------------------------------
@@ -1317,6 +1395,7 @@ BEARBEITBARE_ZUSTAENDE = (
 )
 
 
+@_ohne_aktive_werkbank("Neu planen")
 def auftrag_bearbeiten(
     akteur: Akteur,
     auftrag: Auftrag,
@@ -1381,6 +1460,10 @@ def auftrag_bearbeiten(
             auftrag.zustand = Auftrag.ENTWURF
             auftrag.freigegeben_am = None
             folge = "Freigabe erloschen"
+            if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+                from . import werkbank
+
+                werkbank.freigabe_aufgehoben(auftrag)
         elif auftrag.zustand in Auftrag.BEARBEITER_ZUSTAENDE:
             _bearbeiter_abloesen(auftrag)
             auftrag.zustand = Auftrag.ENTWURF
@@ -1453,6 +1536,7 @@ def faellig_setzen(akteur: Akteur, auftrag: Auftrag, wert) -> None:
         )
 
 
+@_ohne_aktive_werkbank("Abhängigkeiten ändern")
 def vorgaenger_eintragen(
     akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag, grund: str = ""
 ) -> None:
@@ -1489,6 +1573,7 @@ def vorgaenger_eintragen(
         )
 
 
+@_ohne_aktive_werkbank("Abhängigkeiten ändern")
 def vorgaenger_entfernen(akteur: Akteur, auftrag: Auftrag, vorgaenger: Auftrag) -> None:
     _planung_erforderlich(akteur, "Abhängigkeiten entfernen")
     with transaction.atomic():
@@ -1851,6 +1936,10 @@ def _verschiebeplan(eintraege, archiv) -> tuple[dict, dict[int, dict], list[Abha
         e["aendert"] = bool(wechsel or e["aenderungen"])
         if not e["aendert"]:
             continue
+        if (wechsel or p["modul"] != a.modul or p["ort_aendert"]) and _werkbank_aktiv(a):
+            e["konflikte"].append(
+                f"{a.nummer} läuft auf einer KI-Werkbank und kann nicht verschoben werden."
+            )
         _zustand_planen(a, wechsel, p)
         if wechsel:
             e["aenderungen"].insert(
@@ -2123,6 +2212,10 @@ def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
         auftrag.zustand = Auftrag.FREIGEGEBEN
         auftrag.freigegeben_am = timezone.now()
         auftrag.save(update_fields=["zustand", "freigegeben_am", "aktualisiert_am"])
+        if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+            from . import werkbank
+
+            werkbank.kontext_binden(auftrag)  # die Freigabe bindet auch die Kontextbasis
         _ereignis(
             akteur,
             projekt=auftrag.projekt,
@@ -2145,6 +2238,10 @@ def freigabe_zuruecknehmen(akteur: Akteur, auftrag: Auftrag, grund: str = "") ->
         auftrag.zustand = Auftrag.ENTWURF
         auftrag.freigegeben_am = None
         auftrag.save(update_fields=["zustand", "freigegeben_am", "aktualisiert_am"])
+        if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+            from . import werkbank
+
+            werkbank.freigabe_aufgehoben(auftrag)
         _ereignis(
             akteur,
             projekt=auftrag.projekt,
@@ -2156,6 +2253,7 @@ def freigabe_zuruecknehmen(akteur: Akteur, auftrag: Auftrag, grund: str = "") ->
         )
 
 
+@_ohne_aktive_werkbank("Abbrechen")
 def auftrag_abbrechen(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
     _owner_erforderlich(akteur, "Aufträge abbrechen")
     if not grund.strip():
@@ -2178,6 +2276,7 @@ def auftrag_abbrechen(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
         )
 
 
+@_ohne_aktive_werkbank("Entkoppeln")
 def bearbeitung_unklar(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
     """Bearbeiter verschwunden oder Widerspruch zu Projektdateien: Übernahme erlischt, der
     Auftrag geht zurück in den Entwurf und braucht eine neue Freigabe."""
@@ -2215,6 +2314,11 @@ def auftrag_uebernehmen(akteur: Akteur, auftrag: Auftrag, revision_nr: int) -> A
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
         if not aktuell.projekt.aktiv:
             raise Konflikt(f"{aktuell.nummer} gehört zu einem archivierten Projekt.")
+        if aktuell.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+            raise Konflikt(
+                f"{aktuell.nummer} ist einer KI-Werkbank zugewiesen und kann nicht von einem "
+                "Chat übernommen werden. Der Owner hebt die Zuweisung auf, wenn ein Chat ran soll."
+            )
         if aktuell.zustand != Auftrag.FREIGEGEBEN or aktuell.hat_bearbeiter:
             if aktuell.hat_bearbeiter:
                 raise Konflikt(
@@ -2364,6 +2468,7 @@ def fehler_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str)
     return meldung
 
 
+@_ohne_aktive_werkbank("Antworten")
 def rueckfrage_beantworten(akteur: Akteur, auftrag: Auftrag, text: str) -> Meldung:
     """Antwort des Menschen auf Rückfrage, Hindernis oder Fehler; hebt die Blockade auf."""
     _planung_erforderlich(akteur, "Rückfragen beantworten")
@@ -2411,6 +2516,7 @@ def hindernis_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: s
     return meldung
 
 
+@_ohne_aktive_werkbank("Abschließen")
 def ergebnis_einreichen(
     akteur: Akteur,
     auftrag: Auftrag,
@@ -2555,7 +2661,12 @@ def weiter_reihenfolge(projekt: Projekt, modul: Modul | None = None) -> list[Auf
     Bearbeiter und ohne offenen Vorgänger, nach Priorität, dann die älteste Nummer."""
     return _nach_rang(
         _eintraege_im_modul(projekt, modul)
-        .filter(zustand=Auftrag.FREIGEGEBEN, bearbeiter_bindung=None, bearbeiter_benutzer=None)
+        .filter(
+            zustand=Auftrag.FREIGEGEBEN,
+            bearbeiter_bindung=None,
+            bearbeiter_benutzer=None,
+            ausfuehrungsweg=Auftrag.WEG_CHAT,  # Werkbank-Aufträge gehören keinem freien Chat
+        )
         .exclude(pk__in=_mit_offenem_vorgaenger(projekt).values("auftrag_id"))
     )
 
@@ -2590,6 +2701,8 @@ def verstummt(auftrag: Auftrag) -> dict | None:
     ``stand`` ist die letzte Meldung des Bearbeiters, ohne Antworten und ohne den Ende-Vermerk."""
     if auftrag.zustand != Auftrag.IN_ARBEIT or auftrag.bearbeiter_bindung_id is None:
         return None  # Bearbeitet Fred selbst, gibt es keinen Chat, der schweigen könnte.
+    if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+        return None  # Schweigen führt bei der Werkbank nie zur Neuvergabe (Erreichbarkeitswarnung)
     zeiten = [auftrag.zuletzt_gemeldet_am, auftrag.uebernommen_am]
     zuletzt = max((z for z in zeiten if z), default=auftrag.aktualisiert_am)
     ende = auftrag.meldungen.filter(art=Meldung.SITZUNGSENDE, historisch=False).first()

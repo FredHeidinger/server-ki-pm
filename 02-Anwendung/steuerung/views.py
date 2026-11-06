@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, akte, dienst, sicherung
+from . import abgleich, akte, dienst, sicherung, views_werkbank
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -229,11 +229,34 @@ def _reifegrad(auftrag: Auftrag) -> str:
     return "geplant – freigabebereit" if dienst.freigabefaehig(auftrag) else "in Planung"
 
 
+def _werkbank_hauptaktion(auftrag: Auftrag) -> dict:
+    """Für Werkbank-Aufträge gibt es keinen Chat-Knopf: Der Satz sagt, was wartet und wo."""
+    ausf = auftrag.ausfuehrungen.order_by("-id").first()
+    ziel = "#werkbank"
+    if auftrag.zustand == Auftrag.FREIGEGEBEN:
+        satz = "Freigegeben: Die zugewiesene Werkbank übernimmt ihn. Für dich ist nichts zu tun."
+        return {"art": "hinweis", "satz": satz, "kurz": "wartet auf die Werkbank", "ziel": ziel}
+    bedarf = [b for b in (ausf.bedarf if ausf else []) if b.get("offen")]
+    if bedarf:
+        arten = {"frage": "Rückfrage", "freigabe": "Freigabe", "fehler": "Fehler"}
+        was = ", ".join(sorted({arten.get(b["typ"], "Klärung") for b in bedarf}))
+        satz = f"Die Werkbank wartet auf dich ({was}). Antworten und Freigaben stehen unten bei „Ausführung“."
+        return {"art": "hinweis", "satz": satz, "kurz": "Werkbank wartet auf dich", "ziel": ziel}
+    satz = "In Arbeit auf einer KI-Werkbank. Für dich ist nichts zu tun."
+    return {"art": "hinweis", "satz": satz, "kurz": "", "ziel": ziel}
+
+
 def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
     """Der eine Knopf, der den Auftrag jetzt weiterbringt; gleich in „Wartet auf dich“, auf der
     Board-Karte und im Auftragskopf. Ohne möglichen Knopf ein Satz: warum und was zu tun ist
     (``kurz`` für die Karte)."""
     z = auftrag.zustand
+    if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK and z in (
+        Auftrag.IN_ARBEIT,
+        Auftrag.BLOCKIERT,
+        Auftrag.FREIGEGEBEN,
+    ):
+        return _werkbank_hauptaktion(auftrag)
     if z == Auftrag.BLOCKIERT:
         frage = auftrag.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
         return {"art": "antworten", "text": "Antworten", "frage": frage}
@@ -599,6 +622,15 @@ def _aktionen(auftrag: Auftrag) -> tuple[list[dict], bool, list]:
         a("unklar", "Bearbeitung ist unklar", gefahr=True, begruendung=True)
     if not auftrag.ist_endzustand:
         a("abbrechen", "Abbrechen", gefahr=True, begruendung=True)
+    if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+        aktiv = dienst._werkbank_aktiv(auftrag)
+        for x in aktionen:
+            if x["name"] == "selbst":
+                x.update(erlaubt=False, grund="Der Auftrag ist einer Werkbank zugewiesen.")
+            elif aktiv and x["name"] in ("unklar", "abbrechen"):
+                x.update(erlaubt=False, grund="Läuft auf einer Werkbank: unten bei „Ausführung“.")
+        if aktiv:
+            bearbeitbar = False
     return aktionen, bearbeitbar, pruefpunkte
 
 
@@ -629,6 +661,7 @@ def _auftrag_kontext(request: HttpRequest, auftrag: Auftrag) -> dict:
         "zurueck": request.GET.get("zurueck", ""),
         "arbeitsorte": auftrag.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True),
         "arbeitsort_form": ArbeitsortForm(prefix="ort"),
+        "werkbank": views_werkbank.auftrag_daten(auftrag) if _akteur(request).ist_owner else None,
     }
 
 
@@ -1094,7 +1127,8 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
             "projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
             "github": abgleich.zugang_anzeige(_akteur(request)),
             "github_form": GitHubSchluesselForm(prefix="g"),
-            **_zugaenge(ChatBindung.objects.all()),
+            **views_werkbank.verwaltung(request),
+            **_zugaenge(ChatBindung.objects.exclude(art=ChatBindung.ART_WERKBANK)),
         },
     )
 

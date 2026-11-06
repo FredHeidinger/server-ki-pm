@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/schritt_antwort.schema.json",
+  "title": "Antwort auf schritt",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "erlaubt": {
+      "type": "boolean"
+    },
+    "grund_code": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "text": {
+      "$ref": "gemeinsam.schema.json#/$defs/text"
+    },
+    "naechste_handlung": {
+      "$ref": "gemeinsam.schema.json#/$defs/text"
+    },
+    "autorisierung_id": {
+      "oneOf": [
+        {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "statusversion": {
+      "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "erlaubt",
+    "grund_code",
+    "text",
+    "naechste_handlung",
+    "autorisierung_id",
+    "statusversion"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "erlaubt": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "autorisierung_id": {
+            "$ref": "gemeinsam.schema.json#/$defs/uuid"
+          },
+          "grund_code": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "erlaubt": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "autorisierung_id": {
+            "type": "null"
+          },
+          "grund_code": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -98,3 +98,39 @@ def freigegeben(akteur, projekt):
     auftrag.refresh_from_db()
     assert auftrag.zustand == Auftrag.FREIGEGEBEN
     return auftrag
+
+
+# --- Werkbank (gemeinsame Bausteine der Werkbank-Tests) -------------------------------------
+
+
+@pytest.fixture
+def w_instanz(akteur, projekt):
+    from steuerung import werkbank
+
+    inst, schluessel = werkbank.instanz_anlegen(akteur, name="Werkbank PC", projekte=[projekt])
+    inst.klartext = schluessel
+    return inst
+
+
+@pytest.fixture
+def w_pbindung(w_instanz, projekt):
+    from steuerung.models import WerkbankProjektbindung
+
+    return WerkbankProjektbindung.objects.create(
+        instanz=w_instanz, projekt=projekt, arbeitsort=projekt.arbeitsorte.first()
+    )
+
+
+@pytest.fixture
+def w_ausfuehrung(akteur, projekt, w_instanz, w_pbindung):
+    """Ein freigegebener, zugewiesener und von der Werkbank übernommener Auftrag."""
+    from steuerung import werkbank
+    from steuerung.models import WerkbankAusfuehrung
+    from tests import werkbank_hilfen as h
+
+    auftrag = arbeitspaket(akteur, projekt)
+    werkbank.zuweisen(akteur, auftrag, w_pbindung, freigeben=True)
+    auftrag.refresh_from_db()
+    n = h.uebernahme_nachricht(h.vor_quelle(w_instanz, w_pbindung, auftrag))
+    werkbank.operation_ausfuehren(w_instanz, "uebernehmen", n)
+    return WerkbankAusfuehrung.objects.get(auftrag=auftrag)

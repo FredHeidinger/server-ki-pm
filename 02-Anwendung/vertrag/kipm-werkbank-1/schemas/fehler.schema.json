@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/fehler.schema.json",
+  "title": "Fehlerantwort",
+  "type": "object",
+  "properties": {
+    "fehler": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+        },
+        "text": {
+          "$ref": "gemeinsam.schema.json#/$defs/text"
+        },
+        "naechste_handlung": {
+          "$ref": "gemeinsam.schema.json#/$defs/text"
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "naechste_handlung"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "fehler"
+  ],
+  "additionalProperties": false
+}

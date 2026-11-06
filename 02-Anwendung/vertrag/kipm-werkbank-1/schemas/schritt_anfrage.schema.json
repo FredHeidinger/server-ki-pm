@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/schritt_anfrage.schema.json",
+  "title": "POST schritt (Start eines logischen Schritts)",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "art": {
+      "const": "schritt"
+    },
+    "quelle": {
+      "$ref": "gemeinsam.schema.json#/$defs/quelle"
+    },
+    "nutzlast": {
+      "type": "object",
+      "properties": {
+        "schritt": {
+          "$ref": "gemeinsam.schema.json#/$defs/schrittschluessel"
+        },
+        "versuch_nr": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "eingabehash": {
+          "$ref": "gemeinsam.schema.json#/$defs/sha256"
+        },
+        "wirkung": {
+          "enum": [
+            "lesen",
+            "schreiben",
+            "pruefen",
+            "review",
+            "integrieren",
+            "ki_aufruf"
+          ]
+        },
+        "owner_aktion_id": {
+          "oneOf": [
+            {
+              "$ref": "gemeinsam.schema.json#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schritt",
+        "versuch_nr",
+        "eingabehash",
+        "wirkung",
+        "owner_aktion_id"
+      ],
+      "additionalProperties": false
+    },
+    "inhaltshash": {
+      "$ref": "gemeinsam.schema.json#/$defs/sha256"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "art",
+    "quelle",
+    "nutzlast",
+    "inhaltshash"
+  ],
+  "additionalProperties": false
+}

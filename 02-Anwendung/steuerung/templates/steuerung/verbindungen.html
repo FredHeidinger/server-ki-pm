@@ -81,6 +81,8 @@
   </details>{% endif %}
 </section>
 
+{% include "steuerung/werkbank_verwaltung.html" %}
+
 <section id="ordner" class="box{% if ordneranfragen %} warn{% endif %}">
   <h2>Neue Arbeitsordner</h2>
   <p class="gedaempft">Hier entsteht nur dann ein Eintrag, wenn eine KI aus einem Ordner arbeitet, den noch kein Arbeitsort eines Projekts abdeckt. Ordnest du ihn einem Projekt zu, wird er dort ein Arbeitsort, und die KI weiß künftig das Projekt.</p>

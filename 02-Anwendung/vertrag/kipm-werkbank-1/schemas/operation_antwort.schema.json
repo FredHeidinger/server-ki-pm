@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/operation_antwort.schema.json",
+  "title": "GET operationen/<uuid>",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "status": {
+      "enum": [
+        "unbekannt",
+        "gespeichert"
+      ]
+    },
+    "inhaltshash": {
+      "oneOf": [
+        {
+          "$ref": "gemeinsam.schema.json#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ausgang": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "http_status": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 599
+            },
+            "antwort": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "http_status",
+            "antwort"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "status",
+    "inhaltshash",
+    "ausgang"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "gespeichert"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ausgang": {
+            "type": "object"
+          },
+          "inhaltshash": {
+            "$ref": "gemeinsam.schema.json#/$defs/sha256"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "unbekannt"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ausgang": {
+            "type": "null"
+          },
+          "inhaltshash": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

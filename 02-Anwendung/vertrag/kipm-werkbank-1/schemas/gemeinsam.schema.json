@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/gemeinsam.schema.json",
+  "title": "Gemeinsame Bausteine kipm-werkbank/1",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "vertrag": {
+      "const": "kipm-werkbank/1"
+    },
+    "ganzzahl": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "posint": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "zeit": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "kurztext": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "quelle_vor_uebernahme": {
+      "type": "object",
+      "properties": {
+        "server_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "werkbank_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "projektbindung_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "projektbindung_version": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "auftrag_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "revision": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "zuweisung_version": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        }
+      },
+      "required": [
+        "server_id",
+        "werkbank_id",
+        "projektbindung_id",
+        "projektbindung_version",
+        "auftrag_id",
+        "revision",
+        "zuweisung_version"
+      ],
+      "additionalProperties": false
+    },
+    "quelle": {
+      "type": "object",
+      "properties": {
+        "server_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "werkbank_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "projektbindung_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "projektbindung_version": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "auftrag_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "revision": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "zuweisung_version": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "ausfuehrung_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "gemeinsam.schema.json#/$defs/sha256"
+        }
+      },
+      "required": [
+        "server_id",
+        "werkbank_id",
+        "projektbindung_id",
+        "projektbindung_version",
+        "auftrag_id",
+        "revision",
+        "zuweisung_version",
+        "ausfuehrung_id",
+        "snapshot_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "planfassung": {
+      "type": "string",
+      "pattern": "^(vorplanung|[0-9a-f]{64})$"
+    },
+    "paket": {
+      "type": "string",
+      "pattern": "^(root|[A-Za-z0-9._-]{1,64})$"
+    },
+    "schrittschluessel": {
+      "type": "object",
+      "properties": {
+        "ausfuehrung_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "planfassung": {
+          "$ref": "gemeinsam.schema.json#/$defs/planfassung"
+        },
+        "paket": {
+          "$ref": "gemeinsam.schema.json#/$defs/paket"
+        },
+        "phase": {
+          "type": "string",
+          "pattern": "^[a-z_]{1,32}$"
+        },
+        "position": {
+          "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+        }
+      },
+      "required": [
+        "ausfuehrung_id",
+        "planfassung",
+        "paket",
+        "phase",
+        "position"
+      ],
+      "additionalProperties": false
+    },
+    "technischer_zustand": {
+      "enum": [
+        "plant",
+        "laeuft",
+        "wartet_antwort",
+        "wartet_freigabe",
+        "fehler",
+        "unklar",
+        "offline",
+        "halt_angefordert",
+        "angehalten",
+        "abbruch_angefordert",
+        "abgebrochen",
+        "abschluss_gemeldet"
+      ]
+    },
+    "aktionsart": {
+      "enum": [
+        "antworten",
+        "start_freigeben",
+        "uebernahme_freigeben",
+        "weiterbauen",
+        "bearbeitung_beenden",
+        "abbrechen"
+      ]
+    },
+    "aktionszustand": {
+      "enum": [
+        "ausstehend",
+        "angenommen",
+        "ausgefuehrt",
+        "veraltet",
+        "fehlgeschlagen",
+        "unklar"
+      ]
+    },
+    "haltzweck": {
+      "enum": [
+        "bearbeitung_aendern",
+        "abbrechen",
+        "kontext_veraltet"
+      ]
+    }
+  }
+}

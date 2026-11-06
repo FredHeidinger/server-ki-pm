@@ -1,0 +1,10 @@
+{
+  "fehler": {
+    "code": "VERALTET",
+    "text": "Die Zuweisungsfassung ist nicht mehr aktuell.",
+    "naechste_handlung": "Abgleich abrufen und mit der neuen Fassung neu beginnen.",
+    "details": {
+      "aktuelle_zuweisung_version": 2
+    }
+  }
+}

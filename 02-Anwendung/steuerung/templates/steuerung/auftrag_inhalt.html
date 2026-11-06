@@ -29,6 +29,8 @@
   {% endif %}
 </header>
 
+{% if werkbank %}{% include "steuerung/auftrag_werkbank.html" %}{% endif %}
+
 {% if auftrag.zustand == "ENTWURF" and pruef_offen %}
 <section class="box warn" id="freigabe" aria-labelledby="h-freigabe-{{ auftrag.pk }}">
   <h2 id="h-freigabe-{{ auftrag.pk }}">Freigabe: was noch fehlt</h2>

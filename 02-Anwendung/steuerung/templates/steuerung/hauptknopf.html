@@ -16,5 +16,5 @@
 {% elif ort == "karte" %}
 {% if h.kurz %}<p class="kartenhinweis">{{ h.kurz }}</p>{% endif %}
 {% else %}
-<p class="hinweissatz">{{ h.satz }}{% if h.ort and ort == "eingang" %} <a href="{% url 'auftrag_detail' auftrag_id=a.pk %}#freigabe">Arbeitsort wählen</a>{% endif %}</p>
+<p class="hinweissatz">{{ h.satz }}{% if h.ziel and ort != "kopf" %} <a href="{% url 'auftrag_detail' auftrag_id=a.pk %}{{ h.ziel }}">Zur Ausführung</a>{% endif %}{% if h.ort and ort == "eingang" %} <a href="{% url 'auftrag_detail' auftrag_id=a.pk %}#freigabe">Arbeitsort wählen</a>{% endif %}</p>
 {% endif %}

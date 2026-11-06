@@ -1,0 +1,30 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "0b9a7c3e-6d21-4e58-9f04-7a1c5e8d2b10",
+  "art": "schritt",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+    "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+  },
+  "nutzlast": {
+    "schritt": {
+      "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+      "planfassung": "vorplanung",
+      "paket": "root",
+      "phase": "plan",
+      "position": 0
+    },
+    "versuch_nr": 1,
+    "eingabehash": "30a93b61151565c18f57738bb790db3f30ee11f258220d329b83fc9766bb5de5",
+    "wirkung": "ki_aufruf",
+    "owner_aktion_id": null
+  },
+  "inhaltshash": "61be7b1f4291db7f9333b1c7b42341a2abc5491efe96056f7d5b20e14444c1f2"
+}

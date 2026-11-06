@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/auftragssnapshot.schema.json",
+  "title": "Unveränderlicher Auftragssnapshot",
+  "type": "object",
+  "properties": {
+    "snapshot_version": {
+      "const": 1
+    },
+    "auftrag_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/posint"
+    },
+    "nummer": {
+      "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+    },
+    "titel": {
+      "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+    },
+    "revision": {
+      "$ref": "gemeinsam.schema.json#/$defs/posint"
+    },
+    "beschreibung": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "ziel": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "nicht_ziele": {
+      "type": "array",
+      "items": {
+        "$ref": "gemeinsam.schema.json#/$defs/text"
+      }
+    },
+    "schreibumfang": {
+      "type": "array",
+      "items": {
+        "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+      }
+    },
+    "arbeitsort": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "name": {
+          "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+        },
+        "beschreibung": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "beschreibung"
+      ],
+      "additionalProperties": false
+    },
+    "abnahmekriterien": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^AK-[0-9]{1,4}$"
+          },
+          "text": {
+            "$ref": "gemeinsam.schema.json#/$defs/text"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "quellenhinweise": {
+      "type": "array",
+      "items": {
+        "$ref": "gemeinsam.schema.json#/$defs/text"
+      }
+    },
+    "profil": {
+      "type": "object",
+      "properties": {
+        "fassung": {
+          "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 50000
+        }
+      },
+      "required": [
+        "fassung",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "entscheidungen": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "version": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "titel": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "entscheidung": {
+            "$ref": "gemeinsam.schema.json#/$defs/text"
+          },
+          "warum": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "titel",
+          "entscheidung",
+          "warum"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "texte": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "version": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "titel": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "inhalt": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "titel",
+          "inhalt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "version": {
+            "$ref": "gemeinsam.schema.json#/$defs/posint"
+          },
+          "titel": {
+            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "titel",
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "snapshot_version",
+    "auftrag_id",
+    "nummer",
+    "titel",
+    "revision",
+    "beschreibung",
+    "ziel",
+    "nicht_ziele",
+    "schreibumfang",
+    "arbeitsort",
+    "abnahmekriterien",
+    "quellenhinweise",
+    "profil",
+    "entscheidungen",
+    "texte",
+    "links"
+  ],
+  "additionalProperties": false
+}

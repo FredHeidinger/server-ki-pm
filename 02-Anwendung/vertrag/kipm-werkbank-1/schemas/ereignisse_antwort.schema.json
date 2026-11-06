@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/ereignisse_antwort.schema.json",
+  "title": "Antwort auf ereignisse",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "ereignis_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "ergebnis": {
+      "enum": [
+        "verarbeitet",
+        "historisch_quittiert",
+        "wiederholt"
+      ]
+    },
+    "statusversion": {
+      "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+    },
+    "technischer_zustand": {
+      "$ref": "gemeinsam.schema.json#/$defs/technischer_zustand"
+    },
+    "haltanforderung": {
+      "oneOf": [
+        {
+          "$ref": "gemeinsam.schema.json#/$defs/haltzweck"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "naechste_handlung": {
+      "$ref": "gemeinsam.schema.json#/$defs/text"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "ereignis_id",
+    "ergebnis",
+    "statusversion",
+    "technischer_zustand",
+    "haltanforderung",
+    "naechste_handlung"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,778 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kipm.invalid/werkbank/1/ereignisse_anfrage.schema.json",
+  "title": "POST ereignisse (ein technisches Ereignis)",
+  "type": "object",
+  "properties": {
+    "vertrag": {
+      "$ref": "gemeinsam.schema.json#/$defs/vertrag"
+    },
+    "operation_id": {
+      "$ref": "gemeinsam.schema.json#/$defs/uuid"
+    },
+    "art": {
+      "const": "ereignisse"
+    },
+    "quelle": {
+      "$ref": "gemeinsam.schema.json#/$defs/quelle"
+    },
+    "nutzlast": {
+      "type": "object",
+      "properties": {
+        "ereignis_id": {
+          "$ref": "gemeinsam.schema.json#/$defs/uuid"
+        },
+        "sequenz": {
+          "$ref": "gemeinsam.schema.json#/$defs/posint"
+        },
+        "statusversion": {
+          "oneOf": [
+            {
+              "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ereignis": {
+          "type": "object",
+          "properties": {
+            "art": {
+              "enum": [
+                "lebenszeichen",
+                "plan_bestaetigt",
+                "paket_status",
+                "rueckfrage",
+                "freigabe_noetig",
+                "antwort_angewendet",
+                "aktion_angewendet",
+                "fehler",
+                "offline_phase",
+                "kontext_veraltet",
+                "halt_bestaetigt",
+                "abbruch_bestaetigt",
+                "abschluss_bericht"
+              ]
+            },
+            "daten": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "art",
+            "daten"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "lebenszeichen"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "plan_bestaetigt"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "planfassung": {
+                        "$ref": "gemeinsam.schema.json#/$defs/sha256"
+                      },
+                      "pakete": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "paket": {
+                              "$ref": "gemeinsam.schema.json#/$defs/paket"
+                            },
+                            "titel": {
+                              "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                            },
+                            "ersetzt": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "gemeinsam.schema.json#/$defs/paket"
+                              }
+                            },
+                            "zerlegt_aus": {
+                              "oneOf": [
+                                {
+                                  "$ref": "gemeinsam.schema.json#/$defs/paket"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "zustand": {
+                              "enum": [
+                                "offen",
+                                "laeuft",
+                                "erledigt",
+                                "ersetzt",
+                                "zerlegt",
+                                "verworfen",
+                                "fehler"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "paket",
+                            "titel",
+                            "zustand"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "planfassung",
+                      "pakete"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "paket_status"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "paket": {
+                        "$ref": "gemeinsam.schema.json#/$defs/paket"
+                      },
+                      "zustand": {
+                        "enum": [
+                          "offen",
+                          "laeuft",
+                          "erledigt",
+                          "ersetzt",
+                          "zerlegt",
+                          "verworfen",
+                          "fehler"
+                        ]
+                      },
+                      "versuche": {
+                        "$ref": "gemeinsam.schema.json#/$defs/ganzzahl"
+                      },
+                      "handlungsbedarf": {
+                        "type": "boolean"
+                      },
+                      "text": {
+                        "type": "string",
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "paket",
+                      "zustand"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "rueckfrage"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "frage_id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9._-]{1,64}$"
+                      },
+                      "paket": {
+                        "$ref": "gemeinsam.schema.json#/$defs/paket"
+                      },
+                      "text": {
+                        "$ref": "gemeinsam.schema.json#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "frage_id",
+                      "paket",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "freigabe_noetig"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "freigabe_id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9._-]{1,64}$"
+                      },
+                      "art": {
+                        "enum": [
+                          "start",
+                          "uebernahme"
+                        ]
+                      },
+                      "pakete": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "gemeinsam.schema.json#/$defs/paket"
+                        }
+                      },
+                      "kandidaten": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                        }
+                      },
+                      "pruefstand": {
+                        "$ref": "gemeinsam.schema.json#/$defs/text"
+                      },
+                      "grund": {
+                        "$ref": "gemeinsam.schema.json#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "freigabe_id",
+                      "art",
+                      "grund"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "antwort_angewendet"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "aktion_id": {
+                        "$ref": "gemeinsam.schema.json#/$defs/uuid"
+                      }
+                    },
+                    "required": [
+                      "aktion_id"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "aktion_angewendet"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "aktion_id": {
+                        "$ref": "gemeinsam.schema.json#/$defs/uuid"
+                      },
+                      "ergebnis": {
+                        "enum": [
+                          "angewendet",
+                          "verworfen"
+                        ]
+                      },
+                      "grund": {
+                        "type": "string",
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "aktion_id",
+                      "ergebnis"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "fehler"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "paket": {
+                        "$ref": "gemeinsam.schema.json#/$defs/paket"
+                      },
+                      "code": {
+                        "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                      },
+                      "text": {
+                        "$ref": "gemeinsam.schema.json#/$defs/text"
+                      },
+                      "ausgang_unklar": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "offline_phase"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "beginn_lokal": {
+                        "$ref": "gemeinsam.schema.json#/$defs/zeit"
+                      },
+                      "grund": {
+                        "type": "string",
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "grund"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "kontext_veraltet"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "grund": {
+                        "$ref": "gemeinsam.schema.json#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "grund"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "halt_bestaetigt"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "zweck": {
+                        "$ref": "gemeinsam.schema.json#/$defs/haltzweck"
+                      }
+                    },
+                    "required": [
+                      "zweck"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "abbruch_bestaetigt"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "commits_bleiben": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{7,64}$"
+                        }
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "art": {
+                    "const": "abschluss_bericht"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "daten": {
+                    "type": "object",
+                    "properties": {
+                      "planfassung": {
+                        "$ref": "gemeinsam.schema.json#/$defs/sha256"
+                      },
+                      "kriterien": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "kriterium_id": {
+                              "type": "string",
+                              "pattern": "^AK-[0-9]{1,4}$"
+                            },
+                            "behandlung": {
+                              "enum": [
+                                "erfuellt",
+                                "bereits_erfuellt",
+                                "nicht_erfuellt",
+                                "entfaellt"
+                              ]
+                            },
+                            "nachweis": {
+                              "$ref": "gemeinsam.schema.json#/$defs/text"
+                            },
+                            "commit": {
+                              "oneOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{7,64}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kriterium_id",
+                            "behandlung",
+                            "nachweis"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1
+                      },
+                      "paketplan": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "paket": {
+                              "$ref": "gemeinsam.schema.json#/$defs/paket"
+                            },
+                            "titel": {
+                              "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                            },
+                            "ersetzt": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "gemeinsam.schema.json#/$defs/paket"
+                              }
+                            },
+                            "zerlegt_aus": {
+                              "oneOf": [
+                                {
+                                  "$ref": "gemeinsam.schema.json#/$defs/paket"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "zustand": {
+                              "enum": [
+                                "offen",
+                                "laeuft",
+                                "erledigt",
+                                "ersetzt",
+                                "zerlegt",
+                                "verworfen",
+                                "fehler"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "paket",
+                            "titel",
+                            "zustand"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1
+                      },
+                      "integrationen": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "paket": {
+                              "$ref": "gemeinsam.schema.json#/$defs/paket"
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{7,64}$"
+                            },
+                            "kandidat": {
+                              "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                            }
+                          },
+                          "required": [
+                            "paket",
+                            "commit"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "pruefungen": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "paket": {
+                              "$ref": "gemeinsam.schema.json#/$defs/paket"
+                            },
+                            "art": {
+                              "enum": [
+                                "test",
+                                "lint",
+                                "review",
+                                "gesamt",
+                                "sonstige"
+                              ]
+                            },
+                            "ergebnis": {
+                              "enum": [
+                                "bestanden",
+                                "fehlgeschlagen"
+                              ]
+                            },
+                            "beschreibung": {
+                              "$ref": "gemeinsam.schema.json#/$defs/text"
+                            }
+                          },
+                          "required": [
+                            "paket",
+                            "art",
+                            "ergebnis",
+                            "beschreibung"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "gesamtpruefung": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "paket": {
+                                "$ref": "gemeinsam.schema.json#/$defs/paket"
+                              },
+                              "art": {
+                                "enum": [
+                                  "test",
+                                  "lint",
+                                  "review",
+                                  "gesamt",
+                                  "sonstige"
+                                ]
+                              },
+                              "ergebnis": {
+                                "enum": [
+                                  "bestanden",
+                                  "fehlgeschlagen"
+                                ]
+                              },
+                              "beschreibung": {
+                                "$ref": "gemeinsam.schema.json#/$defs/text"
+                              }
+                            },
+                            "required": [
+                              "paket",
+                              "art",
+                              "ergebnis",
+                              "beschreibung"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "offene_arbeiten": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "gemeinsam.schema.json#/$defs/text"
+                        }
+                      },
+                      "ungeklaerte_wirkungen": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "gemeinsam.schema.json#/$defs/text"
+                        }
+                      },
+                      "bereits_erfuellt_am_commit": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{7,64}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "kosten": {
+                        "type": "object",
+                        "properties": {
+                          "bezugsrahmen": {
+                            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                          },
+                          "text": {
+                            "$ref": "gemeinsam.schema.json#/$defs/kurztext"
+                          }
+                        },
+                        "required": [
+                          "bezugsrahmen",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "planfassung",
+                      "kriterien",
+                      "paketplan",
+                      "integrationen",
+                      "pruefungen",
+                      "gesamtpruefung",
+                      "offene_arbeiten",
+                      "ungeklaerte_wirkungen"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "ereignis_id",
+        "sequenz",
+        "statusversion",
+        "ereignis"
+      ],
+      "additionalProperties": false
+    },
+    "inhaltshash": {
+      "$ref": "gemeinsam.schema.json#/$defs/sha256"
+    }
+  },
+  "required": [
+    "vertrag",
+    "operation_id",
+    "art",
+    "quelle",
+    "nutzlast",
+    "inhaltshash"
+  ],
+  "additionalProperties": false
+}

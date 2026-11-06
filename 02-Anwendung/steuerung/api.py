@@ -47,6 +47,8 @@ def bindung_erforderlich(view):
         if not kopf.startswith("Bearer "):
             return _fehler(401, "Kein Zugangsschlüssel.")
         bindung = dienst.bindung_pruefen(kopf[7:])
+        if bindung is None and dienst.werkbank_bindung_finden(kopf[7:]) is not None:
+            return _fehler(403, dienst.WERKBANK_ABWEISUNG)
         if bindung is None:
             return _fehler(401, "Zugangsschlüssel ungültig, abgelaufen oder widerrufen.")
         request.bindung = bindung
@@ -165,6 +167,8 @@ def sitzungsstart(request: HttpRequest) -> JsonResponse:
     nichts: darum weder ``bindung_erforderlich`` noch ``bindung_pruefen``."""
     kopf = request.headers.get("Authorization", "")
     bindung = dienst.bindung_finden(kopf[7:]) if kopf.startswith("Bearer ") else None
+    if bindung is None and dienst.werkbank_bindung_finden(kopf[7:]) is not None:
+        return _fehler(403, dienst.WERKBANK_ABWEISUNG)
     if bindung is None:
         return _fehler(401, "Zugangsschlüssel fehlt, ist ungültig, abgelaufen oder widerrufen.")
     projekt, modul = _sitzungsziel(request, bindung)

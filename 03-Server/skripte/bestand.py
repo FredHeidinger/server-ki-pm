@@ -46,6 +46,14 @@ TABELLEN = (
     "externesobjekt",
     "externeaktion",
     "besuchsmarke",
+    "serverkennung",
+    "werkbankinstanz",
+    "werkbankprojektbindung",
+    "werkbankzuweisung",
+    "werkbankausfuehrung",
+    "werkbankaktion",
+    "werkbankoperation",
+    "werkbankereignis",
 )
 NUR_ANHAENGEND = {"ereignis", "meldung"}
 

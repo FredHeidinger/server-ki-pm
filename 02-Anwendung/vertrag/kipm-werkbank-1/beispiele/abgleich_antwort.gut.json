@@ -1,0 +1,68 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+  "server_zeit": "2026-11-06T09:30:05Z",
+  "abruf_intervall_s": 10,
+  "lebenszeichen_max_s": 30,
+  "warnung_nach_s": 90,
+  "seite": {
+    "groesse": 1,
+    "naechste": null
+  },
+  "zuweisungen": [
+    {
+      "auftrag_id": 25,
+      "nummer": "KIPM-25",
+      "revision": 4,
+      "zuweisung_version": 1,
+      "projektbindung_id": 3,
+      "projektbindung_version": 2,
+      "freigegeben": true,
+      "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03"
+    }
+  ],
+  "aktionen": [
+    {
+      "aktion_id": "d2e4f6a8-1b3c-4d5e-8f70-9a1b2c3d4e04",
+      "art": "antworten",
+      "zustand": "ausstehend",
+      "quelle": {
+        "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+        "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+        "projektbindung_id": 3,
+        "projektbindung_version": 2,
+        "auftrag_id": 25,
+        "revision": 4,
+        "zuweisung_version": 1,
+        "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+        "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+      },
+      "erwarteter_zustand": "wartet_antwort",
+      "bezug": {
+        "frage_id": "F-1"
+      },
+      "antworttext": "Ja, erweitern.",
+      "owner": "fred",
+      "erstellt_am": "2026-11-06T09:30:00Z",
+      "inhaltshash": "30a93b61151565c18f57738bb790db3f30ee11f258220d329b83fc9766bb5de5"
+    }
+  ],
+  "halte": [
+    {
+      "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+      "zweck": "abbrechen",
+      "quelle": {
+        "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+        "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+        "projektbindung_id": 3,
+        "projektbindung_version": 2,
+        "auftrag_id": 25,
+        "revision": 4,
+        "zuweisung_version": 1,
+        "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+        "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+      }
+    }
+  ],
+  "konflikte": []
+}

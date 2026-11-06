@@ -1,0 +1,29 @@
+{
+  "vertrag": "kipm-werkbank/1",
+  "operation_id": "0b9a7c3e-6d21-4e58-9f04-7a1c5e8d2b10",
+  "art": "uebernehmen",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03"
+  },
+  "nutzlast": {
+    "repo_fingerabdruck": "git:root-commit-9f3a1c2",
+    "konfig_fingerabdruecke": {
+      "pruefprofil": "30a93b61151565c18f57738bb790db3f30ee11f258220d329b83fc9766bb5de5",
+      "grenzen": "67eeac392652c4cb4a2fe3d86d8a0b8ec4eefe41580a0212aa98220787aff884"
+    },
+    "faehigkeiten": [
+      "pakete",
+      "review",
+      "integration"
+    ],
+    "werkbank_version": "0.9.0"
+  },
+  "inhaltshash": "caee93becfe81bf34fb933f3d161ba7fec356f4f7bdf460a2f0275b8a7582aee"
+}
