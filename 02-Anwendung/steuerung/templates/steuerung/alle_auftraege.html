@@ -1,0 +1,21 @@
+{% extends "steuerung/grund.html" %}
+{% block titel %}Alle Aufträge{% endblock %}
+{% block brotkrumen %}Alle Aufträge{% endblock %}
+{% block inhalt %}
+<div class="seitenkopf">
+  <h1>Alle Aufträge</h1>
+</div>
+<nav class="projektchips" aria-label="Projekte in dieser Ansicht">
+  <span class="chipname">Projekte:</span>
+  {% for c in chips %}<a class="chip {% if c.an %}an{% else %}aus{% endif %}" href="{{ c.href }}" title="{% if c.an %}Ausschalten{% else %}Einschalten{% endif %}: {{ c.name }}">{% if c.an %}✓ {% endif %}{{ c.name }} <span class="zahl" title="offene Einträge">{{ c.zahl }}</span></a>
+  {% endfor %}
+  <span class="trenner" aria-hidden="true"></span>
+  <a class="umschalter" href="{{ alle_link }}">Alle</a>
+  <a class="umschalter" href="{{ keine_link }}">Keine</a>
+</nav>
+{% if keine_gewaehlt %}
+<div class="leer">Kein Projekt ausgewählt. Schalte oben ein Projekt ein oder wähle „Alle“.</div>
+{% else %}
+{% include "steuerung/auftragsliste.html" %}
+{% endif %}
+{% endblock %}

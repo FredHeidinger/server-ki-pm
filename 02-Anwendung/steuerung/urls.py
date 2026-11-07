@@ -7,6 +7,7 @@ urlpatterns = [
     path("abmelden/", views.Abmelden.as_view(), name="abmelden"),
     # Einstieg: Projekt wählen.
     path("", views.projekte, name="start"),
+    path("auftraege/", views.alle_auftraege, name="alle_auftraege"),
     path("auftraege/wunsch/", views.wunsch_neu, name="wunsch_neu"),
     path("auftraege/<int:auftrag_id>/", views.auftrag_detail, name="auftrag_detail"),
     path("verschieben/", views.verschieben, name="verschieben"),

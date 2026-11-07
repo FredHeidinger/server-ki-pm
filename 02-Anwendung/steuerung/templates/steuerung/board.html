@@ -1,16 +1,19 @@
 {% load steuerung_extras %}
+{% if zaehlleiste %}<p class="zaehlleiste">{% for titel, n in zaehlleiste %}{% if not forloop.first %} · {% endif %}{{ n }} {{ titel }}{% endfor %}</p>{% endif %}
 <div class="board" aria-label="Auftragsboard">
 {% for spalte in spalten %}
-  <section class="spalte spalte-{{ spalte.klasse }}" aria-labelledby="spalte-{{ spalte.klasse }}">
+  <section class="spalte spalte-{{ spalte.klasse }}{% if not spalte.karten %} ist-leer{% endif %}" aria-labelledby="spalte-{{ spalte.klasse }}">
     <h3 id="spalte-{{ spalte.klasse }}">{{ spalte.titel }} <span class="anzahl">{{ spalte.karten|length }}</span></h3>
+    <div class="spaltenkarten">
     {% for a in spalte.karten %}
     <article class="karte prio-{{ a.prioritaet }}{% if a.typ == 'issue' %} ist-issue{% endif %}">
       {% if a.typ == "issue" %}<span class="issue">Issue</span>{% endif %}
       {% if darf_verschieben %}<label class="auswahlfeld" title="{{ a.nummer }} zum Verschieben auswählen"><input type="checkbox" name="auftrag" value="{{ a.pk }}" form="verschiebe-auswahl" aria-label="{{ a.nummer }} auswählen"></label>{% endif %}
       <a class="kartentitel" href="{% url 'auftrag_detail' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a>
-      {% if a.modul %}<p class="kartenmeta">{{ a.modul.name }}</p>{% endif %}
       {% include "steuerung/hauptknopf.html" with h=a.haupt ort="karte" zurueck=request.get_full_path %}
       <div class="kartenfuss">
+        {% if alle %}<span class="kartenort" title="Projekt">{{ a.projekt.name }}</span>{% endif %}
+        {% if a.modul %}<span class="kartenort" title="Modul">{{ a.modul.name }}</span>{% endif %}
         {% if a.zustand != spalte.hauptzustand %}{{ a.zustand|zustand }}{% endif %}
         <span class="prio prio-{{ a.prioritaet }}" title="Priorität">{{ a.prioritaet }}</span>
         {{ a|faellig_marke }}
@@ -20,6 +23,7 @@
     {% empty %}
     <p class="leer klein">leer</p>
     {% endfor %}
+    </div>
   </section>
 {% endfor %}
 </div>

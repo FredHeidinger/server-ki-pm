@@ -13,8 +13,10 @@
 <nav class="seitenleiste" aria-label="Bereiche">
   <a class="marke" href="{% url 'projekte' %}"><span class="marke-zeichen">{% include "steuerung/symbol.html" with name="puls" %}</span><span><strong>Server-KI-PM</strong><small>Projektsteuerung mit KI</small></span></a>
   {% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
+  {% url 'alle_auftraege' as u_alle %}
   {% if aktives_projekt %}
   <a href="{{ u_proj }}" class="wechseln">{% include "steuerung/symbol.html" with name="ordner" %} Projekt wechseln</a>
+  <a href="{{ u_alle }}" class="wechseln">{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
   <p class="navtitel bereichslink">Projekt</p>
   <p class="projektname-nav bereichslink">{{ aktives_projekt.name }}</p>
   {% with k=aktives_projekt.kennung %}
@@ -25,6 +27,7 @@
   {% endwith %}
   {% else %}
   <a href="{{ u_proj }}" {% if request.path == u_proj or request.path == "/" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ordner" %} Projekte</a>
+  <a href="{{ u_alle }}" {% if request.path == u_alle %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
   {% endif %}
   <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %} Konto &amp; KI verbinden{% if ordneranfragen_anzahl %} <span class="zaehler" title="Neue Arbeitsordner zuordnen">{{ ordneranfragen_anzahl }}</span>{% endif %}</a></p>
 </nav>

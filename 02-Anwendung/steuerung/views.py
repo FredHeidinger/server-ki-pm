@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -101,7 +101,7 @@ def _zurueck(request: HttpRequest, standard: str) -> HttpResponse:
 
 @login_required
 def projekte(request: HttpRequest) -> HttpResponse:
-    """Einstieg: Projekt wählen. Kein Dringlichkeitsboard über alle Projekte."""
+    """Einstieg: Projekt wählen. Alle Aufträge zusammen zeigt ``alle_auftraege``."""
     projekte_qs = Projekt.objects.filter(aktiv=True).prefetch_related("module")
     suche = request.GET.get("q", "").strip()
     if suche:
@@ -334,15 +334,24 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     if art in dict(Auftrag.TYPEN):
         liste = liste.filter(typ=art)
     kontext["art"] = art
-    filter_, auswahl = modulwahl(kontext["projekt"], request.GET.get("modul", ""))
-    if filter_:
-        liste = liste.filter(**filter_)
-    kontext.update(auswahl)
+    if kontext.get("projekt") is not None:
+        filter_, auswahl = modulwahl(kontext["projekt"], request.GET.get("modul", ""))
+        if filter_:
+            liste = liste.filter(**filter_)
+        kontext.update(auswahl)
+    else:
+        # Projektübergreifende Ansicht: Module gehören zu einem Projekt, hier kein Modulfilter.
+        kontext["modul"] = ""
     if ansicht == "board":
         alle = list(liste)
         for a in alle:
             a.haupt = hauptaktion(a)
         kontext["spalten"] = _spalten(alle)
+        kontext["zaehlleiste"] = [
+            (s["titel"], len(s["karten"]))
+            for s in kontext["spalten"]
+            if s["klasse"] != "erledigt" and s["karten"]
+        ]
         kontext["abgebrochen"] = sum(1 for a in alle if a.zustand == Auftrag.ABGEBROCHEN)
         return render(request, vorlage, kontext)
     zustand = request.GET.get("zustand", "")
@@ -385,6 +394,77 @@ def projekt_auftraege(request: HttpRequest, kennung: str) -> HttpResponse:
     liste = projekt.auftraege.select_related("projekt", "modul").prefetch_related("revisionen")
     kontext = _projekt_kontext(projekt, "auftraege")
     return _auftragsliste(request, liste, "steuerung/projekt_auftraege.html", kontext)
+
+
+PROJEKTWAHL_SITZUNG = "alle_auftraege_p"
+
+
+def _projektwahl(request: HttpRequest, kennungen: list[str]) -> list[str]:
+    """Welche Projekte „Alle Aufträge“ zeigt: ``?p=`` (mehrfach; ``alle`` oder ``-`` für keines),
+    sonst die letzte Auswahl dieser Sitzung, sonst alle. Unbekannte Kennungen fallen weg."""
+    roh = request.GET.getlist("p")
+    if roh:
+        if "alle" in roh:
+            wahl = list(kennungen)
+            request.session[PROJEKTWAHL_SITZUNG] = "alle"
+        else:
+            wahl = [k for k in kennungen if k in roh]
+            request.session[PROJEKTWAHL_SITZUNG] = wahl if wahl != kennungen else "alle"
+        return wahl
+    gemerkt = request.session.get(PROJEKTWAHL_SITZUNG, "alle")
+    if gemerkt == "alle" or not isinstance(gemerkt, list):
+        return list(kennungen)
+    return [k for k in kennungen if k in gemerkt] or list(kennungen)
+
+
+def _chip_link(request: HttpRequest, kennungen: list[str], wahl: list[str]) -> str:
+    """Adresse mit dieser Auswahl; andere Parameter (Ansicht, Art, Filter) bleiben erhalten."""
+    params = request.GET.copy()
+    if wahl == kennungen:
+        params.setlist("p", ["alle"])
+    elif not wahl:
+        params.setlist("p", ["-"])
+    else:
+        params.setlist("p", wahl)
+    return "?" + params.urlencode()
+
+
+@login_required
+def alle_auftraege(request: HttpRequest) -> HttpResponse:
+    """Board oder Liste über alle aktiven Projekte; Projekte per Schaltfläche ein- und ausschalten."""
+    projekte_ = list(Projekt.objects.filter(aktiv=True).order_by("name"))
+    kennungen = [p.kennung for p in projekte_]
+    wahl = _projektwahl(request, kennungen)
+    offen = dict(
+        Auftrag.objects.filter(projekt__aktiv=True)
+        .exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+        .values_list("projekt__kennung")
+        .annotate(n=Count("pk"))
+    )
+    chips = []
+    for p in projekte_:
+        neu = [k for k in kennungen if (k in wahl) != (k == p.kennung)]
+        chips.append(
+            {
+                "name": p.name,
+                "an": p.kennung in wahl,
+                "zahl": offen.get(p.kennung, 0),
+                "href": _chip_link(request, kennungen, neu),
+            }
+        )
+    liste = (
+        Auftrag.objects.filter(projekt__aktiv=True, projekt__kennung__in=wahl)
+        .select_related("projekt", "modul")
+        .prefetch_related("revisionen")
+    )
+    kontext = {
+        "alle": True,
+        "chips": chips,
+        "alle_link": _chip_link(request, kennungen, list(kennungen)),
+        "keine_link": _chip_link(request, kennungen, []),
+        "keine_gewaehlt": not wahl,
+    }
+    return _auftragsliste(request, liste, "steuerung/alle_auftraege.html", kontext)
 
 
 def _verlauf(request: HttpRequest, ereignisse, vorlage: str, kontext: dict) -> HttpResponse:

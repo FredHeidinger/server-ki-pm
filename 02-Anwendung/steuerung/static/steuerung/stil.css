@@ -507,3 +507,29 @@ select, input[type="text"], input[type="password"], input[type="number"], input[
 .einrichtungswerte caption { text-align: left; font-weight: 600; padding: 8px 0 4px; }
 .einrichtungswerte td code { overflow-wrap: anywhere; }
 #werkbank-kopplungscode { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7em; overflow-y: auto; }
+
+/* Board: Spaltenkopf bleibt stehen, nur die Kartenliste einer Spalte scrollt (nicht die ganze Seite) */
+.zaehlleiste { margin: 0 0 6px; font-size: 12px; color: var(--gedaempft); }
+.kartentitel { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.kartenfuss { margin-top: 4px; }
+.kartenort { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border-radius: 8px; background: var(--weich); }
+.spaltenkarten { scrollbar-width: thin; }
+@media (min-width: 700px) {
+  .spaltenkarten { max-height: calc(100dvh - 19rem); min-height: 10rem; overflow-y: auto; padding-right: 2px; }
+}
+
+/* Alle Aufträge: Projekte als Schalter */
+.projektchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.projektchips .chipname { font-size: 13px; color: var(--gedaempft); margin-right: 2px; }
+.projektchips .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border: 1px solid var(--rahmen); border-radius: 8px; font-size: 13px; text-decoration: none; color: var(--gedaempft); background: var(--flaeche); }
+.projektchips .chip.an { background: var(--akzent-weich); border-color: var(--akzent); color: var(--akzent); font-weight: 600; }
+.projektchips .chip:hover { border-color: var(--akzent); }
+.projektchips .chip .zahl { font-size: 11px; font-weight: 400; color: var(--gedaempft); }
+.projektchips .chip.an .zahl { color: var(--akzent); }
+
+/* Leere Spalten bleiben schmal, die vollen bekommen den Platz */
+.board { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.board .spalte { flex: 1 1 210px; min-width: 0; }
+.board .spalte.ist-leer { flex: 0 1 112px; }
+.board .spalte.ist-leer .leer { padding: 8px 4px; }
+.kartenfuss { row-gap: 3px; }
