@@ -277,7 +277,7 @@ def test_einrichtungswerte_zeigen_den_schluessel_nie_wieder(owner_client, projek
 
 
 def test_einrichtungswerte_warnen_ohne_bestaetigten_arbeitsort(owner_client, projekt):
-    projekt.arbeitsorte.update(bestaetigt=False)
+    projekt.arbeitsorte.all().delete()
     _angelegt(owner_client, projekt)
     html = seite(owner_client, "verbindungen")
     assert "Kein bestätigter Arbeitsort" in html
@@ -288,3 +288,19 @@ def test_einrichtungswerte_fehlen_bei_widerrufenem_zugang(owner_client, akteur, 
     werkbank.instanz_widerrufen(akteur, inst, "")
     html = seite(owner_client, "verbindungen")
     assert "Zugang widerrufen" in html and str(inst.werkbank_id) not in html
+
+
+def test_einrichtungswerte_folgen_dem_spaeter_bestaetigten_arbeitsort(owner_client, projekt):
+    projekt.arbeitsorte.update(bestaetigt=False)
+    _angelegt(owner_client, projekt)
+    assert "noch nicht bestätigt" in seite(owner_client, "verbindungen")
+    projekt.arbeitsorte.update(bestaetigt=True, pfad=r"C:\Projekte\Spaeter")
+    html = seite(owner_client, "verbindungen")
+    assert r"C:\Projekte\Spaeter" in html and "noch nicht bestätigt" not in html
+
+
+def test_einrichtungswerte_sagen_wenn_der_arbeitsort_nur_unbestaetigt_ist(owner_client, projekt):
+    projekt.arbeitsorte.update(bestaetigt=False, pfad=r"C:\Projekte\Offen")
+    _angelegt(owner_client, projekt)
+    html = seite(owner_client, "verbindungen")
+    assert "noch nicht bestätigt" in html

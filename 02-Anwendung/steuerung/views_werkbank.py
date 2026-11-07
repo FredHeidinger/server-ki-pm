@@ -87,9 +87,13 @@ def verwaltung(request: HttpRequest) -> dict:
         i.loeschbar = not werkbank.instanz_benutzt(i)
         i.keine_antwort = werkbank.nicht_erreichbar(i)
         i.erlaubt_ids = {p.pk for p in i.erlaubte_projekte.all()}
-        i.bindungen = list(
-            i.projekte.select_related("projekt", "arbeitsort").order_by("projekt__name")
-        )
+        i.bindungen = list(i.projekte.select_related("projekt").order_by("projekt__name"))
+        for b in i.bindungen:
+            # Der Arbeitsort steht beim Anlegen nur vorläufig an der Bindung; gezeigt wird immer der
+            # aktuelle Stand des Projekts (später bestätigt oder geändert).
+            orte = b.projekt.arbeitsorte.filter(aktiv=True)
+            b.ort = orte.filter(bestaetigt=True).order_by("id").first()
+            b.ort_unbestaetigt = None if b.ort else orte.order_by("id").first()
         instanzen.append(i)
     return {
         "werkbaenke": instanzen,
