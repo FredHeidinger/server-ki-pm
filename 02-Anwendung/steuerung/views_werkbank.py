@@ -71,12 +71,16 @@ def _fehler(request: HttpRequest, fehler: Exception) -> None:
 # --- Verwaltung unter „Konto & KI verbinden“ -------------------------------------------------
 
 
-def verwaltung(request: HttpRequest) -> dict:
-    """Kontext für die Werkbank-Verwaltung; der neue Schlüssel steht genau einmal da."""
-    neu = request.session.pop("neue_werkbank", None)
+def _adresse(request: HttpRequest) -> str:
     basis = (settings.KIPM_OEFFENTLICHE_URL or f"{request.scheme}://{request.get_host()}/").rstrip(
         "/"
     )
+    return f"{basis}/api/werkbank/v1/"
+
+
+def verwaltung(request: HttpRequest) -> dict:
+    """Kontext für die Werkbank-Verwaltung; der neue Schlüssel steht genau einmal da."""
+    neu = request.session.pop("neue_werkbank", None)
     instanzen = []
     for i in (
         WerkbankInstanz.objects.select_related("bindung")
@@ -98,7 +102,7 @@ def verwaltung(request: HttpRequest) -> dict:
     return {
         "werkbaenke": instanzen,
         "neue_werkbank": neu,
-        "werkbank_adresse": f"{basis}/api/werkbank/v1/",
+        "werkbank_adresse": _adresse(request),
         "werkbank_server_id": werkbank.server_id(),
         "werkbank_projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
     }
@@ -119,7 +123,11 @@ def werkbank_anlegen(request: HttpRequest) -> HttpResponse:
             projekte=_projekte_aus(request),
             gueltig_tage=int(request.POST.get("tage") or 90),
         )
-        request.session["neue_werkbank"] = {"name": instanz.name, "schluessel": schluessel}
+        request.session["neue_werkbank"] = {
+            "name": instanz.name,
+            "schluessel": schluessel,
+            "code": werkbank.kopplungscode(instanz, schluessel, _adresse(request)),
+        }
     except (dienst.DienstFehler, ValueError) as fehler:
         _fehler(request, fehler)
     return redirect(reverse("verbindungen") + "#werkbank")

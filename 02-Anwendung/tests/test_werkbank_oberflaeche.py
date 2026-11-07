@@ -304,3 +304,55 @@ def test_einrichtungswerte_sagen_wenn_der_arbeitsort_nur_unbestaetigt_ist(owner_
     _angelegt(owner_client, projekt)
     html = seite(owner_client, "verbindungen")
     assert "noch nicht bestätigt" in html
+
+
+# --- Kopplungscode: ein Text statt sieben Felder ---------------------------------------------------
+
+
+def _code_lesen(text):
+    import base64
+    import json
+
+    assert text.startswith("kipm-kopplung/1:")
+    roh = text.split(":", 1)[1]
+    return json.loads(base64.urlsafe_b64decode(roh + "=" * (-len(roh) % 4)).decode("utf-8"))
+
+
+def test_kopplungscode_traegt_alle_werte(akteur, projekt):
+    projekt.arbeitsorte.update(pfad=r"C:\Projekte\Demo")
+    inst, schluessel = werkbank.instanz_anlegen(akteur, name="W", projekte=[projekt])
+    daten = _code_lesen(
+        werkbank.kopplungscode(inst, schluessel, "https://kipm.invalid/api/werkbank/v1/")
+    )
+    bindung = inst.projekte.get()
+    assert daten["adresse"] == "https://kipm.invalid/api/werkbank/v1/"
+    assert daten["schluessel"] == schluessel
+    assert daten["server_id"] == str(werkbank.server_id())
+    assert daten["werkbank_id"] == str(inst.werkbank_id)
+    assert daten["projekte"] == [
+        {
+            "projektbindung_id": bindung.pk,
+            "projektbindung_version": bindung.version,
+            "projekt": projekt.kennung,
+            "arbeitsort": r"C:\Projekte\Demo",
+        }
+    ]
+
+
+def test_kopplungscode_arbeitsort_ist_leer_ohne_bestaetigten_ort(akteur, projekt):
+    projekt.arbeitsorte.update(bestaetigt=False, pfad=r"C:\X")
+    inst, schluessel = werkbank.instanz_anlegen(akteur, name="W", projekte=[projekt])
+    daten = _code_lesen(werkbank.kopplungscode(inst, schluessel, "https://a/"))
+    assert daten["projekte"][0]["arbeitsort"] is None
+
+
+def test_kopplungscode_steht_nur_beim_anlegen_da(owner_client, projekt):
+    html = owner_client.post(
+        reverse("werkbank_anlegen"), {"name": "Büro", "projekt": [projekt.pk]}, follow=True
+    ).content.decode()
+    assert 'id="werkbank-kopplungscode"' in html and "Kopplungscode" in html
+    code = html.split('id="werkbank-kopplungscode">', 1)[1].split("</", 1)[0].strip()
+    daten = _code_lesen(code)
+    assert daten["werkbank_id"] == str(WerkbankInstanz.objects.get().werkbank_id)
+    spaeter = seite(owner_client, "verbindungen")
+    assert "werkbank-kopplungscode" not in spaeter and "kipm-kopplung/1:" not in spaeter

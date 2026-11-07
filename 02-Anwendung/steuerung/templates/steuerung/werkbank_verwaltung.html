@@ -3,12 +3,22 @@
   <p class="gedaempft">Eine Werkbank arbeitet freigegebene Aufträge auf einem PC selbst ab und meldet nur Fakten an KI-PM zurück. Sie meldet sich bei diesem Server mit einem eigenen Schlüssel an, der nur für die Werkbank-Schnittstelle gilt. Ob sie bereit ist, meldet sie selbst; KI-PM prüft das nicht noch einmal.</p>
   {% if neue_werkbank %}
   <div role="alert" class="box warn">
-    <p><strong>{{ neue_werkbank.name }}</strong> ist angelegt. Den Schlüssel in die Einstellungen der Werkbank eintragen; er wird nur jetzt angezeigt.</p>
+    <p><strong>{{ neue_werkbank.name }}</strong> ist angelegt. Jetzt verbinden, in drei Schritten:</p>
     <ol class="anleitung">
-      <li>Server-Adresse: <code>{{ werkbank_adresse }}</code></li>
-      <li>Schlüssel: <pre id="werkbank-schluessel">{{ neue_werkbank.schluessel }}</pre><button type="button" class="knopf klein" data-kopieren="werkbank-schluessel">Schlüssel kopieren</button></li>
-      <li>Nicht weitergeben und nicht in Screenshots zeigen. Ging etwas schief: unten löschen oder widerrufen und neu anlegen.</li>
+      <li>Auf <strong>„Kopplungscode kopieren“</strong> klicken.</li>
+      <li>In der Werkbank im Bereich „KI-PM-Kopplung“ das Feld <strong>„Kopplungscode“</strong> öffnen und mit Strg+V einfügen.</li>
+      <li>Dort das lokale Projekt wählen, dann „Kopplung speichern“ und „Verbindung aktivieren“.</li>
     </ol>
+    <pre id="werkbank-kopplungscode">{{ neue_werkbank.code }}</pre>
+    <p><button type="button" class="knopf" data-kopieren="werkbank-kopplungscode">Kopplungscode kopieren</button></p>
+    <p class="gedaempft klein">Der Code enthält den Schlüssel und erscheint nur jetzt. Nicht weitergeben, nicht in Screenshots zeigen. Ging etwas schief: unten löschen oder widerrufen und neu anlegen.</p>
+    <details class="mehr"><summary>Einzelwerte statt Code (zum Abtippen)</summary>
+      <ol class="anleitung">
+        <li>Serveradresse: <code>{{ werkbank_adresse }}</code></li>
+        <li>Werkbank-Zugang (Schlüssel): <pre id="werkbank-schluessel">{{ neue_werkbank.schluessel }}</pre><button type="button" class="knopf klein" data-kopieren="werkbank-schluessel">Schlüssel kopieren</button></li>
+        <li>Alle weiteren Felder stehen unten bei der Werkbank unter „Einrichtungswerte“.</li>
+      </ol>
+    </details>
   </div>
   {% endif %}
   {% if werkbaenke %}

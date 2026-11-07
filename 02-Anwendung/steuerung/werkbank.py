@@ -62,6 +62,46 @@ def _bindungen_sichern(instanz: WerkbankInstanz, projekte: list[Projekt]) -> Non
         )
 
 
+KOPPLUNGSCODE_KOPF = "kipm-kopplung/1:"
+
+
+def kopplungscode(instanz: WerkbankInstanz, schluessel: str, adresse: str) -> str:
+    """Ein Text mit allen Einrichtungswerten, damit Fred sie nicht einzeln abtippen muss.
+
+    Enthält den Schlüssel und wird deshalb nur beim Anlegen gezeigt, nie gespeichert. Das Format ist
+    eine Bequemlichkeit außerhalb des Vertrags ``kipm-werkbank/1``: ``kipm-kopplung/1:`` und
+    danach URL-sicheres Base64 eines JSON-Objekts. Der Arbeitsort ist der aktuelle bestätigte
+    Ordner des Projekts oder ``null``.
+    """
+    projekte = []
+    for b in instanz.projekte.select_related("projekt").order_by("projekt__name"):
+        ort = (
+            b.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True)
+            .exclude(pfad="")
+            .order_by("id")
+            .first()
+        )
+        projekte.append(
+            {
+                "projektbindung_id": b.pk,
+                "projektbindung_version": b.version,
+                "projekt": b.projekt.kennung,
+                "arbeitsort": ort.pfad if ort else None,
+            }
+        )
+    daten = {
+        "adresse": adresse,
+        "schluessel": schluessel,
+        "server_id": str(server_id()),
+        "werkbank_id": str(instanz.werkbank_id),
+        "projekte": projekte,
+    }
+    roh = json.dumps(daten, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return KOPPLUNGSCODE_KOPF + base64.urlsafe_b64encode(roh.encode("utf-8")).decode(
+        "ascii"
+    ).rstrip("=")
+
+
 def instanz_anlegen(
     akteur: dienst.Akteur,
     *,

@@ -506,3 +506,4 @@ select, input[type="text"], input[type="password"], input[type="number"], input[
 .verschiebeknoepfe button[disabled] { opacity: .5; cursor: not-allowed; }
 .einrichtungswerte caption { text-align: left; font-weight: 600; padding: 8px 0 4px; }
 .einrichtungswerte td code { overflow-wrap: anywhere; }
+#werkbank-kopplungscode { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7em; overflow-y: auto; }
