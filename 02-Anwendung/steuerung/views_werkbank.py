@@ -87,11 +87,15 @@ def verwaltung(request: HttpRequest) -> dict:
         i.loeschbar = not werkbank.instanz_benutzt(i)
         i.keine_antwort = werkbank.nicht_erreichbar(i)
         i.erlaubt_ids = {p.pk for p in i.erlaubte_projekte.all()}
+        i.bindungen = list(
+            i.projekte.select_related("projekt", "arbeitsort").order_by("projekt__name")
+        )
         instanzen.append(i)
     return {
         "werkbaenke": instanzen,
         "neue_werkbank": neu,
         "werkbank_adresse": f"{basis}/api/werkbank/v1/",
+        "werkbank_server_id": werkbank.server_id(),
         "werkbank_projekte": Projekt.objects.filter(aktiv=True).order_by("name"),
     }
 

@@ -504,3 +504,5 @@ select, input[type="text"], input[type="password"], input[type="number"], input[
 .archivwahl { border: 1px solid var(--linie); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; }
 .verschiebeknoepfe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .verschiebeknoepfe button[disabled] { opacity: .5; cursor: not-allowed; }
+.einrichtungswerte caption { text-align: left; font-weight: 600; padding: 8px 0 4px; }
+.einrichtungswerte td code { overflow-wrap: anywhere; }

@@ -232,3 +232,59 @@ def test_chat_auftrag_sieht_unveraendert_aus(owner_client, akteur, projekt):
     assert (
         "Ich bearbeite das selbst" in html and "nicht möglich" not in html.split("selbst")[1][:80]
     )
+
+
+# --- Einrichtungswerte für die Werkbank ----------------------------------------------------------
+
+
+def _angelegt(owner_client, projekt):
+    owner_client.post(
+        reverse("werkbank_anlegen"), {"name": "Büro", "projekt": [projekt.pk]}, follow=True
+    )
+    return WerkbankInstanz.objects.get()
+
+
+def test_einrichtungswerte_stehen_mit_zuordnung_bei_der_werkbank(owner_client, projekt):
+    instanz = _angelegt(owner_client, projekt)
+    bindung = instanz.projekte.get()
+    html = seite(owner_client, "verbindungen")
+    assert "Einrichtungswerte" in html
+    for feld in (
+        "Serveradresse von KI-PM",
+        "Kennung des Servers",
+        "Kennung dieser Werkbank",
+        "Kennung der Projektbindung",
+        "Version der Projektbindung",
+        "Projekt in KI-PM",
+        "In KI-PM bestätigter Arbeitsort",
+    ):
+        assert feld in html, feld
+    assert str(werkbank.server_id()) in html
+    assert str(instanz.werkbank_id) in html
+    assert f'id="wert-{instanz.pk}-bindung-{bindung.pk}-nummer"' in html
+    assert f'id="wert-{instanz.pk}-bindung-{bindung.pk}-projekt"' in html
+    assert projekt.kennung in html
+
+
+def test_einrichtungswerte_zeigen_den_schluessel_nie_wieder(owner_client, projekt):
+    antwort = owner_client.post(
+        reverse("werkbank_anlegen"), {"name": "Büro", "projekt": [projekt.pk]}, follow=True
+    )
+    assert "werkbank-schluessel" in antwort.content.decode()
+    spaeter = seite(owner_client, "verbindungen")
+    assert "werkbank-schluessel" not in spaeter and "Einrichtungswerte" in spaeter
+    assert "nur beim Anlegen" in spaeter
+
+
+def test_einrichtungswerte_warnen_ohne_bestaetigten_arbeitsort(owner_client, projekt):
+    projekt.arbeitsorte.update(bestaetigt=False)
+    _angelegt(owner_client, projekt)
+    html = seite(owner_client, "verbindungen")
+    assert "Kein bestätigter Arbeitsort" in html
+
+
+def test_einrichtungswerte_fehlen_bei_widerrufenem_zugang(owner_client, akteur, projekt):
+    inst, _ = werkbank.instanz_anlegen(akteur, name="Alt", projekte=[projekt])
+    werkbank.instanz_widerrufen(akteur, inst, "")
+    html = seite(owner_client, "verbindungen")
+    assert "Zugang widerrufen" in html and str(inst.werkbank_id) not in html

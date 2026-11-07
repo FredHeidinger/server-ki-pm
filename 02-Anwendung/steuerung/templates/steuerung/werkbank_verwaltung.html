@@ -23,6 +23,33 @@
         {% if b.bereit_gemeldet_am %}<span class="gedaempft klein">gemeldet {{ b.bereit_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
         {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}</p>
       {% endfor %}
+      {% if not w.gesperrt %}
+      <details class="mehr einrichtung"{% if neue_werkbank and neue_werkbank.name == w.name %} open{% endif %}><summary>Einrichtungswerte für die Werkbank</summary>
+        <p class="gedaempft klein">Diese Werte trägst du im Formular „KI-PM-Kopplung“ der Werkbank ein. Links steht das Feld dort, rechts der Wert zum Kopieren, daneben wofür er gebraucht wird.</p>
+        <div class="tabellenrahmen"><table class="klein einrichtungswerte">
+          <caption>Für die ganze Werkbank</caption>
+          <thead><tr><th scope="col">Feld in der Werkbank</th><th scope="col">Wert</th><th scope="col">Wofür</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Serveradresse von KI-PM</th><td><code id="wert-{{ w.pk }}-adresse">{{ werkbank_adresse }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-adresse">Kopieren</button></td><td>Wohin die Werkbank ihre Anfragen sendet.</td></tr>
+            <tr><th scope="row">Werkbank-Zugang</th><td>Der Schlüssel, nur beim Anlegen sichtbar. Ging er verloren: löschen oder widerrufen und neu anlegen.</td><td>Meldet die Werkbank bei KI-PM an.</td></tr>
+            <tr><th scope="row">Kennung des Servers</th><td><code id="wert-{{ w.pk }}-server">{{ werkbank_server_id }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-server">Kopieren</button></td><td>Stellt sicher, dass die Werkbank mit dem richtigen KI-PM spricht.</td></tr>
+            <tr><th scope="row">Kennung dieser Werkbank</th><td><code id="wert-{{ w.pk }}-kennung">{{ w.werkbank_id }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-kennung">Kopieren</button></td><td>Jede Meldung trägt sie, damit KI-PM sie dieser Werkbank zuordnet.</td></tr>
+          </tbody>
+        </table></div>
+        {% for b in w.bindungen %}
+        <div class="tabellenrahmen"><table class="klein einrichtungswerte">
+          <caption>Für das Projekt {{ b.projekt.name }}</caption>
+          <thead><tr><th scope="col">Feld in der Werkbank</th><th scope="col">Wert</th><th scope="col">Wofür</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Kennung der Projektbindung</th><td><code id="wert-{{ w.pk }}-bindung-{{ b.pk }}-nummer">{{ b.pk }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-bindung-{{ b.pk }}-nummer">Kopieren</button></td><td>Verbindet dieses Projekt mit dieser Werkbank.</td></tr>
+            <tr><th scope="row">Version der Projektbindung</th><td><code id="wert-{{ w.pk }}-bindung-{{ b.pk }}-version">{{ b.version }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-bindung-{{ b.pk }}-version">Kopieren</button></td><td>Steigt, wenn sich Projekt oder Arbeitsort ändern; eine alte Version wird abgewiesen.</td></tr>
+            <tr><th scope="row">Projekt in KI-PM</th><td><code id="wert-{{ w.pk }}-bindung-{{ b.pk }}-projekt">{{ b.projekt.kennung }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-bindung-{{ b.pk }}-projekt">Kopieren</button></td><td>Kurzname des Projekts in KI-PM.</td></tr>
+            <tr><th scope="row">In KI-PM bestätigter Arbeitsort</th><td>{% if b.arbeitsort and b.arbeitsort.pfad %}<code id="wert-{{ w.pk }}-bindung-{{ b.pk }}-ort">{{ b.arbeitsort.pfad }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-bindung-{{ b.pk }}-ort">Kopieren</button>{% elif b.arbeitsort %}<span class="status warn">Arbeitsort „{{ b.arbeitsort.name }}“ hat keinen Ordner.</span> Ordner in den Projekteinstellungen eintragen.{% else %}<span class="status warn">Kein bestätigter Arbeitsort.</span> In den Projekteinstellungen einen Arbeitsort bestätigen.{% endif %}</td><td>Der Ordner muss genau so auf dem PC liegen; sonst startet die Werkbank nichts.</td></tr>
+          </tbody>
+        </table></div>
+        {% empty %}<p class="gedaempft klein">Noch kein Projekt freigegeben. Unter „Erlaubte Projekte“ eines ankreuzen.</p>{% endfor %}
+      </details>
+      {% endif %}
       <div class="eintragaktionen">
         {% if not w.gesperrt %}
         <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='aktiv' %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="{% if w.aktiv %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if w.aktiv %}Abschalten{% else %}Einschalten{% endif %}</button></form>
