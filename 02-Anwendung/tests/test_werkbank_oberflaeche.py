@@ -123,6 +123,45 @@ def test_auftrag_zeigt_ziel_und_freigeben_und_zuweisen(owner_client, akteur, pro
     assert "Ich bearbeite das selbst – nicht möglich" in html
 
 
+def test_freigegebener_chat_auftrag_sagt_warum_die_werkbank_ihn_nicht_sieht(
+    owner_client, akteur, projekt, w_pbindung
+):
+    """Befund KW-1: im Chat freigegeben, aber nie zugewiesen; der Abgleich liefert ihn nicht."""
+    a = arbeitspaket(akteur, projekt)
+    dienst.auftrag_freigeben(akteur, a)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=a.pk)
+    assert "Eine Werkbank sieht diesen Auftrag erst nach der Zuweisung" in html
+    assert "Werkbank zuweisen – bleibt freigegeben" in html
+    assert "Nur zuweisen" not in html  # hätte die Freigabe still zurückgenommen
+
+
+def test_zuweisen_eines_freigegebenen_auftrags_laesst_ihn_freigegeben(
+    owner_client, akteur, projekt, w_pbindung
+):
+    a = arbeitspaket(akteur, projekt)
+    dienst.auftrag_freigeben(akteur, a)
+    html = folgen(
+        owner_client, "auftrag_zuweisen", {"ziel": w_pbindung.pk, "freigeben": "1"}, auftrag_id=a.pk
+    )
+    a.refresh_from_db()
+    z = WerkbankZuweisung.objects.get(auftrag=a)
+    assert a.zustand == Auftrag.FREIGEGEBEN and len(z.kontext_sha256) == 64
+    assert "wartet auf die Werkbank" in html
+    assert "Eine Werkbank sieht diesen Auftrag erst nach der Zuweisung" not in html
+    assert "Ziel wechseln – bleibt freigegeben" in html
+
+
+def test_bereitschaft_vor_der_ersten_uebernahme_heisst_nicht_gemeldet(
+    owner_client, akteur, projekt, w_pbindung
+):
+    a = arbeitspaket(akteur, projekt)
+    werkbank.zuweisen(akteur, a, w_pbindung)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=a.pk)
+    assert "(nicht bereit)" not in html and "(Bereitschaft noch nicht gemeldet)" in html
+    assert "meldet sie bei der ersten Übernahme" in html
+    assert "meldet sie bei der ersten Übernahme" in seite(owner_client, "verbindungen")
+
+
 def test_zuweisen_ohne_wahl_und_aufheben(owner_client, akteur, projekt, w_pbindung):
     a = arbeitspaket(akteur, projekt)
     assert "Bitte eine Werkbank wählen" in folgen(

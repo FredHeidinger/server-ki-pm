@@ -7,18 +7,20 @@
     {% if w.keine_antwort %}<span class="status bad">keine Antwort seit mehr als 90 Sekunden</span>{% endif %}
     {% if w.warten_auf_werkbank %}<span class="status ok">freigegeben, Kontext gebunden: wartet auf die Werkbank</span>
     {% elif auftrag.zustand == "FREIGEGEBEN" %}<span class="status warn">Freigabe ohne gebundenen Kontext</span>{% endif %}{% endif %}</p>
+  {% if not z and auftrag.zustand == "FREIGEGEBEN" and w.ziele %}<p><span class="status warn">Freigegeben, aber keiner Werkbank zugewiesen</span> Eine Werkbank sieht diesen Auftrag erst nach der Zuweisung; bis dahin kann ihn nur ein Chat übernehmen.</p>{% endif %}
   {% if z and w.bereit %}<p class="gedaempft klein">Bereitschaft laut Werkbank:
-    {% if w.bereit.bereit %}<span class="status ok">bereit</span>{% elif w.bereit.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% for g in w.bereit.bereit_gruende %} · {{ g }}{% endfor %}{% else %}<span class="status aus">noch nichts gemeldet</span>{% endif %}
+    {% if w.bereit.bereit %}<span class="status ok">bereit</span>{% elif w.bereit.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% for g in w.bereit.bereit_gruende %} · {{ g }}{% endfor %}{% else %}<span class="status aus">noch nicht gemeldet</span> · meldet sie bei der ersten Übernahme{% endif %}
     · vorbereitet ist das Projekt, vorgeprüft der Auftrag; technische Pakete prüft die Werkbank selbst.</p>{% endif %}
 
   {% if w.darf_zuweisen %}
   <form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="aktion">{% csrf_token %}
-    <label>Werkbank<br><select name="ziel" required>{% for t in w.ziele %}<option value="{{ t.pk }}"{% if z and z.projektbindung_id == t.pk %} selected{% endif %}>{{ t.instanz.name }}{% if not t.bereit %} (nicht bereit){% endif %}</option>{% endfor %}</select></label>
+    <label>Werkbank<br><select name="ziel" required>{% for t in w.ziele %}<option value="{{ t.pk }}"{% if z and z.projektbindung_id == t.pk %} selected{% endif %}>{{ t.instanz.name }}{% if t.bereit %}{% elif t.bereit_gemeldet_am %} (nicht bereit){% else %} (Bereitschaft noch nicht gemeldet){% endif %}</option>{% endfor %}</select></label>
     <div class="knopfzeile">
-      {% if auftrag.zustand == "ENTWURF" %}<button type="submit" name="freigeben" value="1" class="knopf">Freigeben und Werkbank zuweisen</button>{% endif %}
+      {% if auftrag.zustand == "ENTWURF" %}<button type="submit" name="freigeben" value="1" class="knopf">Freigeben und Werkbank zuweisen</button>
       <button type="submit" class="knopf zweit">{% if z %}Ziel wechseln{% else %}Nur zuweisen{% endif %}</button>
+      {% else %}<button type="submit" name="freigeben" value="1" class="knopf">{% if z %}Ziel wechseln{% else %}Werkbank zuweisen{% endif %} – bleibt freigegeben</button>{% endif %}
     </div>
-    <p class="gedaempft klein">Zuweisen reserviert nur das Ziel; die Werkbank übernimmt erst nach der Freigabe. Ein Zielwechsel nimmt die Freigabe zurück.</p>
+    <p class="gedaempft klein">{% if auftrag.zustand == "ENTWURF" %}Zuweisen reserviert nur das Ziel; die Werkbank übernimmt erst nach der Freigabe.{% else %}Die Freigabe wird in einem Schritt mit dem neuen Ziel neu gebunden; scheitert sie, bleibt alles wie vorher.{% endif %}</p>
   </form>
   {% elif w.ziele and not z %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Werkbank zuweisen – nicht möglich</span> In diesem Zustand ({{ auftrag.get_zustand_display }}) ändert sich das Ziel nicht.</p>{% endif %}
   {% if z %}

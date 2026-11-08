@@ -29,7 +29,7 @@
         {% if w.keine_antwort %}<span class="status bad">keine Antwort seit mehr als 90 Sekunden</span>{% endif %}</p>
       <p class="eintragtext">Letzter Kontakt: {% if w.letzter_kontakt %}{{ w.letzter_kontakt|date:"d.m.Y H:i:s" }}{% else %}noch nie{% endif %} · erlaubte Projekte: {% for p in w.erlaubte_projekte.all %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% empty %}keine{% endfor %}</p>
       {% for b in w.projekte.all %}
-      <p class="eintragtext">{{ b.projekt.name }}: {% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nichts gemeldet</span>{% endif %}
+      <p class="eintragtext">{{ b.projekt.name }}: {% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nicht gemeldet</span> <span class="gedaempft klein">meldet sie bei der ersten Übernahme</span>{% endif %}
         {% if b.bereit_gemeldet_am %}<span class="gedaempft klein">gemeldet {{ b.bereit_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
         {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}</p>
       {% endfor %}

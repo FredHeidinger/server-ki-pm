@@ -151,6 +151,15 @@ def test_zuweisen_hebt_vorhandene_freigabe_auf(akteur, projekt, pbindung):
     assert a.zustand == Auftrag.ENTWURF and a.freigegeben_am is None
 
 
+def test_zuweisen_mit_freigeben_haelt_eine_vorhandene_freigabe(akteur, projekt, pbindung):
+    a = arbeitspaket(akteur, projekt)
+    dienst.auftrag_freigeben(akteur, a)
+    z = werkbank.zuweisen(akteur, a, pbindung, freigeben=True)
+    a.refresh_from_db()
+    assert a.zustand == Auftrag.FREIGEGEBEN and a.ausfuehrungsweg == Auftrag.WEG_WERKBANK
+    assert z.kontext_sha256 == werkbank.kontext_hash(werkbank.snapshot_bauen(a))
+
+
 def test_freigeben_und_zuweisen_ist_atomar(akteur, entwurf, pbindung):
     z = werkbank.zuweisen(akteur, entwurf, pbindung, freigeben=True)
     entwurf.refresh_from_db()
