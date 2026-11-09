@@ -1,0 +1,1 @@
+<span class="status {% if p.stand == 'erledigt' %}ok{% elif p.stand == 'blockiert' or p.stand == 'fehler' %}bad{% elif p.stand == 'abgeloest' or p.stand == 'verworfen' or p.stand == 'ersetzt' %}aus{% endif %}">{{ p.stand_wort }}</span>

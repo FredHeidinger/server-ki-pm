@@ -136,6 +136,100 @@ def _klaeren(ausf: WerkbankAusfuehrung, paket: str, ausgang: str = "fehlschlag")
     ).update(klaerung="geklaert", ausgang_art=ausgang)
 
 
+# --- Bauplan zur Anzeige ----------------------------------------------------------------------
+
+#: Paketstände als Wort; „blockiert“ und „abgelöst“ leitet ``bauplan`` ab, die Werkbank meldet sie
+#: nicht.
+PAKET_WORT = {
+    "offen": "offen",
+    "laeuft": "läuft",
+    "erledigt": "erledigt",
+    "ersetzt": "ersetzt",
+    "zerlegt": "zerlegt",
+    "verworfen": "verworfen",
+    "fehler": "Fehler",
+    "blockiert": "blockiert",
+    "abgeloest": "abgelöst",
+}
+_ENDGUELTIG = ("erledigt", "ersetzt", "zerlegt", "verworfen")
+
+
+def _versuch_von(name: str, haupt: list[str]) -> str | None:
+    """Das Planpaket, dessen Versuch ``name`` ist: der längste Paketname, mit dem ``name`` beginnt,
+    gefolgt von einem Trennzeichen (die Werkbank hängt Auftrag und Versuch an, z. B. ``-v2``)."""
+    passend = [
+        h for h in haupt if len(name) > len(h) and name.startswith(h) and name[len(h)] in "-._"
+    ]
+    return max(passend, key=len) if passend else None
+
+
+def bauplan(ausf: WerkbankAusfuehrung) -> list[dict]:
+    """Planpakete mit ihren Versuchen, abgeleitetem Stand und letztem Fehlergrund (Testlauf KTL-1).
+
+    Ein Paket oder Versuch, der noch „läuft“ oder „offen“ heißt, ohne dass ein Schritt ungeklärt
+    ist, gilt als blockiert, wenn für ihn oder den ganzen Auftrag ein Fehler offen ist, sonst als
+    abgelöst, wenn ein späterer Versuch folgt. Das Planpaket zeigt den Stand seines neuesten
+    Versuchs und den letzten Fehlergrund seiner Versuche.
+    """
+    pakete = [dict(p) for p in ausf.pakete]
+    namen = [p["paket"] for p in pakete]
+    if any(p.get("im_plan") for p in pakete):
+        haupt = [p for p in pakete if p.get("im_plan")]
+    else:  # ältere Ausführung ohne Markierung: nur am Namen erkennbar
+        haupt = [p for p in pakete if _versuch_von(p["paket"], namen) is None]
+    zeilen = {p["paket"]: {**p, "versuche_liste": []} for p in haupt}
+    for p in pakete:
+        if p["paket"] in zeilen:
+            continue
+        ziel = _versuch_von(p["paket"], list(zeilen))
+        if ziel is None:
+            zeilen[p["paket"]] = {**p, "versuche_liste": []}
+        else:
+            zeilen[ziel]["versuche_liste"].append(p)
+    schritte = WerkbankOperation.objects.filter(ausfuehrung=ausf, art="schritt")
+    ungeklaert = set(schritte.filter(klaerung="ungeklaert").values_list("paket", flat=True))
+    offen = {
+        b.get("paket") or "root"
+        for b in ausf.bedarf
+        if b.get("offen") and b.get("typ") in ("fehler", "unklar")
+    }
+    grund: dict[str, dict] = {}
+    for b in ausf.bedarf:  # in Meldungsreihenfolge: der letzte Eintrag gewinnt
+        if b.get("typ") in ("fehler", "unklar"):
+            grund[b.get("paket") or "root"] = {"text": b.get("text", ""), "code": b.get("code", "")}
+
+    def stand(p: dict, abgeloest: bool) -> str:
+        z = p.get("zustand") or "offen"
+        if z in ("laeuft", "offen") and p["paket"] not in ungeklaert:
+            if p["paket"] in offen or "root" in offen:
+                return "blockiert"
+            if abgeloest:
+                return "abgeloest"
+        return z
+
+    ergebnis = []
+    for z in zeilen.values():
+        versuche = z["versuche_liste"]
+        for i, v in enumerate(versuche):
+            v["stand"] = stand(v, i < len(versuche) - 1)
+            v["grund"] = grund.get(v["paket"])
+            v["schritte"] = schritte.filter(paket=v["paket"]).count()
+        z["stand"] = stand(z, False)
+        if versuche and z["stand"] not in _ENDGUELTIG:
+            z["stand"] = versuche[-1]["stand"]
+        z["grund"] = next(
+            (g for g in (grund.get(v["paket"]) for v in reversed(versuche)) if g),
+            grund.get(z["paket"]),
+        )
+        eigene = [z["paket"], *(v["paket"] for v in versuche)]
+        z["schritte"] = schritte.filter(paket__in=eigene).count()
+        z["versuche_anzahl"] = len(versuche) or z.get("versuche")
+        for p in (z, *versuche):
+            p["stand_wort"] = PAKET_WORT.get(p["stand"], p["stand"])
+        ergebnis.append(z)
+    return ergebnis
+
+
 # --- schritt ---------------------------------------------------------------------------------
 
 
@@ -323,7 +417,8 @@ def schritt(instanz, n: dict, q: werkbank.QuellePruefung, op: WerkbankOperation)
 def _plan_bestaetigt(instanz, ausf, daten, op) -> None:
     ausf.planfassung = daten["planfassung"]
     alt = {p["paket"]: p for p in ausf.pakete}
-    ausf.pakete = [{**alt.get(p["paket"], {}), **p} for p in daten["pakete"]]
+    # ``im_plan`` trennt Planpakete von Versuchen, die die Werkbank unter eigenem Namen meldet.
+    ausf.pakete = [{**alt.get(p["paket"], {}), **p, "im_plan": True} for p in daten["pakete"]]
 
 
 def _paket_status(instanz, ausf, daten, op) -> None:

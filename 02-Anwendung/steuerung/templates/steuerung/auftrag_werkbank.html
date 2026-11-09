@@ -68,8 +68,10 @@
     {% if w.pakete %}
     <div class="tabellenrahmen"><table class="klein">
       <thead><tr><th scope="col">Paket</th><th scope="col">Stand</th><th scope="col">Versuche</th><th scope="col">Schritte</th><th scope="col">Hinweis</th></tr></thead>
-      <tbody>{% for p in w.pakete %}<tr><td>{{ p.paket }}{% if p.titel %} · {{ p.titel }}{% endif %}</td><td>{{ p.zustand|default:"offen" }}</td><td>{{ p.versuche|default:"–" }}</td><td>{{ p.schritte }}</td><td>{% if p.handlungsbedarf %}<span class="status warn">Handlungsbedarf</span> {% endif %}{{ p.text }}</td></tr>{% endfor %}</tbody>
+      <tbody>{% for p in w.pakete %}<tr><td>{{ p.paket }}{% if p.titel %} · {{ p.titel }}{% endif %}</td><td>{% include "steuerung/_paketstand.html" %}</td><td>{{ p.versuche_anzahl|default:"–" }}</td><td>{{ p.schritte }}</td><td>{% if p.handlungsbedarf %}<span class="status warn">Handlungsbedarf</span> {% endif %}{{ p.text }}{% if p.grund %}{% if p.text or p.handlungsbedarf %}<br>{% endif %}<strong>Letzter Fehler:</strong> {{ p.grund.text }} <span class="gedaempft">({{ p.grund.code }})</span>{% endif %}</td></tr>
+        {% for v in p.versuche_liste %}<tr class="versuch"><td>↳ Versuch {{ forloop.counter }}: <code>{{ v.paket }}</code></td><td>{% include "steuerung/_paketstand.html" with p=v %}</td><td>{{ v.versuche|default:"–" }}</td><td>{{ v.schritte }}</td><td>{{ v.text }}{% if v.grund %}{% if v.text %}<br>{% endif %}<strong>Letzter Fehler:</strong> {{ v.grund.text }} <span class="gedaempft">({{ v.grund.code }})</span>{% endif %}</td></tr>{% endfor %}{% endfor %}</tbody>
     </table></div>
+    <p class="gedaempft klein">Versuche meldet die Werkbank unter eigenem Namen; sie stehen unter ihrem Paket. „blockiert“: kein Schritt ist mehr unterwegs und ein Fehler wartet auf dich. „abgelöst“: ein späterer Versuch hat übernommen.</p>
     {% else %}<p class="gedaempft">Noch kein Plan bestätigt.</p>{% endif %}
     {% if w.abschluss %}
     <h4>Abschluss</h4>

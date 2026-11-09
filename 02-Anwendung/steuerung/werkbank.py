@@ -65,16 +65,31 @@ def _bindungen_sichern(instanz: WerkbankInstanz, projekte: list[Projekt]) -> Non
 KOPPLUNGSCODE_KOPF = "kipm-kopplung/1:"
 
 
-def kopplungscode(instanz: WerkbankInstanz, schluessel: str, adresse: str) -> str:
+def kopplungscode(
+    instanz: WerkbankInstanz,
+    schluessel: str | None,
+    adresse: str,
+    *,
+    bindung: WerkbankProjektbindung | None = None,
+) -> str:
     """Ein Text mit allen Einrichtungswerten, damit Fred sie nicht einzeln abtippen muss.
 
-    Enthält den Schlüssel und wird deshalb nur beim Anlegen gezeigt, nie gespeichert. Das Format ist
-    eine Bequemlichkeit außerhalb des Vertrags ``kipm-werkbank/1``: ``kipm-kopplung/1:`` und
-    danach URL-sicheres Base64 eines JSON-Objekts. Der Arbeitsort ist der aktuelle bestätigte
-    Ordner des Projekts oder ``null``.
+    Mit Schlüssel und allen Projekten nur beim Anlegen gezeigt, nie gespeichert. Mit ``bindung``
+    und ``schluessel=None`` ein Code nur für diese Projektbindung ohne Schlüssel (``null``: die
+    Werkbank behält ihren Zugang); den darf die Seite jederzeit zeigen. Das Format ist eine
+    Bequemlichkeit außerhalb des Vertrags ``kipm-werkbank/1``: ``kipm-kopplung/1:`` und danach
+    URL-sicheres Base64 eines JSON-Objekts (``01-Planung/werkbank-anbindung/KOPPLUNGSCODE.md``).
+    Der Arbeitsort ist der aktuelle bestätigte Ordner des Projekts oder ``null``.
     """
+    if bindung is not None and bindung.instanz_id != instanz.pk:
+        raise ValueError("Die Projektbindung gehört zu einer anderen Werkbank.")
+    bindungen = (
+        [bindung]
+        if bindung is not None
+        else instanz.projekte.select_related("projekt").order_by("projekt__name")
+    )
     projekte = []
-    for b in instanz.projekte.select_related("projekt").order_by("projekt__name"):
+    for b in bindungen:
         ort = (
             b.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True)
             .exclude(pfad="")

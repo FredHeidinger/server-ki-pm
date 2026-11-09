@@ -47,6 +47,12 @@
           </tbody>
         </table></div>
         {% for b in w.bindungen %}
+        <div class="box">
+          <p class="klein"><strong>Kopplungscode für dieses Projekt ({{ b.projekt.name }})</strong>: In der Werkbank im Bereich „KI-PM-Kopplung“ in das Feld „Kopplungscode“ einfügen, dann „Kopplung speichern“. Der Code enthält keinen Schlüssel; die Werkbank behält ihren Zugang.</p>
+          <pre id="code-{{ w.pk }}-bindung-{{ b.pk }}">{{ b.code }}</pre>
+          <p><button type="button" class="knopf zweit klein" data-kopieren="code-{{ w.pk }}-bindung-{{ b.pk }}">Kopplungscode kopieren</button></p>
+          <p class="gedaempft klein">Meldet die Werkbank „schluessel fehlt“, kennt sie Codes ohne Schlüssel noch nicht; dann die Werte darunter einzeln übernehmen.</p>
+        </div>
         <div class="tabellenrahmen"><table class="klein einrichtungswerte">
           <caption>Für das Projekt {{ b.projekt.name }}</caption>
           <thead><tr><th scope="col">Feld in der Werkbank</th><th scope="col">Wert</th><th scope="col">Wofür</th></tr></thead>

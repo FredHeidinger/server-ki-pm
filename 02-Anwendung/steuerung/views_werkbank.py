@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from . import dienst, werkbank
+from . import dienst, werkbank, werkbank_lauf
 from .models import (
     AUSFUEHRUNG_AKTIV,
     Auftrag,
@@ -98,6 +98,7 @@ def verwaltung(request: HttpRequest) -> dict:
             orte = b.projekt.arbeitsorte.filter(aktiv=True)
             b.ort = orte.filter(bestaetigt=True).order_by("id").first()
             b.ort_unbestaetigt = None if b.ort else orte.order_by("id").first()
+            b.code = werkbank.kopplungscode(i, None, _adresse(request), bindung=b)
         instanzen.append(i)
     return {
         "werkbaenke": instanzen,
@@ -213,10 +214,8 @@ def auftrag_daten(auftrag: Auftrag) -> dict | None:
 
 
 def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
-    pakete = [dict(p) for p in ausf.pakete]
+    pakete = werkbank_lauf.bauplan(ausf)
     autorisiert = WerkbankOperation.objects.filter(ausfuehrung=ausf, art="schritt")
-    for p in pakete:
-        p["schritte"] = autorisiert.filter(paket=p["paket"]).count()
     bedarf = [b for b in ausf.bedarf if b.get("offen")]
     aktionen = list(ausf.aktionen.order_by("-id")[:20])
     for a in aktionen:
@@ -235,7 +234,7 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
     return {
         "zustand_text": ZUSTAND_TEXT.get(ausf.zustand, ausf.zustand),
         "pakete": pakete,
-        "pakete_erledigt": sum(1 for p in pakete if p.get("zustand") == "erledigt"),
+        "pakete_erledigt": sum(1 for p in pakete if p["stand"] == "erledigt"),
         "schritte_gesamt": autorisiert.count(),
         "bedarf": bedarf,
         "aktionen": aktionen,

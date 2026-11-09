@@ -394,4 +394,133 @@ def test_kopplungscode_steht_nur_beim_anlegen_da(owner_client, projekt):
     daten = _code_lesen(code)
     assert daten["werkbank_id"] == str(WerkbankInstanz.objects.get().werkbank_id)
     spaeter = seite(owner_client, "verbindungen")
-    assert "werkbank-kopplungscode" not in spaeter and "kipm-kopplung/1:" not in spaeter
+    # Der Code mit Schlüssel erscheint nur jetzt; später stehen nur Codes je Projektbindung
+    # ohne Schlüssel da (Testlauf KTL-1, P15).
+    assert "werkbank-kopplungscode" not in spaeter
+    for teil in spaeter.split("kipm-kopplung/1:")[1:]:
+        assert _code_lesen("kipm-kopplung/1:" + teil.split("<", 1)[0].strip())["schluessel"] is None
+
+
+# --- Testlauf KTL-1: Versuche im Bauplan, letzter Fehlergrund, Code je Projektbindung --------
+
+
+def _bauplan(html):
+    return html.split("<summary>Bauplan", 1)[1].split("</details>", 1)[0]
+
+
+def _ktl1_verlauf(client, ausf, inst):
+    """Wie KTL-1: ein Planpaket, zwei Versuche unter eigenen Namen, die nach einem erfolgreichen
+    Vorschritt „laeuft“ melden und danach blockieren; die Werkbank meldet nur den Abschlussfehler."""
+    ereignis(
+        client, ausf, inst, "plan_bestaetigt",
+        {"planfassung": "c" * 64, "pakete": [
+            {"paket": "fahrenheit-umrechnung", "titel": "Umrechnung", "zustand": "offen"},
+        ]},
+    )  # fmt: skip
+    for nr in (1, 2):
+        ereignis(
+            client, ausf, inst, "paket_status",
+            {"paket": f"fahrenheit-umrechnung-A-20261109-ab12cd-v{nr}", "zustand": "laeuft",
+             "versuche": nr},
+        )  # fmt: skip
+
+
+def test_versuche_gehoeren_zum_paket_und_blockierte_stehen_als_blockiert(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _ktl1_verlauf(client, w_ausfuehrung, w_instanz)
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"code": "ABSCHLUSS_UNVOLLSTAENDIG", "ausgang_unklar": False,
+         "text": "Blattpaket fahrenheit-umrechnung ist nicht übernommen."},
+    )  # fmt: skip
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "0 von 1 Paketen erledigt" in html and "Bauplan (1 Paket)" in html
+    plan = _bauplan(html)
+    assert "Versuch 1" in plan and "Versuch 2" in plan
+    assert "fahrenheit-umrechnung-A-20261109-ab12cd-v2" in plan
+    assert "blockiert" in plan and "läuft" not in plan and "laeuft" not in plan
+
+
+def test_laufender_versuch_ohne_fehler_bleibt_laufend(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _ktl1_verlauf(client, w_ausfuehrung, w_instanz)
+    plan = _bauplan(seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id))
+    # Der neueste Versuch läuft; der ältere ist durch ihn abgelöst und läuft nicht mehr.
+    assert plan.count("läuft") == 2  # Planpaket und Versuch 2
+    assert "abgelöst" in plan
+
+
+def test_letzter_fehlergrund_steht_am_paket_auch_nach_weiterbauen(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _ktl1_verlauf(client, w_ausfuehrung, w_instanz)
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"paket": "fahrenheit-umrechnung-A-20261109-ab12cd-v2", "code": "SCHRITT_FEHLGESCHLAGEN",
+         "ausgang_unklar": False, "text": "Mindestens ein Prüfbefehl ist erforderlich."},
+    )  # fmt: skip
+    folgen(
+        owner_client, "ausfuehrung_aktion",
+        {"art": "weiterbauen", "erwartet": w_ausfuehrung.zustand},
+        ausfuehrung_id=w_ausfuehrung.pk,
+    )  # fmt: skip
+    aktion = WerkbankAktion.objects.get(art="weiterbauen")
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "aktion_angewendet",
+        {"aktion_id": str(aktion.aktion_id), "ergebnis": "angewendet"},
+    )  # fmt: skip
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"code": "ABSCHLUSS_UNVOLLSTAENDIG", "ausgang_unklar": False, "text": "Unvollständig."},
+    )  # fmt: skip
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    oben = html.split("<summary>Bauplan", 1)[0]
+    assert "Mindestens ein Prüfbefehl" not in oben  # der Bedarf ist geschlossen
+    plan = _bauplan(html)
+    assert "Letzter Fehler" in plan
+    assert plan.count("Mindestens ein Prüfbefehl ist erforderlich.") == 2  # Paket und Versuch 2
+    assert "SCHRITT_FEHLGESCHLAGEN" in plan
+
+
+def test_kopplungscode_fuer_eine_projektbindung_ohne_schluessel(akteur, projekt, projekt_b):
+    projekt_b.arbeitsorte.update(pfad=r"C:\Projekte\B", bestaetigt=True)
+    inst, _ = werkbank.instanz_anlegen(akteur, name="W", projekte=[projekt, projekt_b])
+    b = inst.projekte.get(projekt=projekt_b)
+    daten = _code_lesen(werkbank.kopplungscode(inst, None, "https://a/", bindung=b))
+    assert daten["schluessel"] is None
+    assert daten["werkbank_id"] == str(inst.werkbank_id)
+    assert daten["server_id"] == str(werkbank.server_id())
+    assert daten["projekte"] == [
+        {
+            "projektbindung_id": b.pk,
+            "projektbindung_version": b.version,
+            "projekt": projekt_b.kennung,
+            "arbeitsort": r"C:\Projekte\B",
+        }
+    ]
+
+
+def test_neu_erlaubtes_projekt_bietet_einen_code_nur_fuer_diese_bindung(
+    owner_client, akteur, projekt, projekt_b
+):
+    projekt_b.arbeitsorte.update(pfad=r"C:\Projekte\B", bestaetigt=True)
+    inst, _ = werkbank.instanz_anlegen(akteur, name="W", projekte=[projekt])
+    folgen(
+        owner_client, "werkbank_pflegen", {"projekt": [projekt.pk, projekt_b.pk]},
+        instanz_id=inst.pk, wahl="projekte",
+    )  # fmt: skip
+    html = seite(owner_client, "verbindungen")
+    b = inst.projekte.get(projekt=projekt_b)
+    kennung = f'id="code-{inst.pk}-bindung-{b.pk}"'
+    assert kennung in html and "Kopplungscode für dieses Projekt" in html
+    code = html.split(kennung + ">", 1)[1].split("</", 1)[0].strip()
+    daten = _code_lesen(code)
+    assert daten["schluessel"] is None and [p["projekt"] for p in daten["projekte"]] == [
+        projekt_b.kennung
+    ]
+    # Kein Code mit Schlüssel auf der Seite: jeder gezeigte Code trägt schluessel = null.
+    for teil in html.split("kipm-kopplung/1:")[1:]:
+        roh = teil.split("<", 1)[0].strip()
+        assert _code_lesen("kipm-kopplung/1:" + roh)["schluessel"] is None
