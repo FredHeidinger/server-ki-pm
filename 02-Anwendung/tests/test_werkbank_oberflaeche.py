@@ -524,3 +524,70 @@ def test_neu_erlaubtes_projekt_bietet_einen_code_nur_fuer_diese_bindung(
     for teil in html.split("kipm-kopplung/1:")[1:]:
         roh = teil.split("<", 1)[0].strip()
         assert _code_lesen("kipm-kopplung/1:" + roh)["schluessel"] is None
+
+
+# --- Testlauf KTL-1, B7: still verworfene Freigabe sichtbar machen ------------------------------
+
+
+def _uebernahme_bitte(client, ausf, inst, **mehr):
+    ereignis(
+        client, ausf, inst, "freigabe_noetig",
+        {"freigabe_id": "F-1", "art": "uebernahme", "pakete": ["p1-v1"], "grund": "x", **mehr},
+    )  # fmt: skip
+
+
+def test_uebernahmefreigabe_ohne_kandidaten_wird_angesagt(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _uebernahme_bitte(client, w_ausfuehrung, w_instanz)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "Die Werkbank hat keine Kandidaten genannt" in html
+
+
+def test_uebernahmefreigabe_mit_kandidaten_ohne_warnung(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _uebernahme_bitte(client, w_ausfuehrung, w_instanz, kandidaten=["k1"])
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "Die Werkbank hat keine Kandidaten genannt" not in html
+
+
+def _ausstehende_freigabe(client, akteur, ausf, inst, vor_sekunden, kontakt_vor_sekunden):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    _uebernahme_bitte(client, ausf, inst)
+    aktion = werkbank.aktion_erstellen(akteur, ausf, "uebernahme_freigeben", freigabe_id="F-1")
+    jetzt = timezone.now()
+    WerkbankAktion.objects.filter(pk=aktion.pk).update(
+        erstellt_am=jetzt - timedelta(seconds=vor_sekunden)
+    )
+    WerkbankInstanz.objects.filter(pk=inst.pk).update(
+        letzter_kontakt=jetzt - timedelta(seconds=kontakt_vor_sekunden)
+    )
+
+
+def test_unbeantwortete_aktion_trotz_abgleich_wird_gewarnt(
+    client, owner_client, akteur, w_ausfuehrung, w_instanz
+):
+    _ausstehende_freigabe(client, akteur, w_ausfuehrung, w_instanz, 600, 5)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "weder angewendet noch abgewiesen" in html
+
+
+def test_frische_aktion_ist_noch_keine_warnung(
+    client, owner_client, akteur, w_ausfuehrung, w_instanz
+):
+    _ausstehende_freigabe(client, akteur, w_ausfuehrung, w_instanz, 20, 5)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "weder angewendet noch abgewiesen" not in html
+
+
+def test_aktion_ohne_abgleich_seitdem_ist_keine_warnung(
+    client, owner_client, akteur, w_ausfuehrung, w_instanz
+):
+    # Die Werkbank hat seit der Aktion nicht abgeglichen: das meldet schon die Erreichbarkeit.
+    _ausstehende_freigabe(client, akteur, w_ausfuehrung, w_instanz, 600, 900)
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "weder angewendet noch abgewiesen" not in html

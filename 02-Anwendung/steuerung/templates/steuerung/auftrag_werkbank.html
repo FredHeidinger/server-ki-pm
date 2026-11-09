@@ -47,7 +47,7 @@
     {% elif b.typ == "freigabe" %}
       <p><strong>Freigabe nötig ({% if b.art == "start" %}Start{% else %}Übernahme{% endif %}):</strong> {{ b.grund }}</p>
       {% if b.pakete %}<p class="klein">Betroffene Pakete: {{ b.pakete|join:", " }}</p>{% endif %}
-      {% if b.kandidaten %}<p class="klein">Kandidaten: {{ b.kandidaten|join:", " }}</p>{% endif %}
+      {% if b.kandidaten %}<p class="klein">Kandidaten: {{ b.kandidaten|join:", " }}</p>{% elif b.art == "uebernahme" %}<p class="klein"><span class="status warn">Die Werkbank hat keine Kandidaten genannt.</span> Manche Werkbank-Fassungen verwerfen eine Übernahmefreigabe ohne Kandidaten still; steht deine Freigabe dann länger als eine Minute als „gesendet“, liegt es daran.</p>{% endif %}
       {% if b.pruefstand %}<p class="klein">Prüfstand: {{ b.pruefstand }}</p>{% endif %}
       <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="aktion">{% csrf_token %}
         <input type="hidden" name="art" value="{% if b.art == 'start' %}start_freigeben{% else %}uebernahme_freigeben{% endif %}"><input type="hidden" name="freigabe_id" value="{{ b.freigabe_id }}"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}">
@@ -58,6 +58,9 @@
       <p><strong>{% if b.typ == "unklar" %}Ausgang unklar{% else %}Fehler{% endif %}{% if b.paket %} bei {{ b.paket }}{% endif %}:</strong> {{ b.text }} <span class="gedaempft klein">({{ b.code }})</span></p>
     {% endif %}
   </div>
+  {% endfor %}
+  {% for a in w.unbeantwortet %}
+  <div class="box warn" role="status"><p><strong>{{ a.name_text }} vom {{ a.erstellt_am|date:"d.m. H:i" }} ohne Antwort:</strong> Die Werkbank hat seitdem abgeglichen (zuletzt {{ w.letzter_kontakt|date:"H:i:s" }}), die Aktion aber weder angewendet noch abgewiesen. Der Grund liegt in der Werkbank; bitte dort im Bereich „KI-PM-Kopplung“ nachsehen.</p></div>
   {% endfor %}
   {% if w.kann_weiterbauen and not ausf.halt_zweck %}
   <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="weiterbauen"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf">Weiterbauen</button> <span class="gedaempft klein">Du bestätigst damit, dass es nach dem Fehler oder unklaren Ausgang weitergehen soll.</span></form>
@@ -87,7 +90,7 @@
 
   {% if w.aktionen %}
   <details class="mehr"><summary>Deine Aktionen ({{ w.aktionen|length }})</summary>
-    <ul class="klein">{% for a in w.aktionen %}<li>{{ a.erstellt_am|date:"d.m. H:i" }} · {{ a.name_text }}: <span class="status {% if a.zustand == 'ausgefuehrt' %}ok{% elif a.zustand == 'ausstehend' or a.zustand == 'angenommen' %}warn{% else %}aus{% endif %}">{{ a.zustand_text }}</span></li>{% endfor %}</ul>
+    <ul class="klein">{% for a in w.aktionen %}<li>{{ a.erstellt_am|date:"d.m. H:i" }} · {{ a.name_text }}: <span class="status {% if a.zustand == 'ausgefuehrt' %}ok{% elif a.zustand == 'ausstehend' or a.zustand == 'angenommen' %}warn{% else %}aus{% endif %}">{{ a.zustand_text }}</span>{% if a.unbeantwortet %} <span class="status bad">ohne Antwort der Werkbank</span>{% endif %}</li>{% endfor %}</ul>
   </details>
   {% endif %}
 

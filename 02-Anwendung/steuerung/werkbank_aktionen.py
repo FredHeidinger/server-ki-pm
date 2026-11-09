@@ -20,6 +20,9 @@ from .models import (
 )
 
 OFFEN = ("ausstehend", "angenommen")
+#: Hat die Werkbank länger als so viele Sekunden nach einer Aktion noch abgeglichen, die Aktion aber
+#: weder angewendet noch abgewiesen, gilt sie als unbeantwortet (Testlauf KTL-1, B7).
+UNBEANTWORTET_S = 60
 HALT_ARTEN = {"bearbeitung_beenden": "bearbeitung_aendern", "abbrechen": "abbrechen"}
 
 
@@ -170,6 +173,18 @@ def aktion_erstellen(
         if art in HALT_ARTEN:
             halt_setzen(akteur, ausf, HALT_ARTEN[art])
     return aktion
+
+
+def unbeantwortet(aktion: WerkbankAktion, instanz, jetzt=None) -> bool:
+    """Steht die Aktion noch als „ausstehend“, obwohl die Werkbank seit mehr als
+    ``UNBEANTWORTET_S`` Sekunden nach ihr abgeglichen hat? Ohne Abgleich seitdem warnt schon die
+    Erreichbarkeit (``werkbank.nicht_erreichbar``)."""
+    if aktion.zustand != "ausstehend" or instanz.letzter_kontakt is None:
+        return False
+    jetzt = jetzt or timezone.now()
+    return (jetzt - aktion.erstellt_am).total_seconds() > UNBEANTWORTET_S and (
+        instanz.letzter_kontakt - aktion.erstellt_am
+    ).total_seconds() > UNBEANTWORTET_S
 
 
 def aktionen_veralten(ausf: WerkbankAusfuehrung, ausser: WerkbankAktion | None = None) -> None:

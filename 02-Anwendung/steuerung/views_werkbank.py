@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from . import dienst, werkbank, werkbank_lauf
+from . import dienst, werkbank, werkbank_aktionen, werkbank_lauf
 from .models import (
     AUSFUEHRUNG_AKTIV,
     Auftrag,
@@ -218,9 +218,11 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
     autorisiert = WerkbankOperation.objects.filter(ausfuehrung=ausf, art="schritt")
     bedarf = [b for b in ausf.bedarf if b.get("offen")]
     aktionen = list(ausf.aktionen.order_by("-id")[:20])
+    instanz = ausf.projektbindung.instanz
     for a in aktionen:
         a.name_text = AKTION_NAME.get(a.art, a.art)
         a.zustand_text = AKTION_TEXT.get(a.zustand, a.zustand)
+        a.unbeantwortet = werkbank_aktionen.unbeantwortet(a, instanz)
     abschluss = next((n for n in reversed(ausf.nachweise) if n.get("typ") == "abschluss"), None)
     haelt = ausf.halt_zweck != ""
     abgeschlossen = ausf.zustand in ("abschluss_gemeldet", "abgeschlossen")
@@ -238,6 +240,8 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "schritte_gesamt": autorisiert.count(),
         "bedarf": bedarf,
         "aktionen": aktionen,
+        "unbeantwortet": [a for a in aktionen if a.unbeantwortet],
+        "letzter_kontakt": instanz.letzter_kontakt,
         "abschluss": abschluss,
         "halt_grund": grund_halt,
         "halt_moeglich": not grund_halt,
