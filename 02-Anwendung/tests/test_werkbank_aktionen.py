@@ -4,6 +4,7 @@ und Halt (Auftrag 4.7 und 7.3 bis 7.6)."""
 import uuid
 
 import pytest
+from django.urls import reverse
 
 from steuerung import akte, dienst, werkbank, werkbank_vertrag
 from steuerung.models import (
@@ -365,3 +366,44 @@ def test_jedes_teilmodul_laesst_sich_zuerst_importieren(modul):
         [sys.executable, "-c", code], capture_output=True, text=True, env=env, encoding="utf-8"
     )
     assert ergebnis.returncode == 0, ergebnis.stderr[-500:]
+
+
+def test_ktl1_uebernahmefreigabe_ohne_kandidaten_steht_im_abgleich(
+    client, owner_client, akteur, w_ausfuehrung, w_instanz
+):
+    """Testlauf KTL-1, B7: nach „Weiterbauen“ bittet die Werkbank um eine Übernahmefreigabe ohne
+    Kandidaten; Freds Aktion muss im Abgleich als „ausstehend“ mit passender Quelle stehen."""
+    ausf = w_ausfuehrung
+    ereignis(
+        client, ausf, w_instanz, "plan_bestaetigt",
+        {"planfassung": "c" * 64, "pakete": [
+            {"paket": "fahrenheit-umrechnung", "titel": "Umrechnung", "zustand": "offen"}]},
+    )  # fmt: skip
+    ereignis(
+        client, ausf, w_instanz, "fehler",
+        {"code": "ABSCHLUSS_UNVOLLSTAENDIG", "text": "Unvollständig.", "ausgang_unklar": False},
+    )  # fmt: skip
+    weiter = werkbank.aktion_erstellen(akteur, ausf, "weiterbauen", erwartet_zustand=ausf.zustand)
+    ereignis(
+        client, ausf, w_instanz, "aktion_angewendet",
+        {"aktion_id": str(weiter.aktion_id), "ergebnis": "angewendet"},
+    )  # fmt: skip
+    paket = "fahrenheit-umrechnung-A-20261109183356-5d6490-fahrenheit-umrechn"
+    ereignis(
+        client, ausf, w_instanz, "freigabe_noetig",
+        {"freigabe_id": "F-7a405350cdc9", "art": "uebernahme", "pakete": [paket],
+         "grund": "Übernahme ABGELEHNT KIPM_ENTSCHEIDUNG_FEHLT"},
+    )  # fmt: skip
+    antwort = owner_client.post(
+        reverse("ausfuehrung_aktion", kwargs={"ausfuehrung_id": ausf.pk}),
+        {"art": "uebernahme_freigeben", "freigabe_id": "F-7a405350cdc9", "erwartet": ausf.zustand},
+    )
+    assert antwort.status_code in (200, 302)
+    aktion = WerkbankAktion.objects.get(art="uebernahme_freigeben")
+    assert aktion.zustand == "ausstehend"
+    daten = abgleich(client, w_instanz)
+    eintrag = next(a for a in daten["aktionen"] if a["aktion_id"] == str(aktion.aktion_id))
+    assert eintrag["zustand"] == "ausstehend"
+    assert eintrag["bezug"] == {"freigabe_id": "F-7a405350cdc9"}
+    assert eintrag["erwarteter_zustand"] == ausf.zustand
+    assert eintrag["quelle"]["ausfuehrung_id"] == str(ausf.ausfuehrung_id)
