@@ -345,3 +345,25 @@ def test_meldung_zu_unbekannter_ausfuehrung_ist_404_und_baut_nichts(
     n["inhaltshash"] = inhaltshash(n)
     assert senden(client, w_instanz, "ereignisse/", n).status_code == 404
     assert WerkbankAusfuehrung.objects.count() == 1
+
+
+@pytest.mark.parametrize("weg", ["warten", "festlegen", "melden"])
+def test_lieferwege_aendern_keine_aktive_werkbank(w_ausfuehrung, akteur, weg):
+    from steuerung import lieferungen
+
+    a = w_ausfuehrung.auftrag
+    with pytest.raises(dienst.Konflikt, match="Werkbank"):
+        if weg == "warten":
+            lieferungen.warten(akteur, a, a.revision_nr, text="x", bedarf=[], nur_lieferungen=True)
+        elif weg == "festlegen":
+            lieferungen.festlegen(akteur, a, a.revision_nr, bedarf=[], nur_lieferungen=True)
+        else:
+            lieferungen.melden(
+                akteur,
+                a,
+                a.revision_nr,
+                lieferkennung="x",
+                zusammenfassung="x",
+                dateien=[],
+                pruefungen=[],
+            )

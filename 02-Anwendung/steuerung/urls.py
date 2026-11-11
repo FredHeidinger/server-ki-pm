@@ -217,6 +217,21 @@ urlpatterns = [
         api.sitzung_beendet,
         name="api_sitzung_beendet",
     ),
+    path(
+        "api/auftraege/<int:auftrag_id>/lieferbedarf/",
+        api.auf_lieferung_warten,
+        name="api_auf_lieferung_warten",
+    ),
+    path(
+        "api/auftraege/<int:auftrag_id>/lieferbedarf/festlegen/",
+        api.lieferbedarf_festlegen,
+        name="api_lieferbedarf_festlegen",
+    ),
+    path(
+        "api/auftraege/<int:auftrag_id>/lieferung/",
+        api.lieferung_melden,
+        name="api_lieferung_melden",
+    ),
     path("api/auftraege/<int:auftrag_id>/hindernis/", api.hindernis, name="api_hindernis"),
     path("api/auftraege/<int:auftrag_id>/rueckfrage/", api.rueckfrage, name="api_rueckfrage"),
     path("api/auftraege/<int:auftrag_id>/fehler/", api.fehler, name="api_fehler"),

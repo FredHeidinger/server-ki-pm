@@ -30,7 +30,8 @@ ANWEISUNGEN = (
     "KI-PM den Aufruf ab und ändert nichts, mit ihm stehen sie im Verlauf. Erfinde sie nie. "
     "Ausgenommen sind nur das Lesen und die Arbeit an einem freigegebenen Auftrag "
     "(kipm_uebernehmen, kipm_fortschritt, kipm_rueckfrage, kipm_hindernis, kipm_fehler, "
-    "kipm_ergebnis) sowie eine offene Frage an Fred (kipm_entscheidung_fragen): Sie legt nichts "
+    "kipm_ergebnis, kipm_warten_auf_lieferung, kipm_lieferung_melden) sowie eine "
+    "offene Frage an Fred (kipm_entscheidung_fragen): Sie legt nichts "
     "fest, erst seine Antwort macht daraus eine Entscheidung. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
     "Nachweis); nur Offenes, Größeres oder für einen anderen Chat schlägst du Fred für KI-PM vor. "
@@ -65,8 +66,16 @@ ANWEISUNGEN = (
     "kipm_auftrag_anlegen oder kipm_planen; ab dem Tag steht der Eintrag oben in „Wartet auf "
     "dich“. Verschieben in ein anderes Projekt oder Modul: kipm_verschiebeziele, dann "
     "kipm_verschieben_pruefen und die Folgen Fred nennen, nach seinem Ja kipm_verschieben mit dem "
-    "pruefcode der Vorschau; nie als Kopie neu anlegen. Versionen und Installationen kommen aus "
-    "GitHub (Releases "
+    "pruefcode der Vorschau; nie als Kopie neu anlegen. "
+    "Technische Lieferabhängigkeiten werden ausschließlich mit kipm_warten_auf_lieferung und "
+    "nur_lieferungen=true gemeldet, nicht als Freitexthindernis. Der Anbieter "
+    "meldet geprüfte Lieferungen "
+    "vor seinem endgültigen Gesamtabschluss mit kipm_lieferung_melden; Schlüssel/Revision aus "
+    "lieferbedarf verwenden. Bei automatischer Wiederaufnahme die Lieferbelege aus kipm_lesen "
+    "selbst prüfen; fehlende/abgelehnte Lieferung mit ihrem nach_lieferung erneut einordnen, "
+    "niemals Produktabnahme daraus ableiten. Entscheidungen und verweigerte Rechte bleiben beim "
+    "bisherigen Rückfrage-/Hindernisweg. "
+    "Versionen und Installationen kommen aus GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
 
@@ -101,6 +110,22 @@ _REVISION = {"type": "integer", "description": "Aktuelle Revision aus kipm_lesen
 _TEXT = {"type": "string"}
 _LISTE = {"type": "array", "items": {"type": "string"}}
 _MELDUNG = {"auftrag": _AUFTRAG, "revision": _REVISION, "text": _TEXT}
+_LIEFERBEDARF = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 20,
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "lieferkennung": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,79}$"},
+            "nach_lieferung": {"type": "integer", "minimum": 0},
+        },
+        "required": ["auftrag", "revision", "lieferkennung"],
+    },
+}
 _VERSCHIEBUNG = {
     "eintraege": {
         "type": "array",
@@ -350,6 +375,50 @@ WERKZEUGE = [
     ),
     ("kipm_fortschritt", "Fortschritt melden", _MELDUNG, ["auftrag", "revision", "text"]),
     (
+        "kipm_warten_auf_lieferung",
+        "Nur eigener Bearbeiter: ausschließlich technische Lieferbedarfe registrieren "
+        "und warten. Keine Entscheidung oder Werkzeugverweigerung hier einordnen. "
+        "Passende belegte Lieferungen erlauben automatisch die eigene Anschlussprüfung, "
+        "keine Abnahme.",
+        {**_MELDUNG, "bedarf": _LIEFERBEDARF, "nur_lieferungen": {"const": True}},
+        ["auftrag", "revision", "text", "bedarf", "nur_lieferungen"],
+    ),
+    (
+        "kipm_lieferbedarf_festlegen",
+        "Manager: vorhandenen ausschließlich technischen Hindernisblocker auf Freds "
+        "Anweisung einem genauen Lieferprofil zuordnen; keine Rechte- oder "
+        "Entscheidungsblockade.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "bedarf": _LIEFERBEDARF,
+            "nur_lieferungen": {"const": True},
+            "hindernis_id": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "ID der zuvor gelesenen Hindernismeldung aus kipm_lesen",
+            },
+        },
+        ["auftrag", "revision", "bedarf", "nur_lieferungen", "hindernis_id"],
+    ),
+    (
+        "kipm_lieferung_melden",
+        "Nur tatsächlicher Bearbeiter: geprüfte technische Lieferung mit Schlüssel, "
+        "vollständigen Git-Commits und Prüfbelegen melden. Hebt nur ausdrücklich "
+        "passende Lieferblockaden zur Anschlussprüfung auf; kein Auftrag wird dadurch "
+        "erledigt.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "lieferkennung": _TEXT,
+            "zusammenfassung": _TEXT,
+            "dateien": _LISTE,
+            "pruefungen": _LISTE,
+            "fehlgeschlagen": _LISTE,
+        },
+        ["auftrag", "revision", "lieferkennung", "zusammenfassung", "dateien", "pruefungen"],
+    ),
+    (
         "kipm_rueckfrage",
         "Rückfrage an Fred; der Auftrag ist blockiert, bis die Antwort kommt",
         _MELDUNG,
@@ -501,6 +570,18 @@ WERKZEUGE = [
 _AUFTRAGSWERKZEUGE = {
     "kipm_uebernehmen": ("api_uebernehmen", ()),
     "kipm_fortschritt": ("api_fortschritt", ("text",)),
+    "kipm_warten_auf_lieferung": (
+        "api_auf_lieferung_warten",
+        ("text", "bedarf", "nur_lieferungen"),
+    ),
+    "kipm_lieferbedarf_festlegen": (
+        "api_lieferbedarf_festlegen",
+        ("bedarf", "nur_lieferungen", "hindernis_id"),
+    ),
+    "kipm_lieferung_melden": (
+        "api_lieferung_melden",
+        ("lieferkennung", "zusammenfassung", "dateien", "pruefungen", "fehlgeschlagen"),
+    ),
     "kipm_rueckfrage": ("api_rueckfrage", ("text",)),
     "kipm_hindernis": ("api_hindernis", ("text",)),
     "kipm_fehler": ("api_fehler", ("text",)),
@@ -553,6 +634,8 @@ _ARBEIT_AM_AUFTRAG = frozenset(
     {
         "kipm_uebernehmen",
         "kipm_fortschritt",
+        "kipm_warten_auf_lieferung",
+        "kipm_lieferung_melden",
         "kipm_rueckfrage",
         "kipm_hindernis",
         "kipm_fehler",
@@ -732,7 +815,13 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         return rufe(reverse("api_antworten", kwargs=nr), _felder(a, ("text",)))
     if name in _AUFTRAGSWERKZEUGE:
         url_name, felder = _AUFTRAGSWERKZEUGE[name]
-        daten = {"revision": _revision(a)} | _felder(a, felder)
+        revision = (
+            a.get("revision")
+            if name
+            in {"kipm_warten_auf_lieferung", "kipm_lieferbedarf_festlegen", "kipm_lieferung_melden"}
+            else _revision(a)
+        )
+        daten = {"revision": revision} | _felder(a, felder)
         return rufe(reverse(url_name, kwargs=nr), daten)
     raise _Ungueltig(f"Unbekanntes Werkzeug: {name}")
 

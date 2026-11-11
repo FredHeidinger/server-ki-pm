@@ -40,6 +40,8 @@ ARBEIT = {
     "kipm_hindernis",
     "kipm_fehler",
     "kipm_ergebnis",
+    "kipm_warten_auf_lieferung",
+    "kipm_lieferung_melden",
 }
 # Legt nichts fest; erst Freds Antwort macht daraus eine Entscheidung (tests/test_offene_entscheidungen.py).
 FRAGE = {"kipm_entscheidung_fragen"}
@@ -56,6 +58,7 @@ AENDERND = {
     "kipm_auftrag_anlegen",
     "kipm_planen",
     "kipm_antworten",
+    "kipm_lieferbedarf_festlegen",
     "kipm_entscheidung_eintragen",
     "kipm_entscheidung_aendern",
     "kipm_meilenstein_anlegen",
@@ -89,6 +92,10 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
     chat = dienst.Akteur.aus_bindung(bindung)
     dienst.auftrag_uebernehmen(chat, blockiert, blockiert.revision_nr)
     dienst.rueckfrage_melden(chat, blockiert, blockiert.revision_nr, "Welche Sprache?")
+    technisch = arbeitspaket(akteur, projekt, titel="Lieferblocker", umfang="lieferblocker/**")
+    dienst.auftrag_freigeben(akteur, technisch)
+    dienst.auftrag_uebernehmen(chat, technisch, technisch.revision_nr)
+    dienst.hindernis_melden(chat, technisch, technisch.revision_nr, "Technische Lieferung fehlt")
     rufe("kipm_modul_anlegen", name="Vorhanden", kennung="vorhanden")
     modul = Modul.objects.get(projekt=projekt, kennung="vorhanden")
     ort = rufe("kipm_arbeitsort_vorschlagen", name="Neuer Ort")["arbeitsort"]
@@ -110,6 +117,19 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
         dienst.Akteur.aus_bindung(pc_zugang), verschieben["eintraege"]
     )["pruefcode"]
     return {
+        "kipm_lieferbedarf_festlegen": {
+            "auftrag": technisch.nummer,
+            "revision": technisch.revision_nr,
+            "hindernis_id": technisch.meldungen.first().pk,
+            "bedarf": [
+                {
+                    "auftrag": entwurf.nummer,
+                    "revision": entwurf.revision_nr,
+                    "lieferkennung": "lieferung",
+                }
+            ],
+            "nur_lieferungen": True,
+        },
         "kipm_verschieben": {**verschieben, "pruefcode": pruefcode},
         "kipm_projekt_anlegen": {"name": "Ganz neu"},
         "kipm_projekt_archivieren": {},
@@ -198,6 +218,8 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "fehler",
         "ergebnis",
         "entscheidung_fragen",
+        "auf_lieferung_warten",
+        "lieferung_melden",
         "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats
     }
     assert len(routen) == len(AENDERND) + len(ARBEIT) + len(FRAGE) + 1

@@ -23,6 +23,8 @@ TABELLEN = (
     "abhaengigkeit",
     "frueherenummer",
     "meldung",
+    "lieferung",
+    "lieferbedarf",
     "ergebnis",
     "pruefung",
     "kriteriumsbewertung",

@@ -20,7 +20,7 @@ from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from . import akte, dienst
+from . import akte, dienst, lieferungen
 from .models import (
     AnfrageKennung,
     Arbeitsort,
@@ -390,6 +390,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                 ],
                 "meldungen": [
                     {
+                        "id": m.pk,
                         "art": m.art,
                         "von": m.akteur_name,
                         "zeit": m.zeitpunkt.isoformat(timespec="minutes"),
@@ -403,6 +404,8 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                 ],
             }
         )
+    if mit_details:
+        daten.update(lieferungen.details(auftrag))
     return daten
 
 
@@ -1377,4 +1380,74 @@ def unterlage_version(request: HttpRequest, daten: dict, nummer: int) -> JsonRes
             },
         },
         status=201,
+    )
+
+
+def _lieferrevision(daten):
+    revision = daten.get("revision")
+    if type(revision) is not int:
+        raise dienst.DienstFehler("revision muss eine ganze Zahl sein.")
+    return revision
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def auf_lieferung_warten(request, daten, auftrag_id):
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    lieferungen.warten(
+        request.akteur,
+        auftrag,
+        _lieferrevision(daten),
+        text=str(daten.get("text", "")),
+        bedarf=daten.get("bedarf"),
+        nur_lieferungen=daten.get("nur_lieferungen"),
+    )
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_fred_bestaetigt
+@_mit_wiederholungsschutz
+@_behandeln
+def lieferbedarf_festlegen(request, daten, auftrag_id):
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    lieferungen.festlegen(
+        request.akteur,
+        auftrag,
+        _lieferrevision(daten),
+        bedarf=daten.get("bedarf"),
+        nur_lieferungen=daten.get("nur_lieferungen"),
+        hindernis_id=daten.get("hindernis_id"),
+    )
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def lieferung_melden(request, daten, auftrag_id):
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    lieferung = lieferungen.melden(
+        request.akteur,
+        auftrag,
+        _lieferrevision(daten),
+        lieferkennung=daten.get("lieferkennung"),
+        zusammenfassung=daten.get("zusammenfassung"),
+        dateien=daten.get("dateien"),
+        pruefungen=daten.get("pruefungen"),
+        fehlgeschlagen=daten.get("fehlgeschlagen", []),
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "lieferung": {"nummer": lieferung.pk, "inhalt_sha256": lieferung.inhalt_sha256},
+            "auftrag": _auftrag_json(auftrag, mit_details=True),
+        }
     )

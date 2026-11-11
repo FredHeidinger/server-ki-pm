@@ -1556,3 +1556,48 @@ class WerkbankEreignis(models.Model):
                 name="werkbankereignis_sequenz_je_ausfuehrung",
             ),
         ]
+
+
+class Lieferung(models.Model):
+    """Unveränderliche, vom tatsächlichen Bearbeiter gemeldete technische Lieferung."""
+
+    auftrag = models.ForeignKey(Auftrag, on_delete=models.PROTECT, related_name="lieferungen")
+    revision_nr = models.PositiveIntegerField()
+    lieferkennung = models.CharField(max_length=80)
+    meldung = models.OneToOneField(Meldung, on_delete=models.PROTECT, related_name="lieferung")
+    zusammenfassung = models.TextField()
+    dateien = models.JSONField()
+    pruefungen = models.JSONField()
+    inhalt_sha256 = models.CharField(max_length=64)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["auftrag", "revision_nr", "lieferkennung", "inhalt_sha256"],
+                name="lieferung_inhalt_einmal",
+            )
+        ]
+
+
+class Lieferbedarf(models.Model):
+    """Explizit technischer Bedarf genau einer Blockermeldung und ihrer Revision."""
+
+    meldung = models.ForeignKey(Meldung, on_delete=models.PROTECT, related_name="lieferbedarf")
+    lieferauftrag = models.ForeignKey(
+        Auftrag, on_delete=models.PROTECT, related_name="lieferbedarfe"
+    )
+    lieferrevision = models.PositiveIntegerField()
+    lieferkennung = models.CharField(max_length=80)
+    nach_lieferung = models.PositiveBigIntegerField(default=0)
+    erfuellt_durch = models.ForeignKey(
+        Lieferung, null=True, blank=True, on_delete=models.PROTECT, related_name="erfuellte_bedarfe"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meldung", "lieferauftrag", "lieferrevision", "lieferkennung"],
+                name="lieferbedarf_je_blocker_einmal",
+            )
+        ]
