@@ -63,6 +63,8 @@ def zustand_aus_bedarf(ausf: WerkbankAusfuehrung) -> str:
     unklar vor allem, sonst läuft es, wenn ein Paket ohne Fred weiterkommt, sonst wartet es."""
     if _bedarf_offen(ausf, "unklar"):
         return "unklar"
+    if any((b.get("paket") or "root") == "root" for b in _bedarf_offen(ausf, "fehler")):
+        return "fehler"  # ein Fehler des ganzen Auftrags (auch ein Halt) hält alles an
     if _fortsetzbar(ausf):
         return "laeuft"
     for typ, zustand in (
@@ -548,6 +550,11 @@ def _fehler(instanz, ausf, daten, op) -> None:
         _paket(ausf, paket, zustand="fehler", handlungsbedarf=True)
     if unklar:
         _zustand_setzen(ausf, "unklar")  # die ungeklärten Versuche bleiben ungeklärt
+    elif paket == "root":
+        # Ein Fehler des ganzen Auftrags, auch ein Halt der Werkbank, blockiert ihn, selbst wenn ein
+        # Paket noch als laufend gemeldet ist (Freds Entscheidung 12.11.2026, Testlauf KTL-1).
+        _klaeren(ausf, paket)
+        _zustand_setzen(ausf, "fehler")
     else:
         _klaeren(ausf, paket)
         _blockade(ausf, "fehler")

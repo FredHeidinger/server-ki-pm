@@ -385,3 +385,46 @@ def test_nicht_umgesetzte_ereignisart_bleibt_ehrlich_501(client, w_ausfuehrung, 
     n = ereignis_nachricht(w_ausfuehrung, w_instanz, "abschluss_bericht", {}, sequenz=1)
     # Schema verlangt Pflichtfelder: 400 ist hier der erwartete, ehrliche Ausgang.
     assert senden(client, w_instanz, "ereignisse/", n).status_code in {400, 501}
+
+
+# --- Halt oder Fehler des ganzen Auftrags blockiert ihn (Freds Entscheidung 12.11.2026) ---------
+
+
+def test_fehler_des_ganzen_auftrags_blockiert_auch_wenn_ein_paket_laeuft(
+    client, akteur, w_ausfuehrung, w_instanz
+):
+    from steuerung import werkbank
+
+    plan(client, w_ausfuehrung, w_instanz, pakete=("p1", "p2"))
+    ereignis(client, w_ausfuehrung, w_instanz, "paket_status", {"paket": "p1", "zustand": "laeuft"})
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"code": "HALT", "text": "Die Werkbank hält an.", "ausgang_unklar": False},
+    )  # fmt: skip
+    assert w_ausfuehrung.zustand == "fehler"
+    w_ausfuehrung.auftrag.refresh_from_db()
+    assert w_ausfuehrung.auftrag.zustand == Auftrag.BLOCKIERT
+    aktion = werkbank.aktion_erstellen(
+        akteur, w_ausfuehrung, "weiterbauen", erwartet_zustand="fehler"
+    )
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "aktion_angewendet",
+        {"aktion_id": str(aktion.aktion_id), "ergebnis": "angewendet"},
+    )  # fmt: skip
+    assert w_ausfuehrung.zustand == "laeuft"
+    w_ausfuehrung.auftrag.refresh_from_db()
+    assert w_ausfuehrung.auftrag.zustand == Auftrag.IN_ARBEIT
+
+
+def test_fehler_eines_pakets_blockiert_nicht_solange_ein_anderes_laeuft(
+    client, w_ausfuehrung, w_instanz
+):
+    plan(client, w_ausfuehrung, w_instanz, pakete=("p1", "p2"))
+    ereignis(client, w_ausfuehrung, w_instanz, "paket_status", {"paket": "p2", "zustand": "laeuft"})
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"paket": "p1", "code": "X", "text": "kaputt", "ausgang_unklar": False},
+    )  # fmt: skip
+    assert w_ausfuehrung.zustand == "laeuft"
+    w_ausfuehrung.auftrag.refresh_from_db()
+    assert w_ausfuehrung.auftrag.zustand == Auftrag.IN_ARBEIT
