@@ -367,3 +367,101 @@ def test_lieferwege_aendern_keine_aktive_werkbank(w_ausfuehrung, akteur, weg):
                 dateien=[],
                 pruefungen=[],
             )
+
+
+# --- SKP-01: eine neue Bitte schließt die ältere (KTL-1, F-7a405… durch F-3303…) --------------
+
+ALT_PAKET = "p1-A-20261109183356-5d6490-p1"
+
+
+def _bitte(client, ausf, inst, freigabe_id, pakete, art="uebernahme", **mehr):
+    ereignis(
+        client, ausf, inst, "freigabe_noetig",
+        {"freigabe_id": freigabe_id, "art": art, "pakete": pakete, "grund": "x", **mehr},
+    )  # fmt: skip
+
+
+def _bedarf(ausf, freigabe_id):
+    return next(b for b in ausf.bedarf if b.get("freigabe_id") == freigabe_id)
+
+
+def test_neue_bitte_gleicher_art_schliesst_die_aeltere(client, fertig, w_instanz):
+    _bitte(client, fertig, w_instanz, "F-alt", [ALT_PAKET])
+    _bitte(client, fertig, w_instanz, "F-neu", ["p1"], kandidaten=["k1"])
+    alt, neu = _bedarf(fertig, "F-alt"), _bedarf(fertig, "F-neu")
+    assert alt["offen"] is False and alt["ersetzt_durch"] == "F-neu"
+    assert neu["offen"] is True
+
+
+@pytest.mark.parametrize(
+    ("pakete", "art"), [(["p2"], "uebernahme"), (["p1"], "start"), ([], "uebernahme")]
+)
+def test_bitte_fuer_andere_pakete_oder_art_laesst_die_aeltere_offen(
+    client, fertig, w_instanz, pakete, art
+):
+    _bitte(client, fertig, w_instanz, "F-alt", [ALT_PAKET])
+    _bitte(client, fertig, w_instanz, "F-neu", pakete, art=art)
+    assert _bedarf(fertig, "F-alt")["offen"] is True
+
+
+def test_erteilte_freigabe_auf_die_aeltere_bleibt_bestehen(client, akteur, fertig, w_instanz):
+    _bitte(client, fertig, w_instanz, "F-alt", [ALT_PAKET])
+    aktion = werkbank.aktion_erstellen(akteur, fertig, "uebernahme_freigeben", freigabe_id="F-alt")
+    _bitte(client, fertig, w_instanz, "F-neu", ["p1"], kandidaten=["k1"])
+    aktion.refresh_from_db()
+    assert aktion.zustand == "ausstehend"
+
+
+def _ktl1_bericht():
+    return [
+        {"paket": "p1", "titel": "Paket", "zustand": "erledigt", "ersetzt": [ALT_PAKET]},
+        {"paket": ALT_PAKET, "titel": "Altname", "zustand": "ersetzt"},
+    ]
+
+
+def test_ktl1_altbestand_offene_alte_bitte_hindert_den_abschluss_nicht_mehr(
+    client, akteur, fertig, w_instanz
+):
+    """Stand auf dem Server vor SKP-01: alte Bitte offen, jüngere Bitte gleicher Art für dasselbe
+    Paket schon angewendet. Der nächste Abschlussbericht der Werkbank muss durchgehen."""
+    _bitte(client, fertig, w_instanz, "F-alt", [ALT_PAKET])
+    _bitte(client, fertig, w_instanz, "F-neu", ["p1"], kandidaten=["k1"])
+    bedarf = [dict(b) for b in fertig.bedarf]
+    for b in bedarf:
+        b.pop("ersetzt_durch", None)
+        b["offen"] = b.get("freigabe_id") == "F-alt"
+    WerkbankAusfuehrung.objects.filter(pk=fertig.pk).update(
+        bedarf=bedarf, zustand="wartet_freigabe"
+    )
+    fertig.refresh_from_db()
+    abschluss(client, fertig, w_instanz, paketplan=_ktl1_bericht())
+    assert fertig.zustand == "abschluss_gemeldet"
+    assert _bedarf(fertig, "F-alt")["ersetzt_durch"] == "F-neu"
+    fertig.auftrag.refresh_from_db()
+    assert fertig.auftrag.zustand == Auftrag.ERLEDIGT
+
+
+def test_offene_alte_bitte_ohne_juengere_hindert_den_abschluss_weiter(client, fertig, w_instanz):
+    _bitte(client, fertig, w_instanz, "F-alt", [ALT_PAKET])
+    body = abschluss(client, fertig, w_instanz, status=409, paketplan=_ktl1_bericht())
+    assert "Es wartet noch" in " ".join(body["fehler"]["details"]["maengel"])
+
+
+def test_weiterbauen_nur_bei_offenem_fehler(client, owner_client, akteur, fertig, w_instanz):
+    """Kriterium 3 von SKP-01; von Anfang an grün: `kann_weiterbauen` prüft schon nur offenen
+    Bedarf. Der Test hält das fest."""
+    from steuerung import views_werkbank
+
+    ereignis(
+        client, fertig, w_instanz, "fehler",
+        {"paket": "p1", "code": "X", "text": "kaputt", "ausgang_unklar": False},
+    )  # fmt: skip
+    assert views_werkbank._ausfuehrung_daten(fertig)["kann_weiterbauen"] is True
+    aktion = werkbank.aktion_erstellen(
+        akteur, fertig, "weiterbauen", erwartet_zustand=fertig.zustand
+    )
+    ereignis(
+        client, fertig, w_instanz, "aktion_angewendet",
+        {"aktion_id": str(aktion.aktion_id), "ergebnis": "angewendet"},
+    )  # fmt: skip
+    assert views_werkbank._ausfuehrung_daten(fertig)["kann_weiterbauen"] is False

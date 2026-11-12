@@ -116,6 +116,8 @@ def _abschluss(instanz, ausf, d, op):
         )
     if ausf.halt_zweck:
         return None  # Halt geht vor: Fakten sind protokolliert, aber kein ERLEDIGT
+    # Altbestand vor SKP-01: eine von einer jüngeren Bitte überholte Bitte stand noch offen.
+    werkbank_lauf.ueberholte_freigaben_schliessen(ausf)
     maengel = _maengel(ausf, d)
     if maengel:
         raise werkbank.WerkbankFehler(

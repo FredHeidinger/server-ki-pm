@@ -447,6 +447,53 @@ def _rueckfrage(instanz, ausf, daten, op) -> None:
     _verlauf(instanz, ausf, Meldung.RUECKFRAGE, daten["text"], "Rückfrage der Werkbank")
 
 
+def _abgedeckt(alt: list[str], neu: list[str]) -> bool:
+    """Deckt eine Bitte für die Pakete ``neu`` die ältere für ``alt`` ab? Jedes alte Paket ist eines
+    der neuen oder ein Versuch davon (Versuchsname, ``_versuch_von``). Eine Bitte ohne Pakete deckt
+    nur eine ebenso paketlose ab."""
+    if not alt or not neu:
+        return not alt and not neu
+    return all(p in neu or _versuch_von(p, neu) is not None for p in alt)
+
+
+def ueberholte_freigaben_schliessen(ausf: WerkbankAusfuehrung) -> bool:
+    """SKP-01: Eine offene Freigabe-Bitte ist überholt, sobald eine jüngere Bitte gleicher Art
+    (``start`` bzw. ``uebernahme``) ihre Pakete abdeckt; der Vertrag kennt kein Zurückziehen. Sie
+    wird mit Vermerk ``ersetzt_durch`` geschlossen. Erteilte Freigaben auf sie bleiben unberührt
+    (die Werkbank weist sie mit Grund ab). Gibt zurück, ob sich etwas geändert hat."""
+    bitten = [b for b in ausf.bedarf if b.get("typ") == "freigabe"]
+    geaendert = False
+    for i, alt in enumerate(bitten):
+        if not alt.get("offen"):
+            continue
+        neuere = next(
+            (
+                b
+                for b in reversed(bitten[i + 1 :])
+                if b.get("art") == alt.get("art")
+                and _abgedeckt(alt.get("pakete", []), b.get("pakete", []))
+            ),
+            None,
+        )
+        if neuere is not None:
+            alt["offen"] = False
+            alt["ersetzt_durch"] = neuere["freigabe_id"]
+            geaendert = True
+    if not geaendert:
+        return False
+    offen = {b.get("paket") for b in ausf.bedarf if b.get("offen") and b.get("paket")}
+    for b in ausf.bedarf:
+        if b.get("offen") and b.get("typ") == "freigabe":
+            offen.update(b.get("pakete", []))
+    for p in ausf.pakete:
+        if p.get("handlungsbedarf") and p["paket"] not in offen:
+            p["handlungsbedarf"] = False
+    ausf.bedarf = list(ausf.bedarf)
+    if ausf.zustand == "wartet_freigabe":
+        ausf.zustand = zustand_aus_bedarf(ausf)
+    return True
+
+
 def _freigabe_noetig(instanz, ausf, daten, op) -> None:
     if any(b.get("freigabe_id") == daten["freigabe_id"] for b in ausf.bedarf):
         return
@@ -463,6 +510,7 @@ def _freigabe_noetig(instanz, ausf, daten, op) -> None:
             "offen": True,
         },
     ]
+    ueberholte_freigaben_schliessen(ausf)
     for name in daten.get("pakete", []):
         _paket(ausf, name, handlungsbedarf=True)
     _blockade(ausf, "wartet_freigabe")
