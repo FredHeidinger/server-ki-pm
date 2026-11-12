@@ -591,3 +591,79 @@ def test_aktion_ohne_abgleich_seitdem_ist_keine_warnung(
     _ausstehende_freigabe(client, akteur, w_ausfuehrung, w_instanz, 600, 900)
     html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
     assert "weder angewendet noch abgewiesen" not in html
+
+
+# --- P17 (Rest): ersetzte Schrittnamen im Plan, Fehlergrund des ganzen Auftrags -----------------
+
+
+def test_ersetzte_schrittnamen_im_plan_zaehlen_nicht_als_pakete(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    alt1, alt2 = "p1-A-20261109-ab12cd-p1", "p1-A-20261109-ab12cd-p1-v2"
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "plan_bestaetigt",
+        {"planfassung": "d" * 64, "pakete": [
+            {"paket": "p1", "titel": "Umrechnung", "zustand": "laeuft", "ersetzt": [alt1, alt2]},
+            {"paket": alt1, "titel": "Altname", "zustand": "ersetzt"},
+            {"paket": alt2, "titel": "Altname", "zustand": "ersetzt"},
+        ]},
+    )  # fmt: skip
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    assert "0 von 1 Paketen erledigt" in html and "Bauplan (1 Paket)" in html
+    plan = _bauplan(html)
+    assert "früherer Name" in plan and alt2 in plan
+    assert plan.count("ersetzt") >= 2 and plan.count("läuft") == 1
+
+
+def test_grund_eines_halts_bleibt_am_auftrag_sichtbar(
+    client, owner_client, akteur, w_ausfuehrung, w_instanz
+):
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "fehler",
+        {"code": "KIPM_SCHRITT_ERLEDIGT", "ausgang_unklar": False,
+         "text": "Der Schritt review/p1 ist schon gelaufen. – die Werkbank hält an"},
+    )  # fmt: skip
+    aktion = werkbank.aktion_erstellen(
+        akteur, w_ausfuehrung, "weiterbauen", erwartet_zustand=w_ausfuehrung.zustand
+    )
+    ereignis(
+        client, w_ausfuehrung, w_instanz, "aktion_angewendet",
+        {"aktion_id": str(aktion.aktion_id), "ergebnis": "angewendet"},
+    )  # fmt: skip
+    html = seite(owner_client, "auftrag_detail", auftrag_id=w_ausfuehrung.auftrag_id)
+    kopf = html.split("<h3>Ausführung", 1)[1].split("<summary>Bauplan", 1)[0]
+    assert "Letzter Fehler" in kopf and "Der Schritt review/p1 ist schon gelaufen" in kopf
+    assert "KIPM_SCHRITT_ERLEDIGT" in kopf
+
+
+# --- P19: Weiterbauen mit sichtbarer Rückmeldung, ein Doppelklick wirkt einmal --------------------
+
+
+def _fehler_offen(client, ausf, inst):
+    ereignis(
+        client, ausf, inst, "fehler",
+        {"code": "HALT", "text": "Die Werkbank hält an.", "ausgang_unklar": False},
+    )  # fmt: skip
+
+
+def test_weiterbauen_zeigt_dass_es_gesendet_ist(client, owner_client, w_ausfuehrung, w_instanz):
+    _fehler_offen(client, w_ausfuehrung, w_instanz)
+    html = folgen(
+        owner_client, "ausfuehrung_aktion",
+        {"art": "weiterbauen", "erwartet": w_ausfuehrung.zustand},
+        ausfuehrung_id=w_ausfuehrung.pk,
+    )  # fmt: skip
+    assert "Weiterbauen ist gesendet" in html
+    assert "wartet auf die Werkbank" in html
+    assert '<input type="hidden" name="art" value="weiterbauen">' not in html
+
+
+def test_doppelklick_auf_weiterbauen_wirkt_einmal_und_ohne_fehlermeldung(
+    client, owner_client, w_ausfuehrung, w_instanz
+):
+    _fehler_offen(client, w_ausfuehrung, w_instanz)
+    daten = {"art": "weiterbauen", "erwartet": w_ausfuehrung.zustand}
+    folgen(owner_client, "ausfuehrung_aktion", daten, ausfuehrung_id=w_ausfuehrung.pk)
+    html = folgen(owner_client, "ausfuehrung_aktion", daten, ausfuehrung_id=w_ausfuehrung.pk)
+    assert WerkbankAktion.objects.filter(art="weiterbauen").count() == 1
+    assert "schon gesendet" in html and "Es wird schon weitergebaut" not in html

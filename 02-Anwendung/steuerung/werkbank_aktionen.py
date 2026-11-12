@@ -134,12 +134,18 @@ def aktion_erstellen(
                 raise dienst.Konflikt("Diese Freigabe wird schon erteilt.")
             ziel = {"freigabe_id": freigabe_id}
         elif art == "weiterbauen":
+            # Ein zweiter Klick (Doppelklick, Neuladen) liefert die schon gesendete Aktion zurück,
+            # statt eine zweite anzulegen oder einen Fehler zu melden (Testlauf KTL-1, P19).
+            vorhanden = WerkbankAktion.objects.filter(
+                ausfuehrung=ausf, art="weiterbauen", zustand__in=OFFEN
+            ).first()
+            if vorhanden is not None:
+                vorhanden.schon_gesendet = True
+                return vorhanden
             if not any(
                 b.get("offen") and b.get("typ") in ("fehler", "unklar") for b in ausf.bedarf
             ):
                 raise dienst.DienstFehler("Es gibt weder einen Fehler noch einen unklaren Ausgang.")
-            if _offene_aktion(ausf, "weiterbauen"):
-                raise dienst.Konflikt("Es wird schon weitergebaut.")
             ziel = {"paket": paket} if paket else {}
         elif art in HALT_ARTEN:
             zweck = HALT_ARTEN[art]

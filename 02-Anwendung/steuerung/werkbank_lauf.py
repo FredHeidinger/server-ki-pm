@@ -178,8 +178,17 @@ def bauplan(ausf: WerkbankAusfuehrung) -> list[dict]:
     else:  # ältere Ausführung ohne Markierung: nur am Namen erkennbar
         haupt = [p for p in pakete if _versuch_von(p["paket"], namen) is None]
     zeilen = {p["paket"]: {**p, "versuche_liste": []} for p in haupt}
+    # Frühere Schrittnamen, die die Werkbank im Plan als „ersetzt“ nennt (Feld ``ersetzt`` am echten
+    # Paket), stehen unter diesem Paket und zählen nicht als eigene Pakete (Testlauf KTL-1, P17).
+    for neu in list(zeilen.values()):
+        for alt in neu.get("ersetzt") or []:
+            if alt != neu["paket"] and alt in zeilen and neu["paket"] in zeilen:
+                eintrag = zeilen.pop(alt)
+                eintrag.pop("versuche_liste", None)
+                neu["versuche_liste"].append({**eintrag, "frueherer_name": True})
+    eingeordnet = {v["paket"] for z in zeilen.values() for v in z["versuche_liste"]}
     for p in pakete:
-        if p["paket"] in zeilen:
+        if p["paket"] in zeilen or p["paket"] in eingeordnet:
             continue
         ziel = _versuch_von(p["paket"], list(zeilen))
         if ziel is None:
@@ -210,20 +219,23 @@ def bauplan(ausf: WerkbankAusfuehrung) -> list[dict]:
     ergebnis = []
     for z in zeilen.values():
         versuche = z["versuche_liste"]
-        for i, v in enumerate(versuche):
-            v["stand"] = stand(v, i < len(versuche) - 1)
+        echte = [v for v in versuche if not v.get("frueherer_name")]
+        for v in versuche:
+            v["stand"] = stand(v, v is not (echte[-1] if echte else None))
+        for nr, v in enumerate(echte, 1):
+            v["nr"] = nr
             v["grund"] = grund.get(v["paket"])
             v["schritte"] = schritte.filter(paket=v["paket"]).count()
         z["stand"] = stand(z, False)
-        if versuche and z["stand"] not in _ENDGUELTIG:
-            z["stand"] = versuche[-1]["stand"]
+        if echte and z["stand"] not in _ENDGUELTIG:
+            z["stand"] = echte[-1]["stand"]
         z["grund"] = next(
             (g for g in (grund.get(v["paket"]) for v in reversed(versuche)) if g),
             grund.get(z["paket"]),
         )
         eigene = [z["paket"], *(v["paket"] for v in versuche)]
         z["schritte"] = schritte.filter(paket__in=eigene).count()
-        z["versuche_anzahl"] = len(versuche) or z.get("versuche")
+        z["versuche_anzahl"] = len(echte) or z.get("versuche")
         for p in (z, *versuche):
             p["stand_wort"] = PAKET_WORT.get(p["stand"], p["stand"])
         ergebnis.append(z)

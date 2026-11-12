@@ -11,6 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import dienst, werkbank, werkbank_aktionen, werkbank_lauf
@@ -217,6 +218,18 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
     pakete = werkbank_lauf.bauplan(ausf)
     autorisiert = WerkbankOperation.objects.filter(ausfuehrung=ausf, art="schritt")
     bedarf = [b for b in ausf.bedarf if b.get("offen")]
+    # Grund des letzten Fehlers, der den ganzen Auftrag betrifft (auch ein Halt der Werkbank);
+    # ist er nicht mehr offen, stünde er sonst nur noch im Verlauf (Testlauf KTL-1, P17).
+    letzter_fehler = next(
+        (
+            b
+            for b in reversed(ausf.bedarf)
+            if b.get("typ") in ("fehler", "unklar") and (b.get("paket") or "root") == "root"
+        ),
+        None,
+    )
+    if letzter_fehler is not None and letzter_fehler.get("offen"):
+        letzter_fehler = None  # ein offener Fehler steht schon oben im Kasten
     aktionen = list(ausf.aktionen.order_by("-id")[:20])
     instanz = ausf.projektbindung.instanz
     for a in aktionen:
@@ -239,6 +252,7 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "pakete_erledigt": sum(1 for p in pakete if p["stand"] == "erledigt"),
         "schritte_gesamt": autorisiert.count(),
         "bedarf": bedarf,
+        "letzter_fehler": letzter_fehler,
         "aktionen": aktionen,
         "unbeantwortet": [a for a in aktionen if a.unbeantwortet],
         "letzter_kontakt": instanz.letzter_kontakt,
@@ -246,6 +260,14 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "halt_grund": grund_halt,
         "halt_moeglich": not grund_halt,
         "kann_weiterbauen": any(b.get("typ") in ("fehler", "unklar") for b in bedarf),
+        "weiterbauen_offen": next(
+            (
+                a
+                for a in aktionen
+                if a.art == "weiterbauen" and a.zustand in werkbank_aktionen.OFFEN
+            ),
+            None,
+        ),
     }
 
 
@@ -284,7 +306,7 @@ def ausfuehrung_aktion(request: HttpRequest, ausfuehrung_id: int) -> HttpRespons
     )
     p = request.POST
     try:
-        werkbank.aktion_erstellen(
+        aktion = werkbank.aktion_erstellen(
             _akteur(request),
             ausf,
             p.get("art", ""),
@@ -294,7 +316,22 @@ def ausfuehrung_aktion(request: HttpRequest, ausfuehrung_id: int) -> HttpRespons
             freigabe_id=p.get("freigabe_id", ""),
             paket=p.get("paket", ""),
         )
-        messages.success(request, "Gesendet. Die Werkbank bestätigt, sobald sie es angewendet hat.")
+        if getattr(aktion, "schon_gesendet", False):
+            messages.info(
+                request,
+                f"Weiterbauen war schon gesendet ({timezone.localtime(aktion.erstellt_am):%H:%M}); "
+                "es wirkt nur einmal.",
+            )
+        elif aktion.art == "weiterbauen":
+            messages.success(
+                request,
+                "Weiterbauen ist gesendet. Die Werkbank holt es beim nächsten Abgleich ab "
+                "(alle paar Sekunden) und setzt fort.",
+            )
+        else:
+            messages.success(
+                request, "Gesendet. Die Werkbank bestätigt, sobald sie es angewendet hat."
+            )
     except dienst.DienstFehler as fehler:
         _fehler(request, fehler)
     return redirect(reverse("auftrag_detail", kwargs={"auftrag_id": ausf.auftrag_id}) + "#werkbank")

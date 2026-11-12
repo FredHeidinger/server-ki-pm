@@ -533,8 +533,20 @@ class WerkbankFehler(Exception):
             "text": self.text,
             "naechste_handlung": self.naechste_handlung,
         }
-        if self.details:
-            fehler["details"] = self.details
+        details = dict(self.details or {})
+        if self.status in (400, 409) and not details.get("maengel"):
+            # Testlauf KTL-1, Punkt 3: jede 400/409 nennt ihre Mängel als Liste, damit die Werkbank
+            # sie anzeigen kann; vorhandene Einzellisten (z. B. Schemaabweichungen) gehen vor.
+            listen = [
+                str(m)[:300]
+                for wert in details.values()
+                if isinstance(wert, list)
+                for m in wert
+                if str(m).strip()
+            ]
+            details["maengel"] = listen[:20] or [self.text]
+        if details:
+            fehler["details"] = details
         return {"fehler": fehler}
 
 
