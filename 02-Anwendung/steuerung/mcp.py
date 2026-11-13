@@ -19,6 +19,7 @@ from django.urls import resolve, reverse
 from django.views.decorators.csrf import csrf_exempt
 
 from . import dienst
+from .akte import ARBEIT_NUR_IN_KIPM
 
 PROTOKOLLE = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
@@ -28,7 +29,8 @@ ANWEISUNGEN = (
     "Entscheidungen, Texte, Meilensteine, Projekte, alles andere auch), und warte auf seine "
     "Antwort. Seine Worte aus dem Chat gehören wörtlich in fred_sagte; ohne dieses Feld lehnt "
     "KI-PM den Aufruf ab und ändert nichts, mit ihm stehen sie im Verlauf. Erfinde sie nie. "
-    "Ausgenommen sind nur das Lesen und die Arbeit an einem freigegebenen Auftrag "
+    + ARBEIT_NUR_IN_KIPM
+    + " Ausgenommen sind nur das Lesen und die Arbeit an einem freigegebenen Auftrag "
     "(kipm_uebernehmen, kipm_fortschritt, kipm_rueckfrage, kipm_hindernis, kipm_fehler, "
     "kipm_ergebnis, kipm_warten_auf_lieferung, kipm_lieferung_melden) sowie eine "
     "offene Frage an Fred (kipm_entscheidung_fragen): Sie legt nichts "

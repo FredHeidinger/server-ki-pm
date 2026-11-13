@@ -44,6 +44,15 @@ from .models import (
 )
 from .models import Kontextbezug as KontextbezugModell
 
+# Freds Regel für jede verbundene KI; steht wortgleich in den MCP-instructions (mcp.ANWEISUNGEN)
+# und als Pflichtabschnitt „Arbeitsregel“ in jedem Projektkontext. Der Server ist führend.
+ARBEIT_NUR_IN_KIPM = (
+    "Arbeit, Pakete, Aufgaben und Issues legst du nie als Datei (.md o. ä.) in einem "
+    "Projektordner an, sondern nur in KI-PM, nach Freds Ja (fred_sagte). KI-PM ist die einzige "
+    "führende Stelle; es gibt keinen Abgleich mit Dateien. Dateien dürfen Beschreibungen und "
+    "Belege enthalten, aber keinen Auftragsstand."
+)
+
 # Woher der Inhalt einer Unterlage stammt; für KI-Chats ausdrücklich unterschieden.
 UNTERLAGENART_KONTEXT = {
     "text": "eingefügter Text",
@@ -778,8 +787,8 @@ def _profilzeile(name: str, wert: str) -> str:
 def _abschnitte(
     projekt: Projekt, auftrag: Auftrag | None, jetzt, modul: Modul | None = None
 ) -> list[tuple[str, str, bool]]:
-    """(Name, Text, Pflicht). Pflicht sind Kopf, gebundener Auftrag, Entscheidungen, Texte und
-    Links. Mit ``modul`` beschränken sich die aktiven Aufträge auf dessen Teilbaum."""
+    """(Name, Text, Pflicht). Pflicht sind Kopf, Arbeitsregel, gebundener Auftrag, Entscheidungen,
+    Texte und Links. Mit ``modul`` beschränken sich die aktiven Aufträge auf dessen Teilbaum."""
     from .dienst import modul_teilbaum
 
     abschnitte: list[tuple[str, str, bool]] = []
@@ -798,6 +807,7 @@ def _abschnitte(
             + _daten(modul.name, 300)
         )
     abschnitte.append(("Projekt", "\n".join(profil), True))
+    abschnitte.append(("Arbeitsregel", ARBEIT_NUR_IN_KIPM, True))
     if auftrag is not None:
         rev = auftrag.aktuelle_revision
         teile = [
