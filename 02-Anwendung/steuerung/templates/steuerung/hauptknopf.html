@@ -5,12 +5,15 @@
 {% if ort == "karte" %}
 <details class="hauptknopf kartenantwort"><summary class="knopf klein">{{ h.text }}</summary>
   {% if h.frage %}<p class="eintragtext">{{ h.frage.text|truncatechars:160 }}</p>{% endif %}
-  <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Antwort"><button type="submit" class="knopf klein">{{ h.text }}</button></form>
+  {% for b in h.verwaist %}<p class="eintragtext"><span class="status bad">Lieferbedarf verwaist</span> {{ b.satz|truncatechars:160 }}</p>{% endfor %}
+  <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Antwort">{% if h.lieferhinweis %}<label class="lieferhaekchen"><input type="checkbox" name="lieferketten_bestaetigt" value="ja" required> {{ h.lieferhinweis }}</label>{% endif %}<button type="submit" class="knopf klein">{{ h.text }}</button></form>
 </details>
 {% else %}
 <div class="hauptknopf">
   {% if h.frage %}<p class="frage"><strong>{{ h.frage.get_art_display }} von {{ h.frage.akteur_name }}:</strong> {{ h.frage.text|linebreaksbr }}</p>{% else %}<p class="frage">Blockiert ohne offene Frage. Mit einer Antwort geht es weiter.</p>{% endif %}
-  <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Deine Antwort"><button type="submit" class="knopf">{{ h.text }}</button></form>
+  {% for b in h.verwaist %}<p class="frage"><span class="status bad">Lieferbedarf verwaist</span> {{ b.satz }}</p>{% endfor %}
+  {% if h.lieferbedarf and not h.verwaist %}<p class="frage"><span class="status warn">Wartet auf Lieferung</span> {% for b in h.lieferbedarf %}{{ b.auftrag }}, Lieferung „{{ b.lieferkennung }}“{% if not forloop.last %}; {% endif %}{% endfor %}. Kommt sie, geht es von selbst weiter.</p>{% endif %}
+  <form method="post" action="{% url 'antwort' auftrag_id=a.pk %}" class="antwortzeile">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="text" name="text" required aria-label="Antwort zu {{ a.nummer }}" placeholder="Deine Antwort">{% if h.lieferhinweis %}<label class="lieferhaekchen"><input type="checkbox" name="lieferketten_bestaetigt" value="ja" required> {{ h.lieferhinweis }}</label>{% endif %}<button type="submit" class="knopf">{{ h.text }}</button></form>
 </div>
 {% endif %}
 {% elif ort == "karte" %}

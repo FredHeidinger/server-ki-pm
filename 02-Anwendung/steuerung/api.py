@@ -131,6 +131,9 @@ def _wartet_eintrag(x: Auftrag | Entscheidung) -> dict:
     if x.zustand == Auftrag.BLOCKIERT:
         frage = x.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
     text = akte._bereinigt(frage.text) if frage else ""
+    verwaist = [b["grund"] for b in lieferungen.offener_bedarf(x) if b["verwaist"]]
+    if verwaist:
+        text = " ".join(["Lieferbedarf verwaist:", *verwaist, text]).strip()
     if dienst.verstummt(x):  # vor „faellig“: Der Stand darf auch mit Termin nicht fehlen
         art, text = "still", _still_text(x)
     elif dienst.ist_faellig(x):
@@ -1078,6 +1081,17 @@ def _nach_kennung(modell, projekt: Projekt, wert, was: str):
     return treffer
 
 
+# Felder, die allein keine neue Revision auslösen und die Freigabe nicht aufheben.
+OHNE_PLANWIRKUNG = {
+    "freigeben",
+    "meilenstein",
+    "faellig",
+    "anfrage_kennung",
+    "fred_sagte",
+    "lieferketten_bestaetigt",
+}
+
+
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
@@ -1088,7 +1102,8 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     """Auftrag planen oder ändern; nur angegebene Felder ändern sich. Eine bestehende Freigabe
     erlischt dabei, außer es ändern sich nur Meilenstein oder Termin (leer löst sie). Mit
     ``freigeben`` gibt der Assistent danach auf Freds Anweisung im Chat frei; scheitert die
-    Freigabeprüfung, bleibt auch die Planung unverändert."""
+    Freigabeprüfung, bleibt auch die Planung unverändert. Trennt die neue Revision technische
+    Lieferketten, braucht es ``lieferketten_bestaetigt=true`` (sonst 409 mit den Ketten)."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     rev = auftrag.aktuelle_revision
     werte = {feld: getattr(rev, feld) for feld in PLANFELDER}
@@ -1106,7 +1121,7 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     if prioritaet not in dict(Auftrag.PRIO):
         raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
     with transaction.atomic():
-        if set(daten) - {"freigeben", "meilenstein", "faellig", "anfrage_kennung", "fred_sagte"}:
+        if set(daten) - OHNE_PLANWIRKUNG:
             dienst.auftrag_bearbeiten(
                 request.akteur,
                 auftrag,
@@ -1116,6 +1131,7 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
                 modul=modul,
                 anlass=str(daten.get("anlass") or "Geplant durch KI-Assistent"),
                 typ=str(daten["art"]) if daten.get("art") else None,
+                lieferketten_bestaetigt=daten.get("lieferketten_bestaetigt") is True,
                 **werte,
             )
         if "meilenstein" in daten:
@@ -1135,9 +1151,15 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
 @_mit_wiederholungsschutz
 @_behandeln
 def antworten(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
-    """Antwort des Owners (über seinen Assistenten) auf Rückfrage, Hindernis oder Fehler."""
+    """Antwort des Owners (über seinen Assistenten) auf Rückfrage, Hindernis oder Fehler. Auf
+    einen aktiven Lieferblocker nur mit ``lieferketten_bestaetigt=true`` (sonst 409)."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
-    dienst.rueckfrage_beantworten(request.akteur, auftrag, str(daten.get("text", "")))
+    dienst.rueckfrage_beantworten(
+        request.akteur,
+        auftrag,
+        str(daten.get("text", "")),
+        lieferketten_bestaetigt=daten.get("lieferketten_bestaetigt") is True,
+    )
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
 
 

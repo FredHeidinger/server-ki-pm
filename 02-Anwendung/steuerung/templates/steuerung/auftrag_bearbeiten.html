@@ -4,6 +4,9 @@
 <p><a href="{% url 'auftrag_detail' auftrag_id=auftrag.pk %}">← {{ auftrag.nummer }}</a></p>
 <h1>{{ auftrag.nummer }} planen</h1>
 {% if folge %}<div class="box warn"><strong>Folge:</strong> {{ folge }}</div>{% endif %}
+{% if lieferketten %}<div class="box warn" role="alert"><strong>Achtung, Lieferketten:</strong> Speichern legt eine neue Revision an. Dann verwaisen diese technischen Lieferbedarfe:
+  <ul>{% for k in lieferketten %}<li>{{ k.verbraucher }} wartet auf {{ k.anbieter }}, Lieferung „{{ k.lieferkennung }}“</li>{% endfor %}</ul>
+  Wartende Aufträge bleiben blockiert, bis ein Chat den Bedarf auf deine Anweisung neu bindet. Speichern geht nur mit dem Häkchen unten.</div>{% endif %}
 <p class="gedaempft">Für die Freigabe braucht es Ziel, Nicht-Ziele, Arbeitsort mit Schreibumfang und mindestens ein Abnahmekriterium. Unvollständig speichern geht; jede Speicherung wird als neue Revision im Verlauf festgehalten.</p>
 <form method="post" class="formular" novalidate>
   {% csrf_token %}

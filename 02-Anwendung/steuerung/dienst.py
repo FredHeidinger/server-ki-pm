@@ -765,7 +765,8 @@ def arbeitsort_bestaetigen(
 
 def arbeitsort_setzen(akteur: Akteur, auftrag: Auftrag, ort: Arbeitsort) -> Revision:
     """Arbeitsort eines Auftrags ändern; alle übrigen Angaben der aktuellen Revision bleiben.
-    Gelesen wird unter Sperre aus der Datenbank, nie aus einer womöglich veralteten Instanz."""
+    Gelesen wird unter Sperre aus der Datenbank, nie aus einer womöglich veralteten Instanz.
+    Trennt das Lieferketten, lehnt ``auftrag_bearbeiten`` ab; bestätigt wird nur über Planen."""
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().select_related("modul").get(pk=auftrag.pk)
         rev = auftrag.aktuelle_revision
@@ -1412,9 +1413,14 @@ def auftrag_bearbeiten(
     modul: Modul | None,
     anlass: str = "",
     typ: str | None = None,
+    lieferketten_bestaetigt: bool = False,
 ) -> Revision:
     """Neue Revision anlegen. Freigabe und laufende Übernahme erlöschen; der Auftrag geht zurück
-    in den Entwurf und braucht eine neue Freigabe."""
+    in den Entwurf und braucht eine neue Freigabe. Trennt die Revision offene technische
+    Lieferketten (wartende Verbraucher oder eigener Lieferbedarf), braucht es
+    ``lieferketten_bestaetigt``; dann hält der Verlauf fest, welche Bedarfe verwaist sind."""
+    from . import lieferungen
+
     _planung_erforderlich(akteur, "Aufträge bearbeiten")
     if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
         raise Konflikt(
@@ -1435,6 +1441,9 @@ def auftrag_bearbeiten(
                 f"Der Auftrag ist inzwischen „{auftrag.get_zustand_display()}“ "
                 "und kann nicht geändert werden."
             )
+        ketten = lieferungen.betroffene_ketten(auftrag)
+        if ketten and lieferketten_bestaetigt is not True:
+            raise Konflikt(lieferungen.warnung_bearbeiten(auftrag, ketten))
         nummer = auftrag.revision_nr + 1
         rev = Revision.objects.create(
             auftrag=auftrag,
@@ -1470,15 +1479,30 @@ def auftrag_bearbeiten(
             auftrag.freigegeben_am = None
             folge = f"Übernahme von {auftrag.letzter_bearbeiter_name} erloschen, zurück in Entwurf"
         auftrag.save()
+        getrennt = f"Lieferketten getrennt: {lieferungen.ketten_text(ketten)}" if ketten else ""
         _ereignis(
             akteur,
             projekt=auftrag.projekt,
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
             ereignis=f"Revision {nummer} angelegt",
-            anlass="; ".join(t for t in (rev.anlass, folge) if t),
+            anlass="; ".join(t for t in (rev.anlass, folge, getrennt) if t),
             revision=str(nummer),
         )
+        for k in ketten:
+            if k["anbieter"] != auftrag.nummer:
+                continue  # eigener Lieferbedarf: steht im Ereignis oben
+            _ereignis(
+                akteur,
+                projekt=auftrag.projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=k["verbraucher"],
+                ereignis="Technischer Lieferbedarf verwaist",
+                anlass=f"{auftrag.nummer} hat jetzt Revision {nummer}; der Bedarf "
+                f"{k['lieferkennung']} war an Revision {nummer - 1} gebunden. Neu binden kann "
+                "der Manager (kipm_lieferbedarf_festlegen).",
+                revision=str(k["verbraucher_revision"]),
+            )
     return rev
 
 
@@ -2469,13 +2493,22 @@ def fehler_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str)
 
 
 @_ohne_aktive_werkbank("Antworten")
-def rueckfrage_beantworten(akteur: Akteur, auftrag: Auftrag, text: str) -> Meldung:
-    """Antwort des Menschen auf Rückfrage, Hindernis oder Fehler; hebt die Blockade auf."""
+def rueckfrage_beantworten(
+    akteur: Akteur, auftrag: Auftrag, text: str, *, lieferketten_bestaetigt: bool = False
+) -> Meldung:
+    """Antwort des Menschen auf Rückfrage, Hindernis oder Fehler; hebt die Blockade auf. Wartet
+    der Auftrag auf eine technische Lieferung, verdrängt die Antwort diesen Lieferbedarf; das
+    braucht ``lieferketten_bestaetigt``."""
+    from . import lieferungen
+
     _planung_erforderlich(akteur, "Rückfragen beantworten")
     if not text.strip():
         raise DienstFehler("Die Antwort darf nicht leer sein.")
     with transaction.atomic():
-        aktuell = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
+        aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        ketten = lieferungen.betroffene_ketten(aktuell, als_anbieter=False)
+        if ketten and lieferketten_bestaetigt is not True:
+            raise Konflikt(lieferungen.warnung_antworten(ketten))
         meldung = Meldung.objects.create(
             auftrag=aktuell,
             revision_nr=aktuell.revision_nr,
@@ -2494,7 +2527,14 @@ def rueckfrage_beantworten(akteur: Akteur, auftrag: Auftrag, text: str) -> Meldu
             objekt_typ="Auftrag",
             objekt_kennung=aktuell.nummer,
             ereignis="Antwort gegeben" + (", Blockade aufgehoben" if aufgehoben else ""),
-            anlass=text.strip()[:200],
+            anlass=(
+                "Technischer Lieferbedarf entfällt: "
+                + ", ".join(f"{k['anbieter']}/{k['lieferkennung']}" for k in ketten)
+                + " · "
+                if ketten
+                else ""
+            )
+            + text.strip()[:200],
             revision=str(aktuell.revision_nr),
         )
     auftrag.refresh_from_db()

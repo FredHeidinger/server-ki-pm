@@ -47,6 +47,150 @@ def _blocker(auftrag):
     ).first()
 
 
+VERWAIST = "verwaist"
+NICHT_PASSEND = "nicht_passend"
+ERFUELLT = "erfuellt"
+WARTET = "wartet"
+GELIEFERT = "geliefert"
+
+
+def _passende_lieferung(bedarf):
+    return (
+        Lieferung.objects.filter(
+            auftrag=bedarf.lieferauftrag,
+            revision_nr=bedarf.lieferrevision,
+            lieferkennung=bedarf.lieferkennung,
+            pk__gt=bedarf.nach_lieferung,
+        )
+        .order_by("-pk")
+        .first()
+    )
+
+
+def _bedarf_stand(bedarf, projekt_id):
+    """Einzige Stelle, die über einen einzelnen Lieferbedarf entscheidet: (Status, Grund,
+    passende Lieferung). Nur ``geliefert`` lässt freisetzen; jeder andere Status trägt seinen
+    Grund, damit kein Bedarf still verworfen wird."""
+    quelle = bedarf.lieferauftrag
+    if quelle.projekt_id != projekt_id:
+        return NICHT_PASSEND, "Der Lieferauftrag gehört nicht mehr zu diesem Projekt.", None
+    if bedarf.erfuellt_durch_id:
+        return ERFUELLT, "", None
+    if quelle.zustand == Auftrag.ABGEBROCHEN:
+        return NICHT_PASSEND, f"{quelle.nummer} ist abgebrochen und liefert nicht mehr.", None
+    if quelle.ausfuehrungsweg != Auftrag.WEG_CHAT:
+        return (
+            NICHT_PASSEND,
+            f"{quelle.nummer} läuft über eine Werkbank; Chat-Lieferungen passen nicht.",
+            None,
+        )
+    if quelle.revision_nr != bedarf.lieferrevision:
+        return (
+            VERWAIST,
+            f"{quelle.nummer} hat inzwischen Revision {quelle.revision_nr}, der Bedarf "
+            f"{bedarf.lieferkennung} ist an Revision {bedarf.lieferrevision} gebunden. "
+            "Neu binden kann nur der Manager (kipm_lieferbedarf_festlegen mit frischer "
+            "hindernis_id); eine Lieferung der neuen Revision weckt sonst nicht.",
+            None,
+        )
+    lieferung = _passende_lieferung(bedarf)
+    if lieferung is None:
+        return (
+            WARTET,
+            f"Noch keine passende Lieferung {bedarf.lieferkennung} von {quelle.nummer} "
+            f"(Revision {bedarf.lieferrevision}).",
+            None,
+        )
+    return GELIEFERT, "", lieferung
+
+
+def _blocker_grund(auftrag, meldung):
+    """Einzige Stelle, die über den Lieferblocker des Verbrauchers als Ganzes entscheidet:
+    leer, wenn er freigesetzt werden kann, sonst der Grund."""
+    if auftrag.zustand != Auftrag.BLOCKIERT:
+        return f"{auftrag.nummer} ist {auftrag.get_zustand_display()}, nicht blockiert."
+    if auftrag.revision_nr != meldung.revision_nr:
+        return "Der Lieferblocker gehört zu einer früheren Revision des Verbrauchers."
+    if not auftrag.hat_bearbeiter or auftrag.uebernommene_revision != auftrag.revision_nr:
+        return "Der Verbraucher hat keine gültige Übernahme dieser Revision."
+    if not auftrag.projekt.aktiv:
+        return "Das Projekt ist archiviert."
+    if auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT or dienst._werkbank_aktiv(auftrag):
+        return "Der Verbraucher läuft über eine Werkbank."
+    letzter = _blocker(auftrag)
+    if letzter is None or letzter.pk != meldung.pk:
+        return (
+            "Eine neuere Meldung (Rückfrage, Hindernis, Fehler oder Antwort) hat diesen "
+            "Lieferbedarf abgelöst."
+        )
+    return ""
+
+
+def _kette(bedarf, verbraucher):
+    return {
+        "verbraucher": verbraucher.nummer,
+        "verbraucher_revision": verbraucher.revision_nr,
+        "anbieter": bedarf.lieferauftrag.nummer,
+        "lieferkennung": bedarf.lieferkennung,
+    }
+
+
+def betroffene_ketten(auftrag, *, als_anbieter=True):
+    """Offene technische Lieferketten, die eine neue Revision oder eine Antwort dieses Auftrags
+    trennen würde: als Anbieter die wartenden Verbraucher seiner aktuellen Revision, als
+    Verbraucher der eigene aktive Lieferbedarf. Werkbank-Aufträge haben keine Chat-Lieferketten."""
+    if auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT:
+        return []
+    ketten = []
+    if als_anbieter:
+        for b in auftrag.lieferbedarfe.filter(
+            lieferrevision=auftrag.revision_nr,
+            erfuellt_durch__isnull=True,
+            meldung__auftrag__projekt_id=auftrag.projekt_id,
+            meldung__auftrag__zustand=Auftrag.BLOCKIERT,
+            meldung__revision_nr=F("meldung__auftrag__revision_nr"),
+        ).select_related("meldung__auftrag__projekt", "lieferauftrag"):
+            if not _blocker_grund(b.meldung.auftrag, b.meldung):
+                ketten.append(_kette(b, b.meldung.auftrag))
+    if auftrag.zustand == Auftrag.BLOCKIERT:
+        meldung = _blocker(auftrag)
+        if meldung is not None and not _blocker_grund(auftrag, meldung):
+            for b in meldung.lieferbedarf.filter(
+                erfuellt_durch__isnull=True, lieferauftrag__projekt_id=auftrag.projekt_id
+            ).select_related("lieferauftrag"):
+                ketten.append(_kette(b, auftrag))
+    return sorted(ketten, key=lambda k: (k["verbraucher"], k["anbieter"], k["lieferkennung"]))
+
+
+def ketten_text(ketten):
+    return "; ".join(
+        f"{k['verbraucher']} wartet auf {k['anbieter']}/{k['lieferkennung']}" for k in ketten
+    )
+
+
+BESTAETIGEN = (
+    "Nur nach Freds ausdrücklichem Ja erneut mit lieferketten_bestaetigt=true und neuer "
+    "anfrage_kennung senden; in der Oberfläche das Häkchen setzen. Es wurde nichts geändert."
+)
+
+
+def warnung_bearbeiten(auftrag, ketten):
+    return (
+        f"Die Änderung legt eine neue Revision von {auftrag.nummer} an und trennt technische "
+        f"Lieferketten: {ketten_text(ketten)}. Wartende Verbraucher bleiben danach blockiert, "
+        "bis der Manager ihren verwaisten Bedarf neu bindet (kipm_lieferbedarf_festlegen); "
+        f"ein eigener Lieferbedarf von {auftrag.nummer} entfällt. {BESTAETIGEN}"
+    )
+
+
+def warnung_antworten(ketten):
+    liste = ", ".join(f"{k['anbieter']}/{k['lieferkennung']}" for k in ketten)
+    return (
+        f"Damit entfällt der technische Lieferbedarf auf {liste}: Die Antwort hebt die Blockade "
+        f"auf, eine spätere Lieferung weckt {ketten[0]['verbraucher']} nicht mehr. {BESTAETIGEN}"
+    )
+
+
 def _kreis(auftrag, quelle):
     offen, gesehen = {quelle.pk}, set()
     while offen:
@@ -127,16 +271,55 @@ def _bedarf_pruefen(akteur, auftrag, bedarf):
     return geprueft
 
 
-def _registrieren(akteur, auftrag, meldung, geprueft):
-    vorhanden = set(
-        meldung.lieferbedarf.values_list(
-            "lieferauftrag_id", "lieferrevision", "lieferkennung", "nach_lieferung"
-        )
-    )
+def _neu_binden_plan(bestand, geprueft, projekt_id):
+    """Welche verwaisten Bedarfe auf die aktuelle Anbieterrevision umgebunden werden; ``None``,
+    wenn sich mehr ändern soll als genau das."""
+    alt = {(b.lieferauftrag_id, b.lieferkennung): b for b in bestand}
+    neu = {(a.pk, s): (a, r, n) for a, r, s, n in geprueft}
+    if set(alt) != set(neu):
+        return None
+    plan = []
+    for schluessel, b in alt.items():
+        a, r, n = neu[schluessel]
+        if (b.lieferrevision, b.nach_lieferung) == (r, n):
+            continue
+        if _bedarf_stand(b, projekt_id)[0] != VERWAIST or r != a.revision_nr:
+            return None
+        plan.append((b, r, n))
+    return plan or None
+
+
+def _registrieren(akteur, auftrag, meldung, geprueft, *, neu_binden=False):
+    bestand = list(meldung.lieferbedarf.select_related("lieferauftrag"))
+    vorhanden = {
+        (b.lieferauftrag_id, b.lieferrevision, b.lieferkennung, b.nach_lieferung) for b in bestand
+    }
     erwartet = {(a.pk, r, s, n) for a, r, s, n in geprueft}
     if vorhanden:
         if vorhanden != erwartet:
-            raise dienst.Konflikt("Dieser Blocker hat bereits einen anderen Lieferbedarf.")
+            plan = _neu_binden_plan(bestand, geprueft, auftrag.projekt_id) if neu_binden else None
+            if plan is None:
+                raise dienst.Konflikt(
+                    "Dieser Blocker hat bereits einen anderen Lieferbedarf. Neu binden lassen "
+                    "sich nur verwaiste Bedarfe, je auf die aktuelle Revision desselben "
+                    "Anbieters und Lieferschlüssels."
+                )
+            umgebunden = []
+            for b, r, n in plan:
+                umgebunden.append(
+                    f"{b.lieferauftrag.nummer}/{b.lieferkennung} Revision {b.lieferrevision} → {r}"
+                )
+                b.lieferrevision, b.nach_lieferung = r, n
+                b.save(update_fields=["lieferrevision", "nach_lieferung"])
+            dienst._ereignis(
+                akteur,
+                projekt=auftrag.projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=auftrag.nummer,
+                ereignis="Verwaisten Lieferbedarf neu gebunden",
+                anlass="; ".join(umgebunden),
+                revision=str(auftrag.revision_nr),
+            )
     else:
         Lieferbedarf.objects.bulk_create(
             [
@@ -201,7 +384,9 @@ def warten(akteur, auftrag, revision, *, text, bedarf, nur_lieferungen):
 
 @dienst._ohne_aktive_werkbank("Lieferbedarf festlegen")
 def festlegen(akteur, auftrag, revision, *, bedarf, nur_lieferungen, hindernis_id=None):
-    """Einmalige Einordnung vorhandener Blockaden durch Fred/Manager; kein neuer Lebensimpuls."""
+    """Einordnung vorhandener Blockaden durch Fred/Manager; kein neuer Lebensimpuls. Hat der
+    Blocker schon einen Bedarf, darf nur ein verwaister auf die aktuelle Anbieterrevision neu
+    gebunden werden."""
     dienst._planung_erforderlich(akteur, "Technischen Lieferbedarf festlegen")
     with transaction.atomic():
         aktuell = _aktuell(akteur, auftrag, revision)
@@ -220,46 +405,20 @@ def festlegen(akteur, auftrag, revision, *, bedarf, nur_lieferungen, hindernis_i
         if meldung.pk != hindernis_id:
             raise dienst.Konflikt("Die Hindernismeldung hat sich geändert; zuerst neu lesen.")
         geprueft = _bedarf_pruefen(akteur, aktuell, bedarf)
-        _registrieren(akteur, aktuell, meldung, geprueft)
+        _registrieren(akteur, aktuell, meldung, geprueft, neu_binden=True)
     auftrag.refresh_from_db()
     return meldung
 
 
 def _freisetzen(akteur, meldung):
+    # Jeder Abbruchgrund steht in _blocker_grund oder _bedarf_stand und ist in details sichtbar.
     auftrag = Auftrag.objects.select_related("projekt").get(pk=meldung.auftrag_id)
-    letzter = _blocker(auftrag)
-    if (
-        auftrag.zustand != Auftrag.BLOCKIERT
-        or auftrag.revision_nr != meldung.revision_nr
-        or auftrag.uebernommene_revision != auftrag.revision_nr
-        or not auftrag.hat_bearbeiter
-        or not auftrag.projekt.aktiv
-        or auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT
-        or dienst._werkbank_aktiv(auftrag)
-        or letzter is None
-        or letzter.pk != meldung.pk
-    ):
+    if _blocker_grund(auftrag, meldung):
         return
     passend = []
     for bedarf in meldung.lieferbedarf.select_related("lieferauftrag"):
-        if (
-            bedarf.lieferauftrag.revision_nr != bedarf.lieferrevision
-            or bedarf.lieferauftrag.projekt_id != auftrag.projekt_id
-            or bedarf.lieferauftrag.zustand == Auftrag.ABGEBROCHEN
-            or bedarf.lieferauftrag.ausfuehrungsweg != Auftrag.WEG_CHAT
-        ):
-            return
-        lieferung = (
-            Lieferung.objects.filter(
-                auftrag=bedarf.lieferauftrag,
-                revision_nr=bedarf.lieferrevision,
-                lieferkennung=bedarf.lieferkennung,
-                pk__gt=bedarf.nach_lieferung,
-            )
-            .order_by("-pk")
-            .first()
-        )
-        if lieferung is None:
+        status, _, lieferung = _bedarf_stand(bedarf, auftrag.projekt_id)
+        if status != GELIEFERT:
             return
         passend.append((bedarf, lieferung))
     if not passend:
@@ -400,7 +559,6 @@ def details(auftrag):
             "-pk"
         )[:100]
     ]
-    letzter_blocker = _blocker(auftrag)
     blocker = (
         auftrag.meldungen.filter(
             revision_nr=auftrag.revision_nr,
@@ -410,51 +568,74 @@ def details(auftrag):
         .distinct()
         .first()
     )
-    aktiv = (
-        auftrag.zustand == Auftrag.BLOCKIERT
-        and blocker is not None
-        and letzter_blocker is not None
-        and letzter_blocker.pk == blocker.pk
-    )
-    bedarf = (
-        []
-        if blocker is None
-        else [
-            {
-                "auftrag": b.lieferauftrag.nummer,
-                "revision": b.lieferrevision,
-                "lieferkennung": b.lieferkennung,
-                "nach_lieferung": b.nach_lieferung,
-                "erfuellt_durch": b.erfuellt_durch_id,
-                "aktiv": aktiv,
-                "aktuelle_lieferrevision": b.lieferauftrag.revision_nr,
-            }
-            for b in blocker.lieferbedarf.filter(
-                lieferauftrag__projekt_id=auftrag.projekt_id
-            ).select_related("lieferauftrag")
-        ]
-    )
-    angefordert = []
+    inaktiv_grund = "" if blocker is None else _blocker_grund(auftrag, blocker)
+    bedarf, ausgeblendet = [], []
+    if blocker is not None:
+        for b in blocker.lieferbedarf.select_related("lieferauftrag").order_by("pk"):
+            status, grund, _ = _bedarf_stand(b, auftrag.projekt_id)
+            if b.lieferauftrag.projekt_id != auftrag.projekt_id:
+                # Nichts über fremde Projekte verraten, den Bedarf aber nicht verschweigen.
+                ausgeblendet.append(
+                    {"lieferkennung": b.lieferkennung, "status": status, "grund": grund}
+                )
+                continue
+            bedarf.append(
+                {
+                    "auftrag": b.lieferauftrag.nummer,
+                    "revision": b.lieferrevision,
+                    "lieferkennung": b.lieferkennung,
+                    "nach_lieferung": b.nach_lieferung,
+                    "erfuellt_durch": b.erfuellt_durch_id,
+                    "aktiv": not inaktiv_grund,
+                    "inaktiv_grund": inaktiv_grund,
+                    "aktuelle_lieferrevision": b.lieferauftrag.revision_nr,
+                    "status": status,
+                    "verwaist": status == VERWAIST,
+                    "grund": grund,
+                }
+            )
+    angefordert, verwaist = [], []
     for b in auftrag.lieferbedarfe.filter(
-        lieferrevision=auftrag.revision_nr,
         erfuellt_durch__isnull=True,
         meldung__auftrag__projekt_id=auftrag.projekt_id,
         meldung__auftrag__zustand=Auftrag.BLOCKIERT,
         meldung__revision_nr=F("meldung__auftrag__revision_nr"),
-    ).select_related("meldung__auftrag"):
-        aktueller = _blocker(b.meldung.auftrag)
-        if aktueller and aktueller.pk == b.meldung_id:
-            angefordert.append(
-                {
-                    "verbraucher": b.meldung.auftrag.nummer,
-                    "revision": b.meldung.revision_nr,
-                    "lieferkennung": b.lieferkennung,
-                    "nach_lieferung": b.nach_lieferung,
-                    "beschreibung": b.meldung.text,
-                }
-            )
+    ).select_related("meldung__auftrag__projekt", "lieferauftrag"):
+        verbraucher = b.meldung.auftrag
+        if _blocker_grund(verbraucher, b.meldung):
+            continue  # Der Verbraucher wartet nicht mehr darauf; sein details nennt den Grund.
+        eintrag = {
+            "verbraucher": verbraucher.nummer,
+            "revision": b.meldung.revision_nr,
+            "lieferkennung": b.lieferkennung,
+            "nach_lieferung": b.nach_lieferung,
+            "beschreibung": b.meldung.text,
+        }
+        if b.lieferrevision == auftrag.revision_nr:
+            angefordert.append(eintrag)
+            continue
+        status, grund, _ = _bedarf_stand(b, verbraucher.projekt_id)
+        verwaist.append(
+            eintrag
+            | {
+                "gebunden_an_revision": b.lieferrevision,
+                "aktuelle_revision": auftrag.revision_nr,
+                "status": status,
+                "grund": grund,
+            }
+        )
     return {
         "lieferungen": lieferungen,
         "lieferbedarf": bedarf,
+        "lieferbedarf_ausgeblendet": ausgeblendet,
         "angeforderte_lieferungen": angefordert,
+        "verwaiste_anforderungen": verwaist,
     }
+
+
+def offener_bedarf(auftrag):
+    """Aktiver, noch nicht erfüllter Lieferbedarf eines blockierten Chat-Auftrags (Oberfläche
+    und „Wartet auf dich“)."""
+    if auftrag.zustand != Auftrag.BLOCKIERT or auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT:
+        return []
+    return [b for b in details(auftrag)["lieferbedarf"] if b["aktiv"] and b["status"] != ERFUELLT]

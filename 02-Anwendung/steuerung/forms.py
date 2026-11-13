@@ -216,8 +216,14 @@ class ArbeitspaketForm(forms.Form):
     )
     anlass = forms.CharField(label="Anlass der Änderung", max_length=200, required=False)
 
-    def __init__(self, *args, auftrag: Auftrag, **kwargs):
+    def __init__(self, *args, auftrag: Auftrag, lieferketten=(), **kwargs):
         super().__init__(*args, **kwargs)
+        if lieferketten:
+            # Nur wenn die neue Revision Lieferketten trennt (lieferungen.betroffene_ketten).
+            self.fields["lieferketten_bestaetigt"] = forms.BooleanField(
+                label="Ja, Lieferketten trennen: Die oben genannten Lieferbedarfe verwaisen.",
+                help_text="Wartende Aufträge bleiben blockiert, bis ihr Bedarf neu gebunden ist.",
+            )
         self.fields["modul"].queryset = Modul.objects.filter(projekt=auftrag.projekt, aktiv=True)
         meilensteine = Meilenstein.objects.filter(projekt=auftrag.projekt)
         self.fields["meilenstein"].queryset = meilensteine

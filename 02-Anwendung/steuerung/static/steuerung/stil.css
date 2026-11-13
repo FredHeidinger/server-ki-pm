@@ -217,6 +217,8 @@ body.anmeldung { display: grid; place-items: center; min-height: 100vh; backgrou
 .faelligform input[type="date"] { max-width: 100%; }
 .antwortzeile { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0; width: 100%; }
 .antwortzeile input[type="text"] { flex: 1; max-width: 520px; }
+.lieferhaekchen { flex-basis: 100%; display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.lieferhaekchen input { flex-shrink: 0; width: 16px; height: 16px; margin-top: 3px; accent-color: var(--akzent); }
 
 /* KI-Kennzeichen, Aktivität */
 .ki { display: inline-block; background: var(--akzent-weich); color: var(--akzent); font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; vertical-align: middle; }

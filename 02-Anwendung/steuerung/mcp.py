@@ -74,7 +74,10 @@ ANWEISUNGEN = (
     "lieferbedarf verwenden. Bei automatischer Wiederaufnahme die Lieferbelege aus kipm_lesen "
     "selbst prüfen; fehlende/abgelehnte Lieferung mit ihrem nach_lieferung erneut einordnen, "
     "niemals Produktabnahme daraus ableiten. Entscheidungen und verweigerte Rechte bleiben beim "
-    "bisherigen Rückfrage-/Hindernisweg. "
+    "bisherigen Rückfrage-/Hindernisweg. Trennt kipm_planen oder kipm_antworten eine "
+    "Lieferkette, lehnt KI-PM ab und nennt sie; erst nach Freds Ja mit "
+    "lieferketten_bestaetigt=true wiederholen. Verwaiste Bedarfe bindet der Manager mit "
+    "kipm_lieferbedarf_festlegen neu. "
     "Versionen und Installationen kommen aus GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
@@ -108,6 +111,10 @@ _KENNUNG = {
 }
 _REVISION = {"type": "integer", "description": "Aktuelle Revision aus kipm_lesen"}
 _TEXT = {"type": "string"}
+_LIEFERKETTEN_BESTAETIGT = {
+    "type": "boolean",
+    "description": "Nur nach Freds ausdrücklichem Ja: Lieferketten trennen (siehe Ablehnung)",
+}
 _LISTE = {"type": "array", "items": {"type": "string"}}
 _MELDUNG = {"auftrag": _AUFTRAG, "revision": _REVISION, "text": _TEXT}
 _LIEFERBEDARF = {
@@ -333,8 +340,14 @@ WERKZEUGE = [
     ),
     (
         "kipm_planen",
-        "Auftrag oder Issue planen oder ändern; nur angegebene Felder ändern sich, eine "
-        "Freigabe erlischt. Listenfelder je Eintrag eine Zeile. "
+        "Auftrag oder Issue planen oder ändern; nur angegebene Felder ändern sich. Jede "
+        "inhaltliche Änderung legt eine neue Revision an: eine Freigabe erlischt, ein "
+        "Bearbeiter (In Arbeit oder Blockiert) wird abgelöst, der Auftrag geht zurück in den "
+        "Entwurf. Wartet ein anderer Auftrag auf eine technische Lieferung dieses Auftrags, "
+        "verwaist dessen Lieferbedarf (er bleibt blockiert, bis der Manager ihn mit "
+        "kipm_lieferbedarf_festlegen neu bindet); ein eigener Lieferbedarf entfällt. Dann lehnt "
+        "KI-PM ohne lieferketten_bestaetigt=true ab und nennt die Ketten: Fred fragen, erst nach "
+        "seinem Ja erneut senden. Listenfelder je Eintrag eine Zeile. "
         "meilenstein ordnet zu (leer löst) und lässt allein Revision und Freigabe unberührt, "
         "auch bei laufenden und erledigten Aufträgen. "
         "faellig setzt den Termin (leer entfernt), lässt allein ebenfalls Revision und Freigabe "
@@ -357,14 +370,22 @@ WERKZEUGE = [
             "art": {"type": "string", "enum": ["auftrag", "issue"]},
             "anlass": _TEXT,
             "freigeben": {"type": "boolean"},
+            "lieferketten_bestaetigt": _LIEFERKETTEN_BESTAETIGT,
         },
         ["auftrag"],
     ),
     (
         "kipm_antworten",
         "Rückfrage, Hindernis oder Fehler eines Bearbeiters in Freds Namen beantworten; hebt die "
-        "Blockade auf",
-        {"auftrag": _AUFTRAG, "text": _TEXT},
+        "Blockade auf. Wartet der Auftrag auf eine technische Lieferung, verdrängt die Antwort "
+        "diesen Lieferbedarf (eine spätere Lieferung weckt ihn nicht mehr); dann lehnt KI-PM "
+        "ohne lieferketten_bestaetigt=true ab: „Damit entfällt der technische Lieferbedarf "
+        "auf …“. Fred fragen, erst nach seinem Ja erneut senden.",
+        {
+            "auftrag": _AUFTRAG,
+            "text": _TEXT,
+            "lieferketten_bestaetigt": _LIEFERKETTEN_BESTAETIGT,
+        },
         ["auftrag", "text"],
     ),
     (
@@ -387,7 +408,10 @@ WERKZEUGE = [
         "kipm_lieferbedarf_festlegen",
         "Manager: vorhandenen ausschließlich technischen Hindernisblocker auf Freds "
         "Anweisung einem genauen Lieferprofil zuordnen; keine Rechte- oder "
-        "Entscheidungsblockade.",
+        "Entscheidungsblockade. Neu binden: Steht ein Bedarf in kipm_lesen als "
+        "verwaist (der Anbieter hat eine neue Revision), denselben Bedarf mit der aktuellen "
+        "Anbieterrevision und der frisch gelesenen hindernis_id senden; nur verwaiste Bedarfe "
+        "lassen sich so umbinden, eine danach passende Lieferung setzt wie gewohnt frei.",
         {
             "auftrag": _AUFTRAG,
             "revision": _REVISION,
@@ -812,7 +836,9 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         }
         return rufe(reverse("api_planen", kwargs=nr), felder)
     if name == "kipm_antworten":
-        return rufe(reverse("api_antworten", kwargs=nr), _felder(a, ("text",)))
+        return rufe(
+            reverse("api_antworten", kwargs=nr), _felder(a, ("text", "lieferketten_bestaetigt"))
+        )
     if name in _AUFTRAGSWERKZEUGE:
         url_name, felder = _AUFTRAGSWERKZEUGE[name]
         revision = (

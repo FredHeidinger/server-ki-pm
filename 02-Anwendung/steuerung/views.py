@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, akte, dienst, sicherung, views_werkbank
+from . import abgleich, akte, dienst, lieferungen, sicherung, views_werkbank
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -259,7 +259,33 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
         return _werkbank_hauptaktion(auftrag)
     if z == Auftrag.BLOCKIERT:
         frage = auftrag.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
-        return {"art": "antworten", "text": "Antworten", "frage": frage}
+        bedarf = lieferungen.offener_bedarf(auftrag)
+        hinweis = ""
+        if bedarf:
+            liste = ", ".join(f"{b['auftrag']}/{b['lieferkennung']}" for b in bedarf)
+            hinweis = (
+                f"Damit entfällt der technische Lieferbedarf auf {liste}; eine spätere Lieferung "
+                "weckt den Auftrag nicht mehr."
+            )
+        return {
+            "art": "antworten",
+            "text": "Antworten",
+            "frage": frage,
+            "lieferbedarf": bedarf,
+            "verwaist": [
+                b
+                | {
+                    "satz": f"{b['auftrag']} hat inzwischen Revision "
+                    f"{b['aktuelle_lieferrevision']}, die Lieferung „{b['lieferkennung']}“ "
+                    f"hängt noch an Revision {b['revision']}. Eine Lieferung weckt "
+                    f"{auftrag.nummer} erst wieder, wenn ein Chat den Bedarf neu bindet. Sag "
+                    f"ihm dazu: „Binde den Lieferbedarf von {auftrag.nummer} neu.“"
+                }
+                for b in bedarf
+                if b["verwaist"]
+            ],
+            "lieferhinweis": hinweis,
+        }
     if z == Auftrag.ENTWURF:
         if auftrag.aktuelle_revision.ist_wunsch:
             satz = (
@@ -768,12 +794,14 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         "quellen": rev.quellen,
         "abnahmekriterien": rev.abnahmekriterien,
     }
+    ketten = lieferungen.betroffene_ketten(auftrag)
     form = ArbeitspaketForm(
         listen_zusammenfuehren(request.POST, "schreibumfang", "abnahmekriterien")
         if request.method == "POST"
         else None,
         initial=anfang,
         auftrag=auftrag,
+        lieferketten=ketten,
     )
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
@@ -793,6 +821,7 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
                 prioritaet=d["prioritaet"],
                 modul=d["modul"],
                 anlass=d["anlass"],
+                lieferketten_bestaetigt=bool(d.get("lieferketten_bestaetigt")),
             )
             if "meilenstein" in d:
                 dienst.meilenstein_zuordnen(akteur, auftrag, d["meilenstein"])
@@ -807,7 +836,13 @@ def auftrag_bearbeiten(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     return render(
         request,
         "steuerung/auftrag_bearbeiten.html",
-        {"auftrag": auftrag, "form": form, "rev": rev, "folge": _folge_der_bearbeitung(auftrag)},
+        {
+            "auftrag": auftrag,
+            "form": form,
+            "rev": rev,
+            "folge": _folge_der_bearbeitung(auftrag),
+            "lieferketten": ketten,
+        },
     )
 
 
@@ -1098,7 +1133,12 @@ def auftrag_arbeitsort(request: HttpRequest, auftrag_id: int, wahl: str) -> Http
 def antwort(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     auftrag = _auftrag_oder_404(auftrag_id)
     try:
-        dienst.rueckfrage_beantworten(_akteur(request), auftrag, request.POST.get("text", ""))
+        dienst.rueckfrage_beantworten(
+            _akteur(request),
+            auftrag,
+            request.POST.get("text", ""),
+            lieferketten_bestaetigt=request.POST.get("lieferketten_bestaetigt") == "ja",
+        )
         messages.success(
             request,
             f"Antwort zu {auftrag.nummer} gespeichert; der Bearbeiter sieht sie beim nächsten Lesen.",
