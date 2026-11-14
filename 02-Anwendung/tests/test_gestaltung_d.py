@@ -1,6 +1,6 @@
 """Gestaltung D (mit Fred festgelegt, 14.11.2026): FHEngineering-Farben und -Schriften, Kopfleiste
-mit Logo statt Seitenleiste, Startseite mit „Wartet auf dich“ über alle Projekte und „Läuft
-gerade“, Board mit Signalleiste, Überblick in zwei Spalten. Funktionen bleiben erhalten."""
+mit Logo statt Seitenleiste, Startseite nur mit den Projekten, Board mit Signalleiste, Überblick in
+zwei Spalten. Funktionen bleiben erhalten."""
 
 import re
 from pathlib import Path
@@ -8,9 +8,8 @@ from pathlib import Path
 from django.urls import reverse
 
 from steuerung import dienst
-from steuerung.models import Auftrag
 from tests.conftest import arbeitspaket
-from tests.test_klickwege import _Klicker, _Seite
+from tests.test_klickwege import _Seite
 
 STATIC = Path(__file__).resolve().parents[1] / "steuerung" / "static" / "steuerung"
 VORLAGEN = Path(__file__).resolve().parents[1] / "steuerung" / "templates" / "steuerung"
@@ -65,74 +64,23 @@ def test_kopfleiste_mit_logo_vier_bereichen_und_kontozugang(owner_client, projek
 # --- Startseite: Wartet auf dich und Läuft gerade -------------------------------------------
 
 
-def test_start_zeigt_wartet_auf_dich_aus_allen_aktiven_projekten(
-    owner_client, akteur, projekt, projekt_b
-):
-    a = arbeitspaket(akteur, projekt, titel="Export als CSV")
-    b = arbeitspaket(akteur, projekt_b, titel="Belege zuordnen", umfang="b/**")
+def test_start_zeigt_nur_projekte_keine_tagesuebersicht(owner_client, akteur, projekt, bindung):
+    """Fred (14.11.2026): „die tagesübersicht brauche ich nicht, ich will nur projekte sehen“."""
+    arbeitspaket(akteur, projekt, titel="Wartet auf Freigabe", umfang="w/**")
+    _in_arbeit(akteur, projekt, bindung, stand="Index steht")
     html = owner_client.get(reverse("start")).content.decode()
-    wartet = html.split('id="wartet"')[1].split("</section>")[0]
-    assert "Export als CSV" in wartet and "Belege zuordnen" in wartet
-    aktionen = {f["action"] for f in _Seite(wartet).formulare}
-    for x in (a, b):
-        assert (
-            reverse("auftrag_aktion", kwargs={"auftrag_id": x.pk, "aktion": "freigeben"})
-            in aktionen
-        )
-    assert "Synthetisches A" in wartet and "Synthetisches B" in wartet  # Projekt je Eintrag
-
-
-def test_start_wartet_ohne_archivierte_projekte(owner_client, akteur, projekt, projekt_b):
-    arbeitspaket(akteur, projekt_b, titel="Im Archiv", umfang="b/**")
-    dienst.projekt_archivieren(akteur, projekt_b, aktiv=False)
-    html = owner_client.get(reverse("start")).content.decode()
-    assert "Im Archiv" not in html.split('id="wartet"')[1].split("</section>")[0]
-
-
-def test_klickweg_freigeben_direkt_auf_der_startseite(owner_client, akteur, projekt):
-    entwurf = arbeitspaket(akteur, projekt)
-    f = _Klicker(owner_client)
-    f.knopf(
-        reverse("auftrag_aktion", kwargs={"auftrag_id": entwurf.pk, "aktion": "freigeben"}),
-        "Freigeben",
-    )
-    entwurf.refresh_from_db()
-    assert entwurf.zustand == Auftrag.FREIGEGEBEN and f.klicks == 1
-    assert f.url == reverse("start")
-
-
-def test_laeuft_gerade_nennt_bearbeiter_und_letzten_stand(
-    akteur, projekt, projekt_b, bindung, bindung_b
-):
-    a = _in_arbeit(akteur, projekt, bindung, stand="Index steht")
-    b = _in_arbeit(akteur, projekt_b, bindung_b, titel="Belege zuordnen", stand="")
-    zeilen = dienst.laeuft_gerade()
-    assert [z["a"].pk for z in zeilen] == [a.pk, b.pk] or [z["a"].pk for z in zeilen] == [
-        b.pk,
-        a.pk,
-    ]
-    nach_pk = {z["a"].pk: z for z in zeilen}
-    assert nach_pk[a.pk]["stand"].text == "Index steht"
-    assert nach_pk[b.pk]["stand"] is None
-
-
-def test_laeuft_gerade_ohne_archiv_entwuerfe_und_erledigtes(
-    akteur, projekt, projekt_b, bindung, bindung_b
-):
-    arbeitspaket(akteur, projekt, titel="Nur Entwurf", umfang="e/**")
-    _in_arbeit(akteur, projekt_b, bindung_b, titel="Archivprojekt")
-    Auftrag.objects.filter(projekt=projekt_b).update(zustand=Auftrag.IN_ARBEIT)
-    projekt_b.aktiv = False
-    projekt_b.save(update_fields=["aktiv"])
-    assert dienst.laeuft_gerade() == []
-
-
-def test_start_zeigt_laeuft_gerade(owner_client, akteur, projekt, bindung):
-    _in_arbeit(akteur, projekt, bindung, stand="Index steht, Messung läuft")
-    html = owner_client.get(reverse("start")).content.decode()
-    laeuft = html.split('id="laeuft-gerade"')[1].split("</section>")[0]
-    assert "Suche beschleunigen" in laeuft and "Chat A" in laeuft
-    assert "Index steht, Messung läuft" in laeuft
+    inhalt = html.split('<main id="inhalt">')[1]
+    assert 'class="projektwahl"' in inhalt and "Synthetisches A" in inhalt
+    assert "<h1>Projekte</h1>" in inhalt
+    for weg in (
+        'id="wartet"',
+        'id="laeuft-gerade"',
+        "Läuft gerade",
+        "Guten ",
+        "Wartet auf Freigabe",
+    ):
+        assert weg not in html, weg
+    assert 'class="band' not in html
 
 
 def test_start_projektkarten_bleiben_mit_zahlenzeile(owner_client, akteur, projekt):

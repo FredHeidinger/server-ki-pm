@@ -110,25 +110,14 @@ def projekte(request: HttpRequest) -> HttpResponse:
         )
     projekte_liste = list(projekte_qs)
     abgleich.versionen_auffrischen(projekte_liste)
-    wartet = []
     for p in projekte_liste:
         p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
-        eintraege = wartet_eintraege(p)
-        p.wartet = len(eintraege)
+        p.wartet = len(akte.wartet_liste(p))
         p.version = abgleich.version_anzeige(p)["zustand"]
-        if not suche:
-            wartet.extend(eintraege)
-    # Über alle Projekte: Fälliges zuerst, sonst die Reihenfolge je Projekt (stabil sortiert).
-    wartet.sort(key=lambda w: 0 if w.get("faellig") else 1)
-    laeuft = dienst.laeuft_gerade() if not suche else []
     return render(
         request,
         "steuerung/projekte.html",
         {
-            "wartet": wartet,
-            "laeuft": laeuft,
-            "gruss": _gruss(request),
-            "offen_gesamt": sum(p.offen for p in projekte_liste),
             "projekte": projekte_liste,
             "suche": suche,
             "ordneranfragen": OrdnerAnfrage.objects.count(),
@@ -347,21 +336,12 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
     return {"art": "hinweis", "satz": satz, "kurz": ""}
 
 
-def _gruss(request: HttpRequest) -> str:
-    """Begrüßung auf der Startseite nach Ortszeit, mit dem Vornamen oder Anmeldenamen."""
-    stunde = timezone.localtime().hour
-    tageszeit = "Guten Morgen" if stunde < 11 else "Guten Tag" if stunde < 18 else "Guten Abend"
-    name = request.user.first_name or request.user.get_username().capitalize()
-    return f"{tageszeit}, {name}."
-
-
 def wartet_eintraege(projekt: Projekt) -> list[dict]:
-    """Einträge für „Wartet auf dich“; Aufträge mit ihrem Hauptknopf, jeder mit seinem Projekt."""
+    """Einträge für „Wartet auf dich“; Aufträge mit ihrem Hauptknopf."""
     return [
-        {"e": x, "p": projekt}
+        {"e": x}
         if isinstance(x, Entscheidung)
         else {
-            "p": projekt,
             "a": x,
             "h": hauptaktion(x),
             "faellig": dienst.ist_faellig(x),

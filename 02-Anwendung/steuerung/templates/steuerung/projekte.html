@@ -1,53 +1,10 @@
 {% extends "steuerung/grund.html" %}
 {% block titel %}Projekte{% endblock %}
-{% block band %}
-<section class="band" aria-label="Heute">
-  <div class="band-innen">
-    <div class="band-text">
-      <p class="oberzeile">Heute · {% now "l, j. F" %}</p>
-      <h1>{{ gruss }}{% if wartet %}<br><em>{{ wartet|length }} {% if wartet|length == 1 %}Sache wartet{% else %}Dinge warten{% endif %}</em> auf dich.{% else %}<br>Nichts wartet auf dich.{% endif %}</h1>
-    </div>
-    <div class="kennzahlen">
-      <div class="kz{% if wartet %} achtung{% endif %}"><b>{{ wartet|length }}</b><span>wartet auf dich</span></div>
-      <div class="kz"><b>{{ laeuft|length }}</b><span>in Arbeit</span></div>
-      <div class="kz"><b>{{ offen_gesamt }}</b><span>offen gesamt</span></div>
-    </div>
-  </div>
-</section>
-{% endblock %}
 {% block inhalt %}
 {% if kopie_warnung %}<p class="box warn">{{ kopie_warnung }}</p>{% endif %}
 {% if ordneranfragen %}<p class="box warn">{{ ordneranfragen }} neue{{ ordneranfragen|pluralize:"r,"}} Arbeitsordner warte{{ ordneranfragen|pluralize:"t,n" }} auf Zuordnung: <a href="{% url 'verbindungen' %}#ordner">unter „Konto &amp; KI verbinden“ zuordnen</a>.</p>{% endif %}
-{% if not suche %}
-<div class="start-raster">
-<section class="box wartet-box" id="wartet" aria-labelledby="h-wartet">
-  <div class="abschnittkopf"><h2 id="h-wartet">Wartet auf dich{% if wartet %} <span class="zahl">{{ wartet|length }}</span>{% endif %}</h2><span class="gedaempft klein">aus allen Projekten, Fälliges zuerst</span></div>
-  {% if wartet %}
-  {% include "steuerung/wartet_liste.html" with mit_projekt=True %}
-  {% else %}
-  <p class="gedaempft">Nichts. Hier erscheint, was nur du erledigen kannst: Freigaben, Antworten, Fälliges.</p>
-  {% endif %}
-</section>
-<section class="box" id="laeuft-gerade" aria-labelledby="h-laeuft">
-  <div class="abschnittkopf"><h2 id="h-laeuft"><span class="puls" aria-hidden="true"></span> Läuft gerade</h2><a class="klein" href="{% url 'alle_auftraege' %}">Alle Aufträge</a></div>
-  {% if laeuft %}
-  <ul class="laeuft">
-  {% for z in laeuft %}
-    <li>
-      <a class="laeuft-titel" href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}"><span class="nr">{{ z.a.nummer }}</span> {{ z.a.titel }}</a>
-      <span class="laeuft-wer">{% if z.a.bearbeiter_bindung_id %}<span class="ki">KI</span> {% endif %}{{ z.a.bearbeiter_name|default:"niemand" }} · {{ z.a.projekt.name }} · {{ z.zeit|date:"d.m. H:i" }}</span>
-      {% if z.stand %}<span class="laeuft-stand">{{ z.stand.text|truncatechars:140 }}</span>{% else %}<span class="laeuft-stand gedaempft">Noch kein Stand gemeldet.</span>{% endif %}
-    </li>
-  {% endfor %}
-  </ul>
-  {% else %}
-  <p class="gedaempft">Gerade arbeitet kein Chat an einem Auftrag.</p>
-  {% endif %}
-</section>
-</div>
-{% endif %}
-<div class="abschnittkopf projekte-kopf">
-  <h2>Projekte</h2>
+<div class="seitenkopf projekte-kopf">
+  <h1>Projekte</h1>
 <form method="get" class="filterzeile projektsuche" role="search">
   <label for="projektsuche-alle">Suchen</label>
   <input type="search" id="projektsuche-alle" name="q" value="{{ suche }}" placeholder="Name oder Zweck" maxlength="100">
