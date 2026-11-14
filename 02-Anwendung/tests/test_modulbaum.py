@@ -211,6 +211,6 @@ def test_projektauswahl_feste_plaetze_und_bereiche_einmal(owner_client, akteur, 
     assert "Phase –" in seite and '<span class="chip projektwahl-phase">Aufbau</span>' in seite
     assert "Zweck noch nicht erfasst." in seite
     stil = Path(__file__).parents[1] / "steuerung" / "static" / "steuerung" / "stil.css"
-    assert "@media (min-width: 901px) { .reiter { display: none; } }" in stil.read_text(
-        encoding="utf-8"
-    )
+    # Bereiche nur einmal: dieselbe Leiste steht breit oben und schmal am unteren Rand
+    assert seite.count('<div class="bereiche">') == 1
+    assert "body.mit-projekt .bereiche { position: fixed;" in stil.read_text(encoding="utf-8")

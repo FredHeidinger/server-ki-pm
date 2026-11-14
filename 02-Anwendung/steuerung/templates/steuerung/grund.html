@@ -7,54 +7,62 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="{% static 'steuerung/stil.css' %}">
 </head>
-<body>
+<body class="{% if aktives_projekt %}mit-projekt{% endif %}">
 <a class="sprung" href="#inhalt">Zum Inhalt springen</a>
-<div class="app">
-<nav class="seitenleiste" aria-label="Bereiche">
-  <a class="marke" href="{% url 'projekte' %}"><span class="marke-zeichen">{% include "steuerung/symbol.html" with name="puls" %}</span><span><strong>Server-KI-PM</strong><small>Projektsteuerung mit KI</small></span></a>
-  {% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}
-  {% url 'alle_auftraege' as u_alle %}
+{% url 'projekte' as u_proj %}{% url 'verbindungen' as u_verb %}{% url 'alle_auftraege' as u_alle %}
+<header class="kopfleiste">
+<div class="kopfleiste-innen">
+<nav class="hauptleiste" aria-label="Hauptnavigation">
+  <a class="marke" href="{{ u_proj }}" title="Startseite: alle Projekte"><img src="{% static 'steuerung/fhe-logo.png' %}" alt="FHEngineering" width="146" height="44"><span class="produktname">KI-PM</span></a>
   {% if aktives_projekt %}
-  <a href="{{ u_proj }}" class="wechseln">{% include "steuerung/symbol.html" with name="ordner" %} Projekt wechseln</a>
-  <a href="{{ u_alle }}" class="wechseln">{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
-  <p class="navtitel bereichslink">Projekt</p>
-  <p class="projektname-nav bereichslink">{{ aktives_projekt.name }}</p>
+  <a class="projektwechsel" href="{{ u_proj }}" title="Projekt wechseln"><span class="sr-nur">Projekt wechseln</span> {{ aktives_projekt.name }}{% include "steuerung/symbol.html" with name="wechsel" %}</a>
   {% with k=aktives_projekt.kennung %}
-  <a class="bereichslink" href="{% url 'projekt_detail' kennung=k %}" {% if bereich == "ueberblick" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="puls" %} Überblick</a>
-  <a class="bereichslink" href="{% url 'projekt_auftraege' kennung=k %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Aufträge</a>
-  <a class="bereichslink" href="{% url 'akte_wissen' kennung=k %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="buch" %} Wissen</a>
-  <a class="bereichslink" href="{% url 'projekt_verlauf' kennung=k %}" {% if bereich == "verlauf" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
-  {% endwith %}
-  {% else %}
-  <a href="{{ u_proj }}" {% if request.path == u_proj or request.path == "/" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="ordner" %} Projekte</a>
-  <a href="{{ u_alle }}" {% if request.path == u_alle %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
-  {% endif %}
-  <p class="gruppe unten"><a href="{{ u_verb }}" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %} Konto &amp; KI verbinden{% if ordneranfragen_anzahl %} <span class="zaehler" title="Neue Arbeitsordner zuordnen">{{ ordneranfragen_anzahl }}</span>{% endif %}</a></p>
-</nav>
-<main id="inhalt">
-<header class="kopfzeile">
-  <div class="brotkrumen">{% block brotkrumen %}{% endblock %}</div>
-  <div class="kopfrechts">
-    <details class="neu-menue">
-      <summary class="knopf">+ Neu</summary>
-      <div class="menue" role="menu">
-        {% if aktives_projekt %}{% with p=aktives_projekt.kennung %}
-        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag&amp;projekt={{ p }}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
-        <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue&amp;projekt={{ p }}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
-        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=text"><strong>Text</strong><span>Notiz oder Beschreibung für die Chats</span></a>
-        <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=link"><strong>Link</strong><span>Verweis auf eine Seite oder Datei</span></a>
-        {% endwith %}{% else %}
-        <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt; Module sind optional</span></a>
-        {% endif %}
-      </div>
-    </details>
-    <form method="post" action="{% url 'abmelden' %}" class="benutzer">
-      {% csrf_token %}
-      <span class="avatar" title="Angemeldet als {{ user.get_username }}">{{ user.get_username|slice:":2"|upper }}</span>
-      <button type="submit" class="knopf zweit klein">Abmelden</button>
-    </form>
+  <div class="bereiche">
+  <a href="{% url 'projekt_detail' kennung=k %}" {% if bereich == "ueberblick" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="puls" %} Überblick</a>
+  <a href="{% url 'projekt_auftraege' kennung=k %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Aufträge</a>
+  <a href="{% url 'akte_wissen' kennung=k %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="buch" %} Wissen</a>
+  <a href="{% url 'projekt_verlauf' kennung=k %}" {% if bereich == "verlauf" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="uhr" %} Verlauf</a>
   </div>
+  {% endwith %}
+  <div class="nebenwege">
+  <a href="{{ u_alle }}" title="Alle Aufträge aus allen Projekten" {% if request.path == u_alle %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="stapel" %}<span class="nebentext">Alle Aufträge</span></a>
+  {% else %}
+  <div class="bereiche">
+  <a href="{{ u_proj }}" {% if request.path == u_proj or request.path == "/" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="raster" %} Projekte</a>
+  <a href="{{ u_alle }}" {% if request.path == u_alle %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="board" %} Alle Aufträge</a>
+  </div>
+  <div class="nebenwege">
+  {% endif %}
+  <a href="{{ u_verb }}" title="Konto &amp; KI verbinden" {% if request.path|slice:":13" == "/verbindungen" %}aria-current="page"{% endif %}>{% include "steuerung/symbol.html" with name="link" %}<span class="nebentext">Konto &amp; KI verbinden</span>{% if ordneranfragen_anzahl %} <span class="zaehler" title="Neue Arbeitsordner zuordnen">{{ ordneranfragen_anzahl }}</span>{% endif %}</a>
+  </div>
+</nav>
+<div class="kopfrechts">
+  <details class="neu-menue">
+    <summary class="knopf">+ Neu</summary>
+    <div class="menue" role="menu">
+      {% if aktives_projekt %}{% with p=aktives_projekt.kennung %}
+      <a role="menuitem" href="{% url 'wunsch_neu' %}?art=auftrag&amp;projekt={{ p }}"><strong>Auftrag</strong><span>Etwas soll gebaut oder geändert werden</span></a>
+      <a role="menuitem" href="{% url 'wunsch_neu' %}?art=issue&amp;projekt={{ p }}"><strong>Issue</strong><span>Ein Fehler oder Problem</span></a>
+      <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=text"><strong>Text</strong><span>Notiz oder Beschreibung für die Chats</span></a>
+      <a role="menuitem" href="{% url 'unterlage_neu' kennung=p %}?art=link"><strong>Link</strong><span>Verweis auf eine Seite oder Datei</span></a>
+      {% endwith %}{% else %}
+      <a role="menuitem" href="{% url 'projekt_neu' %}"><strong>Projekt</strong><span>Neues Projekt; Module sind optional</span></a>
+      {% endif %}
+    </div>
+  </details>
+  <details class="konto-menue">
+    <summary class="avatar" title="Angemeldet als {{ user.get_username }}">{{ user.get_username|slice:":2"|upper }}</summary>
+    <div class="menue">
+      <p class="gedaempft klein">Angemeldet als {{ user.get_username }}</p>
+      <form method="post" action="{% url 'abmelden' %}" class="benutzer">{% csrf_token %}<button type="submit" class="knopf zweit klein">Abmelden</button></form>
+    </div>
+  </details>
+</div>
+</div>
 </header>
+{% block band %}{% endblock %}
+<main id="inhalt">
+<div class="brotkrumen">{% block brotkrumen %}{% endblock %}</div>
 {% if messages %}
 <ul class="meldungen" aria-live="polite">
   {% for m in messages %}<li class="meldung {{ m.tags }}">{{ m }}</li>{% endfor %}
@@ -62,7 +70,6 @@
 {% endif %}
 {% block inhalt %}{% endblock %}
 </main>
-</div>
 <script>
 // Plus-Listen und Kopieren; alles andere ist ohne JavaScript bedienbar.
 (function () {

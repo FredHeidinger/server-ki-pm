@@ -31,6 +31,8 @@
 
 {% if werkbank %}{% include "steuerung/auftrag_werkbank.html" %}{% endif %}
 
+<div class="auftrag-raster">
+<div class="spalte-links">
 {% if auftrag.zustand == "ENTWURF" and pruef_offen %}
 <section class="box warn" id="freigabe" aria-labelledby="h-freigabe-{{ auftrag.pk }}">
   <h2 id="h-freigabe-{{ auftrag.pk }}">Freigabe: was noch fehlt</h2>
@@ -89,6 +91,8 @@
   {% if ist_bearbeiter and auftrag.zustand in "IN_ARBEIT BLOCKIERT" %}<p><a class="knopf zweit" href="{% url 'eigenes_ergebnis' auftrag_id=auftrag.pk %}">Mein Ergebnis einreichen</a></p>{% endif %}
 </section>
 
+</div>
+<div class="spalte-rechts">
 <section class="box" id="verlauf" aria-labelledby="h-verlauf-{{ auftrag.pk }}">
   <h2 id="h-verlauf-{{ auftrag.pk }}">Verlauf</h2>
   {% if meldungen %}
@@ -106,4 +110,6 @@
   {% endif %}
   {% if not meldungen and not ereignisse %}<p class="gedaempft">Noch nichts geschehen.</p>{% endif %}
 </section>
+</div>
+</div>
 </div>

@@ -1,5 +1,5 @@
 {% load steuerung_extras %}
-{% if zaehlleiste %}<p class="zaehlleiste">{% for titel, n in zaehlleiste %}{% if not forloop.first %} · {% endif %}{{ n }} {{ titel }}{% endfor %}</p>{% endif %}
+{% if zaehlleiste %}<nav class="zaehlleiste signalleiste" aria-label="Zählzeile: zur Spalte springen">{% for titel, n, klasse in zaehlleiste %}<a class="knoten knoten-{{ klasse }}" href="#spalte-{{ klasse }}"><span class="punkt">{{ n }}</span> <span class="knotentitel">{{ titel }}</span></a>{% endfor %}</nav>{% endif %}
 <div class="board" aria-label="Auftragsboard">
 {% for spalte in spalten %}
   <section class="spalte spalte-{{ spalte.klasse }}{% if not spalte.karten %} ist-leer{% endif %}" aria-labelledby="spalte-{{ spalte.klasse }}">
@@ -10,6 +10,7 @@
       {% if a.typ == "issue" %}<span class="issue">Issue</span>{% endif %}
       {% if darf_verschieben %}<label class="auswahlfeld" title="{{ a.nummer }} zum Verschieben auswählen"><input type="checkbox" name="auftrag" value="{{ a.pk }}" form="verschiebe-auswahl" aria-label="{{ a.nummer }} auswählen"></label>{% endif %}
       <a class="kartentitel" href="{% url 'auftrag_detail' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a>
+      {% if a.haupt.lieferbedarf and not a.haupt.verwaist %}<p class="lieferung">Wartet auf Lieferung von {% for b in a.haupt.lieferbedarf %}{{ b.auftrag }}{% if not forloop.last %}, {% endif %}{% endfor %}. Geht von selbst weiter.</p>{% endif %}
       {% include "steuerung/hauptknopf.html" with h=a.haupt ort="karte" zurueck=request.get_full_path %}
       <div class="kartenfuss">
         {% if alle %}<span class="kartenort" title="Projekt">{{ a.projekt.name }}</span>{% endif %}

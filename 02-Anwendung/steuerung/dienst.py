@@ -2763,6 +2763,27 @@ def verstummt(auftrag: Auftrag) -> dict | None:
     return {"seit": zuletzt, "beendet": beendet, "stand": stand}
 
 
+def laeuft_gerade(grenze: int = 8) -> list[dict]:
+    """Startseite „Läuft gerade“: Aufträge in Arbeit aus aktiven Projekten mit ihrem letzten Stand,
+    zuletzt Gemeldetes zuerst. Verstummte fehlen hier, sie stehen in „Wartet auf dich“. Nur Lesen.
+    ``stand`` ist die letzte Meldung ohne Antworten und Ende-Vermerk, sonst None."""
+    zeilen = []
+    for a in Auftrag.objects.filter(projekt__aktiv=True, zustand=Auftrag.IN_ARBEIT).select_related(
+        "projekt"
+    ):
+        if verstummt(a):
+            continue
+        stand = (
+            a.meldungen.filter(historisch=False)
+            .exclude(art__in=(Meldung.ANTWORT, Meldung.SITZUNGSENDE))
+            .first()
+        )
+        zeit = max((z for z in (a.zuletzt_gemeldet_am, a.uebernommen_am) if z), default=None)
+        zeilen.append({"a": a, "stand": stand, "zeit": zeit or a.aktualisiert_am})
+    zeilen.sort(key=lambda z: (z["zeit"], z["a"].pk), reverse=True)
+    return zeilen[:grenze]
+
+
 def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Was in diesem Projekt auf Fred wartet. Zuoberst jeder offene Eintrag ab seinem Termin, der
     älteste Termin zuerst, in jedem Zustand. Danach blockierte Aufträge (Rückfrage, Hindernis,

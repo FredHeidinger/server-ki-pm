@@ -5,12 +5,15 @@ Ein Klickweg zählt jeden Link und jeden Knopf; Tippen in ein Feld ist kein Klic
 muss auf der gerade angezeigten Seite stehen, sonst gilt der Weg als nicht erreichbar."""
 
 from html.parser import HTMLParser
+from pathlib import Path
 
 from django.urls import reverse
 
 from steuerung import dienst
 from steuerung.models import Auftrag
 from tests.conftest import arbeitspaket
+
+STATIC = Path(__file__).resolve().parents[1] / "steuerung" / "static" / "steuerung"
 
 
 class _Seite(HTMLParser):
@@ -239,15 +242,12 @@ def test_startseite_projektkarten_mit_zeile(owner_client, akteur, projekt, proje
     assert projekt.kuerzel in karte and "Phase" in karte
 
 
-def test_seitenleiste_vier_bereiche_und_einstellungen(owner_client, projekt):
+def test_kopfleiste_vier_bereiche_und_einstellungen(owner_client, projekt):
     html = owner_client.get(_projekt_url(projekt)).content.decode()
-    leiste = html.split('<nav class="seitenleiste"')[1].split("</nav>")[0]
+    leiste = html.split('<nav class="hauptleiste"')[1].split("</nav>")[0]
     bereiche = [t for h, t in _Seite(leiste).links if h.startswith("/projekt/")]
     assert bereiche == ["Überblick", "Aufträge", "Wissen", "Verlauf"]
-    assert (
-        leiste.rstrip().endswith("</p>")
-        and "Konto &amp; KI verbinden" in leiste.split("Verlauf")[1]
-    )
+    assert "Konto &amp; KI verbinden" in leiste.split("Verlauf")[1]
     einstellungen = _projekt_url(projekt, "projekt_einstellungen")
     assert f'href="{einstellungen}"' in html
     seite = owner_client.get(einstellungen).content.decode()
@@ -266,9 +266,21 @@ def test_ueberblick_reihenfolge(owner_client, akteur, projekt, bindung):
         pruefungen="pytest: grün",
     )
     html = owner_client.get(_projekt_url(projekt)).content.decode()
-    teile = ["Wartet auf dich", "Version", "Meilensteine", "Zuletzt erledigt", "Beschreibung"]
-    stellen = [html.index(f">{t}") for t in teile]
-    assert stellen == sorted(stellen)
+    # Gestaltung D: breit zwei Spalten, schmal (unter 900 px) per CSS-order die festgelegte
+    # Reihenfolge; die Browserprüfung misst sie (04-Pruefung/gestaltung-d).
+    links = html.split('class="spalte-links"')[1].split('class="spalte-rechts"')[0]
+    rechts = html.split('class="spalte-rechts"')[1]
+    for spalte, teile in (
+        (links, ["Wartet auf dich", "Als Nächstes", "Zuletzt erledigt"]),
+        (rechts, ["Version", "Meilensteine", "Beschreibung"]),
+    ):
+        stellen = [spalte.index(f">{t}") for t in teile]
+        assert stellen == sorted(stellen)
+    stil = (STATIC / "stil.css").read_text(encoding="utf-8")
+    assert (
+        "#wartet { order: 1; } #als-naechstes { order: 2; } #version { order: 3; } "
+        "#meilensteine { order: 4; } #erledigt { order: 5; } #beschreibung { order: 6; }"
+    ) in stil
     assert "Produktion: unbekannt" in html
     erledigt = html.split('id="h-erledigt"')[1].split("</section>")[0]
     assert fertig.titel in erledigt

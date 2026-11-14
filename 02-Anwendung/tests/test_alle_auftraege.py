@@ -131,17 +131,17 @@ def test_liste_hat_projektspalte(owner_client, zwei, projekt):
     assert "Auftrag in A" in html and "Auftrag in B" in html
 
 
-def test_seitenleiste_hat_alle_auftraege_ueberall(owner_client, zwei, projekt):
+def test_kopfleiste_hat_alle_auftraege_ueberall(owner_client, zwei, projekt):
     for url in (reverse("start"), reverse("projekt_detail", kwargs={"kennung": projekt.kennung})):
         html = owner_client.get(url).content.decode()
-        leiste = html.split('<nav class="seitenleiste"')[1].split("</nav>")[0]
+        leiste = html.split('<nav class="hauptleiste"')[1].split("</nav>")[0]
         links = _Seite(leiste).links
         assert (reverse("alle_auftraege"), "Alle Aufträge") in [(h, t.strip()) for h, t in links]
 
 
-def test_seitenleiste_bleibt_ohne_projekt_auf_der_neuen_seite(owner_client, zwei):
+def test_kopfleiste_bleibt_ohne_projekt_auf_der_neuen_seite(owner_client, zwei):
     html = _seite(owner_client, "?p=synth-a")
-    leiste = html.split('<nav class="seitenleiste"')[1].split("</nav>")[0]
+    leiste = html.split('<nav class="hauptleiste"')[1].split("</nav>")[0]
     assert "Projekt wechseln" not in leiste and 'aria-current="page"' in leiste
 
 
@@ -188,7 +188,8 @@ def test_zaehlleiste_nennt_die_spalten(owner_client, akteur, projekt):
     html = owner_client.get(
         reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
     ).content.decode()
-    leiste = html.split('class="zaehlleiste"')[1].split("</p>")[0]
+    leiste = html.split('class="zaehlleiste')[1].split("</nav>")[0]
+    leiste = " ".join(re.sub(r"<[^>]+>", " ", leiste.split(">", 1)[1]).split())
     assert "1 Entwurf" in leiste and "1 Freigegeben" in leiste and "0 Blockiert" not in leiste
     assert Auftrag.objects.count() == 2
 

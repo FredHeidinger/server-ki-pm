@@ -243,7 +243,7 @@ def test_board_und_projektkarten_rendern(owner_client, projekt, freigegeben):
     url = reverse("projekt_auftraege", kwargs={"kennung": projekt.kennung})
     board = owner_client.get(url).content.decode()
     assert 'class="board"' in board and freigegeben.nummer in board and "Freigegeben" in board
-    assert 'class="reiter"' in board
+    assert board.count('<div class="bereiche">') == 1  # vier Bereiche, schmal als untere Leiste
     liste = owner_client.get(url + "?ansicht=liste").content.decode()
     assert "<table" in liste and freigegeben.nummer in liste
     auswahl = owner_client.get(reverse("projekte")).content.decode()

@@ -1,21 +1,17 @@
 {% extends "steuerung/grund.html" %}
-{% block brotkrumen %}<a href="{% url 'projekte' %}">Projekte</a> › <a href="{% url 'projekt_detail' kennung=projekt.kennung %}">{{ projekt.name }}</a>{% endblock %}
+{% block band %}
+<section class="band{% if bereich != 'ueberblick' %} kompakt{% endif %}" aria-label="Projekt">
+  <div class="band-innen">
+    <div class="band-text">
+      <p class="oberzeile">Projekt · {{ projekt.kuerzel }}{% if projekt.phase %} · {{ projekt.phase }}{% endif %}</p>
+      <h1>{{ projekt.name }}</h1>
+      <p class="band-zweck">{% if projekt.zweck %}{{ projekt.zweck|truncatechars:140 }} · {% endif %}<a href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}" {% if reiter == "einstellungen" %}aria-current="page"{% endif %}>Projekteinstellungen</a></p>
+    </div>
+    {% block kennzahlen %}{% endblock %}
+  </div>
+</section>
+{% endblock %}
 {% block inhalt %}
 {% if not projekt.aktiv %}<p class="box warn">Dieses Projekt ist archiviert: Es fehlt auf der Startseite, und Chats sehen es nicht. <a href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}#archivieren">Zurückholen</a></p>{% endif %}
-<div class="projektkopf-akte">
-  <div>
-    <p class="oberzeile">Projekt · {{ projekt.kennung }}{% if projekt.phase %} · {{ projekt.phase }}{% endif %}</p>
-    <h1>{{ projekt.name }}</h1>
-  </div>
-  <div class="kopfaktionen">
-    <a class="knopf zweit klein" href="{% url 'projekt_einstellungen' kennung=projekt.kennung %}" {% if reiter == "einstellungen" %}aria-current="page"{% endif %}>Projekteinstellungen</a>
-  </div>
-</div>
-<nav class="reiter" aria-label="Bereiche des Projekts">
-  <a href="{% url 'projekt_detail' kennung=projekt.kennung %}" {% if bereich == "ueberblick" %}aria-current="page"{% endif %}>Überblick</a>
-  <a href="{% url 'projekt_auftraege' kennung=projekt.kennung %}" {% if bereich == "auftraege" %}aria-current="page"{% endif %}>Aufträge</a>
-  <a href="{% url 'akte_wissen' kennung=projekt.kennung %}" {% if bereich == "wissen" %}aria-current="page"{% endif %}>Wissen</a>
-  <a href="{% url 'projekt_verlauf' kennung=projekt.kennung %}" {% if bereich == "verlauf" %}aria-current="page"{% endif %}>Verlauf</a>
-</nav>
 {% block projektinhalt %}{% endblock %}
 {% endblock %}

@@ -47,7 +47,7 @@ def test_p01_vier_bereiche_und_projektgrenzen(owner_client, akteur, alpha, beta)
         seite = owner_client.get(_url(name, beta))
         assert seite.status_code == 200, name
         text = seite.content.decode()
-        leiste = text.split('<nav class="seitenleiste"')[1].split("</nav>")[0]
+        leiste = text.split('<nav class="hauptleiste"')[1].split("</nav>")[0]
         for bereich in ("Überblick", "Aufträge", "Wissen", "Verlauf"):
             assert f"{bereich}</a>" in leiste, (name, bereich)
         for frueher in ("Funktionen &amp; Planung", "Versionen &amp; Betrieb", "Arbeitsaufträge"):
