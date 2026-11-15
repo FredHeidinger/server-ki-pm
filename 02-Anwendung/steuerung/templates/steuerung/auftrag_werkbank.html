@@ -32,6 +32,7 @@
   <h3>Ausführung {{ ausf.ausfuehrung_id|stringformat:"s"|slice:":8" }}</h3>
   <p><span class="status {% if ausf.zustand == 'abschluss_gemeldet' or ausf.zustand == 'abgeschlossen' %}ok{% elif w.bedarf or ausf.zustand == 'fehler' or ausf.zustand == 'unklar' %}bad{% elif ausf.zustand == 'offline' or ausf.halt_zweck %}warn{% endif %}">{{ w.zustand_text }}</span>
     <span class="gedaempft klein">· Statusversion {{ ausf.statusversion }} · Revision {{ ausf.revision }}{% if ausf.halt_zweck == "kontext_veraltet" %} · Kontext veraltet: neue Freigabe nötig{% endif %}</span></p>
+  {% for g in w.abweichungen %}<p class="klein"><span class="status warn">Abweichung:</span> {{ g }}</p>{% endfor %}
   {% if w.letzter_fehler %}<p class="klein"><strong>Letzter Fehler (ganzer Auftrag):</strong> {{ w.letzter_fehler.text }} <span class="gedaempft">({{ w.letzter_fehler.code }}) · nicht mehr offen</span></p>{% endif %}
   {% if w.pakete %}<p>{{ w.pakete_erledigt }} von {{ w.pakete|length }} Paketen erledigt · {{ w.schritte_gesamt }} Schritt{{ w.schritte_gesamt|pluralize:",e" }} autorisiert</p>{% endif %}
 

@@ -285,6 +285,7 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "halt_grund": grund_halt,
         "halt_moeglich": not grund_halt,
         "kann_weiterbauen": any(b.get("typ") in ("fehler", "unklar") for b in bedarf),
+        "abweichungen": werkbank_lauf.abweichungen(ausf),
         "weiterbauen_offen": next(
             (
                 a

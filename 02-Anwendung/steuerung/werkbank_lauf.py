@@ -9,10 +9,14 @@ Antwort (``erlaubt: false`` mit Grundcode), nicht mit einem HTTP-Fehler.
 """
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
+
+from django.utils import timezone
 
 from . import dienst, werkbank, werkbank_vertrag
 from .models import (
+    AUSFUEHRUNG_AKTIV,
     Auftrag,
     Meldung,
     WerkbankAktion,
@@ -616,19 +620,22 @@ def ereignis_verarbeiten(art: str, instanz, n: dict, q: werkbank.QuellePruefung,
             or not q.aktiv
             or (version is not None and version < ausf.statusversion)
         )
-        WerkbankEreignis.objects.create(
-            instanz=instanz,
-            ereignis_id=nutzlast["ereignis_id"],
-            art=art,
-            ausfuehrung=ausf,
-            projektbindung=q.projektbindung,
-            sequenz=nutzlast["sequenz"],
-            statusversion=version,
-            inhalt_sha256=inhalt,
-            rueckmeldung=nutzlast,
-            operation=op,
-            verarbeitung="historisch" if historisch else "angewendet",
-        )
+        werte = {
+            "ereignis_id": nutzlast["ereignis_id"],
+            "art": art,
+            "ausfuehrung": ausf,
+            "projektbindung": q.projektbindung,
+            "sequenz": nutzlast["sequenz"],
+            "statusversion": version,
+            "inhalt_sha256": inhalt,
+            "rueckmeldung": nutzlast,
+            "operation": op,
+            "verarbeitung": "historisch" if historisch else "angewendet",
+        }
+        if art == "lebenszeichen":
+            _lebenszeichen_ablegen(instanz, ausf, op, werte)
+        else:
+            WerkbankEreignis.objects.create(instanz=instanz, **werte)
         ergebnis = "historisch_quittiert" if historisch else "verarbeitet"
         if not historisch:
             rueck = EFFEKTE[art](instanz, ausf, nutzlast["ereignis"]["daten"], op)
@@ -662,6 +669,120 @@ def ereignis_verarbeiten(art: str, instanz, n: dict, q: werkbank.QuellePruefung,
             ),
         },
     )
+
+
+def _lebenszeichen_ablegen(instanz, ausf, op, werte: dict) -> None:
+    """KIPM-02: Je Ausführung bleibt nur das jüngste Lebenszeichen gespeichert (Zeile und
+    Operationsnachweis); es ersetzt das vorige statt eine neue Zeile je Takt anzulegen. Alle
+    anderen Ereignisse bleiben vollständig. Ältere Lebenszeichen aus der Zeit davor bleiben
+    unberührt (Altbestand, nur nach Freds Wort)."""
+    vorige = (
+        WerkbankEreignis.objects.filter(instanz=instanz, ausfuehrung=ausf, art="lebenszeichen")
+        .order_by("-id")
+        .first()
+    )
+    if vorige is None:
+        WerkbankEreignis.objects.create(instanz=instanz, **werte)
+        return
+    if vorige.sequenz > werte["sequenz"]:
+        return  # verspätetes älteres Lebenszeichen: das jüngere bleibt stehen
+    alte_op = vorige.operation_id
+    WerkbankEreignis.objects.filter(pk=vorige.pk).update(**werte, empfangen_am=timezone.now())
+    if (
+        alte_op is not None
+        and alte_op != op.pk
+        and not WerkbankEreignis.objects.filter(operation_id=alte_op).exists()
+        and not WerkbankAktion.objects.filter(operation_id=alte_op).exists()
+    ):
+        WerkbankOperation.objects.filter(pk=alte_op).delete()
+
+
+# --- Liegengeblieben und Abweichungen (KIPM-02) ----------------------------------------------
+
+#: Ohne Fortschrittsmeldung so viele Stunden: die Ausführung steht in „Wartet auf dich“.
+KEIN_FORTSCHRITT_STUNDEN = 2
+#: Ereignisse, die keinen Fortschritt bedeuten.
+KEIN_FORTSCHRITT = ("lebenszeichen",)
+
+
+def _letzter_fortschritt(ausf: WerkbankAusfuehrung) -> datetime:
+    letzte = (
+        ausf.ereignisse.exclude(art__in=KEIN_FORTSCHRITT)
+        .order_by("-empfangen_am")
+        .values_list("empfangen_am", flat=True)
+        .first()
+    )
+    return max(z for z in (letzte, ausf.angelegt_am) if z is not None)
+
+
+def ohne_fortschritt(ausf: WerkbankAusfuehrung, jetzt: datetime | None = None) -> dict | None:
+    """Aktive Ausführung, die seit ``KEIN_FORTSCHRITT_STUNDEN`` keine Fortschrittsmeldung geschickt
+    hat (Lebenszeichen zählen nicht); sonst None. Zeigt nur an, bricht nichts automatisch ab."""
+    if ausf.zustand not in AUSFUEHRUNG_AKTIV:
+        return None
+    seit = _letzter_fortschritt(ausf)
+    if (jetzt or timezone.now()) - seit < timedelta(hours=KEIN_FORTSCHRITT_STUNDEN):
+        return None
+    return {
+        "seit": seit,
+        "ausf": ausf,
+        # Ist schon ein Halt oder Abbruch angefordert, wartet es auf die Werkbank, nicht auf Fred.
+        "halt": ausf.halt_zweck,
+        "halt_text": ausf.get_halt_zweck_display() if ausf.halt_zweck else "",
+        "halt_am": ausf.halt_angefordert_am,
+        "fehler_offen": any(
+            b.get("offen") and b.get("typ") in ("fehler", "unklar") for b in ausf.bedarf
+        ),
+    }
+
+
+def haengende(projekt, jetzt: datetime | None = None) -> dict[int, dict]:
+    """Auftrags-ID → ``ohne_fortschritt`` für alle liegengebliebenen Ausführungen des Projekts."""
+    ergebnis = {}
+    for ausf in WerkbankAusfuehrung.objects.filter(
+        auftrag__projekt=projekt, zustand__in=AUSFUEHRUNG_AKTIV
+    ).select_related("auftrag"):
+        info = ohne_fortschritt(ausf, jetzt)
+        if info is not None:
+            ergebnis[ausf.auftrag_id] = info
+    return ergebnis
+
+
+def abweichungen(ausf: WerkbankAusfuehrung, jetzt: datetime | None = None) -> list[str]:
+    """BR-005: Wo der Zustand des Auftrags in KI-PM und der Stand der Ausführung (samt der letzten
+    Meldung der Werkbank) nicht zusammenpassen, je ein Satz mit Grund. Ändert nichts."""
+    jetzt = jetzt or timezone.now()
+    auftrag = ausf.auftrag
+    aktiv = ausf.zustand in AUSFUEHRUNG_AKTIV
+    gruende = []
+    if aktiv and auftrag.ist_endzustand:
+        gruende.append(
+            f"Der Auftrag ist {auftrag.get_zustand_display()}, KI-PM führt die Ausführung aber "
+            f"noch als aktiv ({ausf.zustand})."
+        )
+    if (
+        not aktiv
+        and auftrag.zustand == Auftrag.IN_ARBEIT
+        and auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK
+        and not auftrag.ausfuehrungen.filter(zustand__in=AUSFUEHRUNG_AKTIV).exists()
+        and not auftrag.ausfuehrungen.filter(pk__gt=ausf.pk).exists()
+    ):
+        gruende.append(f"Die Ausführung ist {ausf.zustand}, der Auftrag steht aber noch in Arbeit.")
+    if (
+        aktiv
+        and ausf.halt_angefordert_am is not None
+        and ausf.halt_bestaetigt_am is None
+        and jetzt - ausf.halt_angefordert_am > timedelta(hours=KEIN_FORTSCHRITT_STUNDEN)
+    ):
+        zeit = timezone.localtime(ausf.halt_angefordert_am).strftime("%d.%m. %H:%M")
+        gruende.append(f"Halt seit {zeit} angefordert, von der Werkbank nicht bestätigt.")
+    letzte = ausf.ereignisse.exclude(art__in=KEIN_FORTSCHRITT).order_by("-sequenz").first()
+    if aktiv and letzte is not None and letzte.art in ("abbruch_bestaetigt", "abschluss_bericht"):
+        gruende.append(
+            f"Die Werkbank meldete zuletzt „{letzte.art}“, KI-PM führt die Ausführung aber noch "
+            "als aktiv."
+        )
+    return gruende
 
 
 def _handler(art: str):

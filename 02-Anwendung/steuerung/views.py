@@ -18,7 +18,16 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, akte, dienst, lieferungen, sicherung, views_werkbank, werkbank
+from . import (
+    abgleich,
+    akte,
+    dienst,
+    lieferungen,
+    sicherung,
+    views_werkbank,
+    werkbank,
+    werkbank_lauf,
+)
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -114,7 +123,9 @@ def projekte(request: HttpRequest) -> HttpResponse:
     for p in projekte_liste:
         p.orte = abgleich.orte_anzeige(p, lesbar)
         p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
-        p.wartet = len(akte.wartet_liste(p)) + len(werkbank.zugang_hinweise(p))
+        liste = akte.wartet_liste(p)
+        haengt = set(werkbank_lauf.haengende(p)) - {x.pk for x in liste if isinstance(x, Auftrag)}
+        p.wartet = len(liste) + len(werkbank.zugang_hinweise(p)) + len(haengt)
         p.version = abgleich.version_anzeige(p)["zustand"]
     return render(
         request,
@@ -339,9 +350,13 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
 
 
 def wartet_eintraege(projekt: Projekt) -> list[dict]:
-    """Einträge für „Wartet auf dich“; zuerst ablaufende Werkbank-Zugänge (KIPM-03), dann Aufträge
-    mit ihrem Hauptknopf."""
-    return [{"werkbank": h} for h in werkbank.zugang_hinweise(projekt)] + [
+    """Einträge für „Wartet auf dich“: zuerst ablaufende Werkbank-Zugänge (KIPM-03), dann
+    liegengebliebene Werkbank-Ausführungen ohne eigenen Eintrag (KIPM-02), dann Aufträge mit ihrem
+    Hauptknopf. Steht ein liegengebliebener Auftrag schon in der Liste, trägt sein Eintrag den
+    Hinweis; die Sitzungsstart-Schnittstelle der Chats bleibt davon unberührt."""
+    haengt = werkbank_lauf.haengende(projekt)
+    liste = akte.wartet_liste(projekt)
+    eintraege = [
         {"e": x}
         if isinstance(x, Entscheidung)
         else {
@@ -349,9 +364,15 @@ def wartet_eintraege(projekt: Projekt) -> list[dict]:
             "h": hauptaktion(x),
             "faellig": dienst.ist_faellig(x),
             "still": dienst.verstummt(x),
+            "haengt": haengt.pop(x.pk, None),
         }
-        for x in akte.wartet_liste(projekt)
+        for x in liste
     ]
+    zusaetzlich = [
+        {"a": i["ausf"].auftrag, "h": None, "faellig": False, "still": None, "haengt": i}
+        for i in sorted(haengt.values(), key=lambda i: i["seit"])
+    ]
+    return [{"werkbank": h} for h in werkbank.zugang_hinweise(projekt)] + zusaetzlich + eintraege
 
 
 def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> HttpResponse:
