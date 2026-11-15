@@ -64,9 +64,10 @@ def test_formular_registriert_und_zeigt_projekt(owner_client):
     )
     assert antwort.status_code == 302
     seite = owner_client.get(reverse("projekte")).content.decode()
-    assert "Synthetisches A" in seite and "Testprojekt" in seite
+    # Die Karte zeigt seit 15.11.2026 keine Kurzbeschreibung mehr (Freds Wunsch), nur den Namen
+    assert "Synthetisches A" in seite and "Testprojekt" not in seite
     detail = owner_client.get(antwort["Location"]).content.decode()
-    assert "synth-a" in detail and "Projekteinstellungen" in detail
+    assert "synth-a" in detail and "Projekteinstellungen" in detail and "Testprojekt" in detail
     einstellungen = owner_client.get(
         reverse("projekt_einstellungen", kwargs={"kennung": "synth-a"})
     )

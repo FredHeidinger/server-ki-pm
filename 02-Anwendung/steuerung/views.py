@@ -102,7 +102,7 @@ def _zurueck(request: HttpRequest, standard: str) -> HttpResponse:
 @login_required
 def projekte(request: HttpRequest) -> HttpResponse:
     """Einstieg: Projekt wählen. Alle Aufträge zusammen zeigt ``alle_auftraege``."""
-    projekte_qs = Projekt.objects.filter(aktiv=True).prefetch_related("module")
+    projekte_qs = Projekt.objects.filter(aktiv=True).prefetch_related("module", "arbeitsorte")
     suche = request.GET.get("q", "").strip()
     if suche:
         projekte_qs = projekte_qs.filter(
@@ -110,7 +110,9 @@ def projekte(request: HttpRequest) -> HttpResponse:
         )
     projekte_liste = list(projekte_qs)
     abgleich.versionen_auffrischen(projekte_liste)
+    lesbar = abgleich.lesbare_repositorys()
     for p in projekte_liste:
+        p.orte = abgleich.orte_anzeige(p, lesbar)
         p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
         p.wartet = len(akte.wartet_liste(p))
         p.version = abgleich.version_anzeige(p)["zustand"]

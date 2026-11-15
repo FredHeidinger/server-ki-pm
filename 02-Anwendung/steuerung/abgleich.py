@@ -218,6 +218,76 @@ def zugang_anzeige(akteur: Akteur) -> dict:
     }
 
 
+GITHUB_ADRESSE = re.compile(
+    r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def repo_name_aus_adresse(adresse: str) -> str:
+    """„besitzer/repository“ (klein) aus einer GitHub-Adresse eines Arbeitsorts, sonst leer."""
+    treffer = GITHUB_ADRESSE.fullmatch((adresse or "").strip())
+    return f"{treffer[1]}/{treffer[2]}".lower() if treffer else ""
+
+
+def lesbare_repositorys() -> set[str]:
+    """Namen (klein) der Repositorys, die der Lese-Schlüssel bei seiner letzten Prüfung lesen
+    konnte; leer ohne Schlüssel, bei abgelehntem Schlüssel oder fehlgeschlagener Prüfung. Fragt
+    GitHub nicht neu und verrät den Schlüssel nicht; Seiten zeigen daraus nur einen Zustand."""
+    zugang = GitHubZugang.objects.first()
+    if zugang is None or zugang.abgelehnt or zugang.fehler:
+        return set()
+    return {str(r.get("name", "")).lower() for r in zugang.repositorys if isinstance(r, dict)}
+
+
+def _zeile_anzeige(label: str, text: str, klasse: str, wert: str = "", titel: str = "") -> dict:
+    return {"label": label, "text": text, "klasse": klasse, "wert": wert, "titel": titel}
+
+
+def orte_anzeige(projekt: Projekt, lesbar: set[str]) -> dict:
+    """Arbeitsort- und Repository-Zeile der Projektkarte (Festlegung A B B, 15.11.2026). Zählt nur
+    aktive Orte. Arbeitsort gut erst nach Freds Häkchen; Repository gut nur, wenn der
+    Lese-Schlüssel es lesen kann (``lesbar`` aus ``lesbare_repositorys``), mittel bei eingetragener,
+    nicht gelesener Adresse. Mehrere Orte erscheinen als Zählzeile, einer mit Ordnername."""
+    orte = [o for o in projekt.arbeitsorte.all() if o.aktiv]
+    anzahl = len(orte)
+    bestaetigt = sum(o.bestaetigt for o in orte)
+    eingetragen = [o for o in orte if o.repository]
+    verbunden = (
+        sum(repo_name_aus_adresse(o.repository) in lesbar for o in eingetragen) if lesbar else 0
+    )
+    if anzahl == 0:
+        ort = _zeile_anzeige("Arbeitsort", "kein Arbeitsort", "schlecht")
+    elif anzahl == 1:
+        einziger = orte[0]
+        ordner = re.split(r"[\\/]", einziger.pfad.strip().rstrip("\\/"))[-1] or einziger.name
+        ort = _zeile_anzeige(
+            "Arbeitsort",
+            "bestätigt" if einziger.bestaetigt else "Vorschlag",
+            "gut" if einziger.bestaetigt else "schlecht",
+            wert=ordner,
+            titel=einziger.pfad or einziger.name,
+        )
+    else:
+        ort = _zeile_anzeige(
+            "Arbeitsorte",
+            f"{bestaetigt} von {anzahl} bestätigt",
+            "gut" if bestaetigt == anzahl else "schlecht",
+        )
+    if not eingetragen:
+        repo = _zeile_anzeige("Repository", "kein Repository", "schlecht")
+    elif anzahl == 1:
+        repo = (
+            _zeile_anzeige("Repository", "verbunden", "gut")
+            if verbunden
+            else _zeile_anzeige("Repository", "eingetragen, nicht gelesen", "mittel")
+        )
+    else:
+        klasse = "gut" if verbunden == anzahl else "schlecht" if verbunden == 0 else "mittel"
+        repo = _zeile_anzeige("Repositorys", f"{verbunden} von {anzahl} verbunden", klasse)
+    return {"arbeitsort": ort, "repository": repo}
+
+
 # --- Repository je Projekt -------------------------------------------------------------------
 
 

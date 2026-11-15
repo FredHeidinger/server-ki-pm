@@ -209,7 +209,10 @@ def test_projektauswahl_feste_plaetze_und_bereiche_einmal(owner_client, akteur, 
     assert seite.count('class="projektwahl-karte"') == 2
     assert seite.count('class="kuerzel projektwahl-kuerzel"') == 2
     assert "Phase –" in seite and '<span class="chip projektwahl-phase">Aufbau</span>' in seite
-    assert "Zweck noch nicht erfasst." in seite
+    # Feste Plätze: statt der Kurzbeschreibung (Freds Wunsch 15.11.2026) je Karte zwei Ortszeilen
+    assert (
+        seite.count('data-zeile="arbeitsort"') == 2 and seite.count('data-zeile="repository"') == 2
+    )
     stil = Path(__file__).parents[1] / "steuerung" / "static" / "steuerung" / "stil.css"
     # Bereiche nur einmal: dieselbe Leiste steht breit oben und schmal am unteren Rand
     assert seite.count('<div class="bereiche">') == 1
