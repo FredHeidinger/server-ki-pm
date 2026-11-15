@@ -151,6 +151,23 @@ def test_nach_angefordertem_abbruch_keine_knoepfe_mehr(owner_client, w_ausfuehru
     assert 'name="art" value="abbrechen"' not in wartet
 
 
+def test_abschluss_gemeldet_oder_auftrag_erledigt_ist_kein_haengen(
+    owner_client, w_ausfuehrung, projekt
+):
+    """Messung am Server 15.11.2026: KTL-1 ist erledigt, seine Ausführung steht noch auf
+    „abschluss_gemeldet“. Das ist eine Abweichung am Auftrag, kein Eintrag mit „Abbrechen“."""
+    _zurueckdatieren(w_ausfuehrung, werkbank_lauf.KEIN_FORTSCHRITT_STUNDEN + 1)
+    WerkbankAusfuehrung.objects.filter(pk=w_ausfuehrung.pk).update(zustand="abschluss_gemeldet")
+    w_ausfuehrung.refresh_from_db()
+    assert werkbank_lauf.ohne_fortschritt(w_ausfuehrung) is None
+    WerkbankAusfuehrung.objects.filter(pk=w_ausfuehrung.pk).update(zustand="laeuft")
+    Auftrag.objects.filter(pk=w_ausfuehrung.auftrag_id).update(zustand=Auftrag.ERLEDIGT)
+    w_ausfuehrung.refresh_from_db()
+    assert werkbank_lauf.ohne_fortschritt(w_ausfuehrung) is None
+    assert "Werkbank ohne Fortschritt" not in _wartet(owner_client, projekt)
+    assert werkbank_lauf.abweichungen(w_ausfuehrung)
+
+
 def test_projektkarte_zaehlt_den_eintrag(owner_client, w_ausfuehrung, projekt):
     vorher = owner_client.get(reverse("projekte")).content.decode()
     _zurueckdatieren(w_ausfuehrung, werkbank_lauf.KEIN_FORTSCHRITT_STUNDEN + 1)

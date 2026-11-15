@@ -718,8 +718,10 @@ def _letzter_fortschritt(ausf: WerkbankAusfuehrung) -> datetime:
 def ohne_fortschritt(ausf: WerkbankAusfuehrung, jetzt: datetime | None = None) -> dict | None:
     """Aktive Ausführung, die seit ``KEIN_FORTSCHRITT_STUNDEN`` keine Fortschrittsmeldung geschickt
     hat (Lebenszeichen zählen nicht); sonst None. Zeigt nur an, bricht nichts automatisch ab."""
-    if ausf.zustand not in AUSFUEHRUNG_AKTIV:
+    if ausf.zustand not in AUSFUEHRUNG_AKTIV or ausf.zustand == "abschluss_gemeldet":
         return None
+    if ausf.auftrag.ist_endzustand:
+        return None  # Widerspruch zum Auftrag: steht als Abweichung am Auftrag, nicht hier
     seit = _letzter_fortschritt(ausf)
     if (jetzt or timezone.now()) - seit < timedelta(hours=KEIN_FORTSCHRITT_STUNDEN):
         return None
