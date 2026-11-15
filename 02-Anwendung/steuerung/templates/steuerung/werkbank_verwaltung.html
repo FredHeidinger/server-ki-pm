@@ -3,7 +3,7 @@
   <p class="gedaempft">Eine Werkbank arbeitet freigegebene Aufträge auf einem PC selbst ab und meldet nur Fakten an KI-PM zurück. Sie meldet sich bei diesem Server mit einem eigenen Schlüssel an, der nur für die Werkbank-Schnittstelle gilt. Ob sie bereit ist, meldet sie selbst; KI-PM prüft das nicht noch einmal.</p>
   {% if neue_werkbank %}
   <div role="alert" class="box warn">
-    <p><strong>{{ neue_werkbank.name }}</strong> ist angelegt. Jetzt verbinden, in drei Schritten:</p>
+    <p><strong>{{ neue_werkbank.name }}</strong> {% if neue_werkbank.erneuert %}hat einen neuen Schlüssel; der alte gilt nicht mehr. Jetzt in der Werkbank eintragen{% else %}ist angelegt. Jetzt verbinden{% endif %}, in drei Schritten:</p>
     <ol class="anleitung">
       <li>Auf <strong>„Kopplungscode kopieren“</strong> klicken.</li>
       <li>In der Werkbank im Bereich „KI-PM-Kopplung“ das Feld <strong>„Kopplungscode“</strong> öffnen und mit Strg+V einfügen.</li>
@@ -25,13 +25,15 @@
   <ul class="eingang">{% for w in werkbaenke %}
     <li class="eintrag">
       <p class="eintragtitel">{{ w.name }}
-        {% if w.gesperrt %}<span class="status aus">Zugang widerrufen</span>{% elif w.aktiv %}<span class="status ok">aktiv</span>{% else %}<span class="status warn">abgeschaltet</span>{% endif %}
+        {% if w.zugang.art == "widerrufen" %}<span class="status aus">Zugang widerrufen am {{ w.zugang.am|date:"d.m.Y" }}</span>{% elif w.zugang.art == "kein" %}<span class="status aus">kein Zugang</span>{% elif w.zugang.art == "abgelaufen" %}<span class="status bad rot">Zugang abgelaufen am {{ w.zugang.am|date:"d.m.Y" }} – die Werkbank wird abgewiesen</span>{% elif w.aktiv %}<span class="status ok">aktiv</span>{% else %}<span class="status warn">abgeschaltet</span>{% endif %}
+        {% if w.zugang.art == "bald" %}<span class="status warn">Zugang läuft am {{ w.zugang.am|date:"d.m.Y" }} ab – erneuern</span>{% endif %}
         {% if w.keine_antwort %}<span class="status bad">keine Antwort seit mehr als 90 Sekunden</span>{% endif %}</p>
-      <p class="eintragtext">Letzter Kontakt: {% if w.letzter_kontakt %}{{ w.letzter_kontakt|date:"d.m.Y H:i:s" }}{% else %}noch nie{% endif %} · erlaubte Projekte: {% for p in w.erlaubte_projekte.all %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% empty %}keine{% endfor %}</p>
+      <p class="eintragtext">{% if w.zugang.art == "gueltig" or w.zugang.art == "bald" %}Zugang gültig bis {{ w.zugang.am|date:"d.m.Y" }} · {% endif %}Letzter Kontakt: {% if w.letzter_kontakt %}{{ w.letzter_kontakt|date:"d.m.Y H:i:s" }}{% else %}noch nie{% endif %} · erlaubte Projekte: {% for p in w.erlaubte_projekte.all %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% empty %}keine{% endfor %}</p>
       {% for b in w.projekte.all %}
-      <p class="eintragtext">{{ b.projekt.name }}: {% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nicht gemeldet</span> <span class="gedaempft klein">meldet sie bei der ersten Übernahme</span>{% endif %}
+      <div class="eintragtext">{{ b.projekt.name }}: {% if b.projekt.pk not in w.erlaubt_ids %}<span class="status warn">pausiert</span> <span class="gedaempft klein">KI-PM weist die Werkbank hier ab</span>{% if not w.gesperrt %} <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='fortsetzen' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ b.projekt.pk }}"><button type="submit" class="knopf zweit klein">Fortsetzen</button></form>{% endif %}{% else %}{% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nicht gemeldet</span> <span class="gedaempft klein">meldet sie bei der ersten Übernahme</span>{% endif %}
         {% if b.bereit_gemeldet_am %}<span class="gedaempft klein">gemeldet {{ b.bereit_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
-        {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}</p>
+        {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}
+        {% if not w.gesperrt %}{% if w.erlaubt_ids|length > 1 %}<form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='pausieren' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ b.projekt.pk }}"><button type="submit" class="knopf zweit klein">Pausieren</button></form>{% else %}<button type="button" class="knopf zweit klein" disabled>Pausieren</button> <span class="gedaempft klein">Letztes erlaubtes Projekt: zum Pausieren die ganze Werkbank mit „Abschalten“ stoppen.</span>{% endif %}{% endif %}{% endif %}</div>
       {% endfor %}
       {% if not w.gesperrt %}
       <details class="mehr einrichtung"{% if neue_werkbank and neue_werkbank.name == w.name %} open{% endif %}><summary>Einrichtungswerte für die Werkbank</summary>
@@ -69,6 +71,12 @@
       <div class="eintragaktionen">
         {% if not w.gesperrt %}
         <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='aktiv' %}" class="inline">{% csrf_token %}<input type="hidden" name="aktiv" value="{% if w.aktiv %}0{% else %}1{% endif %}"><button type="submit" class="knopf zweit klein">{% if w.aktiv %}Abschalten{% else %}Einschalten{% endif %}</button></form>
+        <details class="mehr"><summary>Zugang erneuern</summary>
+          <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='erneuern' %}" class="formular klein" autocomplete="off">{% csrf_token %}
+            <p class="gedaempft klein">Erzeugt einen neuen Schlüssel für dieselbe Werkbank. Erlaubte Projekte, Projektbindungen und Verlauf bleiben; danach den neuen Kopplungscode in der Werkbank einfügen.</p>
+            <label>Neuer Schlüssel gültig (Tage)<br><input type="number" name="tage" value="90" min="1" max="365" required></label>
+            <label><input type="checkbox" name="bestaetigt" value="1" required> Mir ist klar: Der bisherige Schlüssel gilt danach sofort nicht mehr.</label>
+            <button type="submit" class="knopf klein">Neuen Schlüssel erzeugen</button></form></details>
         <details class="mehr"><summary>Erlaubte Projekte</summary>
           <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='projekte' %}" class="formular klein">{% csrf_token %}
             {% for p in werkbank_projekte %}<label><input type="checkbox" name="projekt" value="{{ p.pk }}"{% if p.pk in w.erlaubt_ids %} checked{% endif %}> {{ p.name }}</label><br>{% endfor %}

@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from . import abgleich, akte, dienst, lieferungen, sicherung, views_werkbank
+from . import abgleich, akte, dienst, lieferungen, sicherung, views_werkbank, werkbank
 from .forms import (
     ArbeitsortForm,
     ArbeitspaketForm,
@@ -114,7 +114,7 @@ def projekte(request: HttpRequest) -> HttpResponse:
     for p in projekte_liste:
         p.orte = abgleich.orte_anzeige(p, lesbar)
         p.offen = p.auftraege.exclude(zustand__in=Auftrag.ENDZUSTAENDE).count()
-        p.wartet = len(akte.wartet_liste(p))
+        p.wartet = len(akte.wartet_liste(p)) + len(werkbank.zugang_hinweise(p))
         p.version = abgleich.version_anzeige(p)["zustand"]
     return render(
         request,
@@ -339,8 +339,9 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
 
 
 def wartet_eintraege(projekt: Projekt) -> list[dict]:
-    """Einträge für „Wartet auf dich“; Aufträge mit ihrem Hauptknopf."""
-    return [
+    """Einträge für „Wartet auf dich“; zuerst ablaufende Werkbank-Zugänge (KIPM-03), dann Aufträge
+    mit ihrem Hauptknopf."""
+    return [{"werkbank": h} for h in werkbank.zugang_hinweise(projekt)] + [
         {"e": x}
         if isinstance(x, Entscheidung)
         else {

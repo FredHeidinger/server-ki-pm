@@ -107,6 +107,8 @@ def kopplungscode(
     daten = {
         "adresse": adresse,
         "schluessel": schluessel,
+        # KIPM-03: additiv, damit die Werkbank vor dem Ablauf warnen kann; ältere ignorieren es.
+        "gueltig_bis": instanz.bindung.gueltig_bis.isoformat() if instanz.bindung else None,
         "server_id": str(server_id()),
         "werkbank_id": str(instanz.werkbank_id),
         "projekte": projekte,
@@ -177,6 +179,53 @@ def instanz_projekte_setzen(
         )
 
 
+def projekt_pausieren(
+    akteur: dienst.Akteur, instanz: WerkbankInstanz, projekt: Projekt, *, pausiert: bool
+) -> None:
+    """Die Werkbank für ein Projekt pausieren oder fortsetzen (Freds Wunsch vom 15.11.2026:
+    „schaltet die verbindung einfach tot“). Pausiert heißt: das Projekt ist nicht mehr erlaubt,
+    KI-PM weist die Werkbank dafür ab; die Projektbindung bleibt samt Fassung und Bereitschaft für
+    den Verlauf.
+    Nicht während einer laufenden Ausführung und nicht für das letzte erlaubte Projekt (dafür
+    gibt es „Abschalten“)."""
+    dienst._owner_erforderlich(akteur, "Werkbänke pausieren")
+    erlaubt = list(instanz.erlaubte_projekte.all())
+    ist_erlaubt = any(p.pk == projekt.pk for p in erlaubt)
+    if pausiert == (not ist_erlaubt):
+        return
+    if pausiert:
+        if len(erlaubt) == 1:
+            raise dienst.DienstFehler(
+                f"„{projekt.name}“ ist das letzte erlaubte Projekt; zum Pausieren die ganze "
+                "Werkbank mit „Abschalten“ stoppen."
+            )
+        if WerkbankAusfuehrung.objects.filter(
+            projektbindung__instanz=instanz,
+            projektbindung__projekt=projekt,
+            zustand__in=AUSFUEHRUNG_AKTIV,
+        ).exists():
+            raise dienst.DienstFehler(
+                f"In „{projekt.name}“ läuft noch eine Ausführung dieser Werkbank; erst abbrechen "
+                "oder abschließen lassen."
+            )
+    else:
+        _projekte_pruefen([projekt])
+    with transaction.atomic():
+        if pausiert:
+            instanz.erlaubte_projekte.remove(projekt)
+        else:
+            instanz.erlaubte_projekte.add(projekt)
+            _bindungen_sichern(instanz, [projekt])
+        dienst._ereignis(
+            akteur,
+            projekt=projekt,
+            objekt_typ="Werkbank",
+            objekt_kennung=instanz.name,
+            ereignis="Werkbank: Projekt pausiert" if pausiert else "Werkbank: Projekt fortgesetzt",
+            anlass=projekt.kennung,
+        )
+
+
 def instanz_aktiv_setzen(akteur: dienst.Akteur, instanz: WerkbankInstanz, aktiv: bool) -> None:
     dienst._owner_erforderlich(akteur, "Werkbänke aktivieren oder deaktivieren")
     if instanz.aktiv == aktiv:
@@ -202,6 +251,78 @@ def instanz_widerrufen(akteur: dienst.Akteur, instanz: WerkbankInstanz, grund: s
         dienst.bindung_widerrufen(akteur, instanz.bindung, grund)
         instanz.aktiv = False
         instanz.save(update_fields=["aktiv"])
+
+
+ABLAUF_WARNUNG_TAGE = 14
+
+
+def zugang_stand(instanz: WerkbankInstanz, jetzt: datetime | None = None) -> dict:
+    """Zustand des Werkbank-Zugangs für die Anzeige (KIPM-03): ``kein``, ``widerrufen``,
+    ``abgelaufen``, ``bald`` (höchstens 14 Tage) oder ``gueltig``, mit dem passenden Zeitpunkt.
+    Erklärt die 401-Antwort, ohne die Anmeldung zu ändern."""
+    bindung = instanz.bindung
+    if bindung is None:
+        return {"art": "kein", "am": None}
+    if bindung.widerrufen_am is not None:
+        return {"art": "widerrufen", "am": bindung.widerrufen_am}
+    jetzt = jetzt or timezone.now()
+    if bindung.gueltig_bis <= jetzt:
+        return {"art": "abgelaufen", "am": bindung.gueltig_bis}
+    if bindung.gueltig_bis - jetzt <= timedelta(days=ABLAUF_WARNUNG_TAGE):
+        return {"art": "bald", "am": bindung.gueltig_bis}
+    return {"art": "gueltig", "am": bindung.gueltig_bis}
+
+
+def zugang_hinweise(projekt: Projekt, jetzt: datetime | None = None) -> list[dict]:
+    """Einträge für „Wartet auf dich“ eines Projekts: jede Werkbank, die das Projekt erreichen darf
+    und deren nicht widerrufener Zugang in höchstens 14 Tagen abläuft oder abgelaufen ist."""
+    hinweise = []
+    for instanz in (
+        WerkbankInstanz.objects.select_related("bindung")
+        .filter(erlaubte_projekte=projekt, bindung__isnull=False)
+        .order_by("bindung__gueltig_bis", "name")
+    ):
+        stand = zugang_stand(instanz, jetzt)
+        if stand["art"] in ("bald", "abgelaufen"):
+            hinweise.append({"name": instanz.name, **stand})
+    return hinweise
+
+
+def instanz_erneuern(akteur: dienst.Akteur, instanz: WerkbankInstanz, *, gueltig_tage: int) -> str:
+    """Neuen Schlüssel für dieselbe Werkbank erzeugen (KIPM-03): Kennung, erlaubte Projekte,
+    Projektbindungen und Verlauf bleiben, der alte Schlüssel gilt sofort nicht mehr. Gibt den
+    Klartext genau einmal zurück. Ein widerrufener Zugang bleibt gesperrt (Freds Festlegung vom
+    15.11.2026: bei Bedarf eine neue Werkbank anlegen)."""
+    dienst._owner_erforderlich(akteur, "Werkbank-Zugänge erneuern")
+    if not 1 <= gueltig_tage <= 365:
+        raise dienst.DienstFehler("Die Gültigkeit muss zwischen 1 und 365 Tagen liegen.")
+    with transaction.atomic():
+        instanz = WerkbankInstanz.objects.select_related("bindung").get(pk=instanz.pk)
+        bindung = instanz.bindung
+        if bindung is None:
+            raise dienst.DienstFehler("Diese Werkbank hat keinen Zugang mehr.")
+        if bindung.widerrufen_am is not None:
+            raise dienst.DienstFehler(
+                "Ein widerrufener Zugang lässt sich nicht erneuern; bei Bedarf eine neue "
+                "Werkbank anlegen."
+            )
+        praefix = secrets.token_hex(6)
+        schluessel = f"kipm_{praefix}_{secrets.token_urlsafe(32)}"
+        bindung.praefix = praefix
+        bindung.schluessel_hash = dienst._schluessel_hash(schluessel)
+        bindung.gueltig_bis = timezone.now() + timedelta(days=gueltig_tage)
+        bindung.save(update_fields=["praefix", "schluessel_hash", "gueltig_bis"])
+        dienst._ereignis(
+            akteur,
+            projekt=None,
+            objekt_typ="Werkbank",
+            objekt_kennung=instanz.name,
+            ereignis="Werkbank-Zugang erneuert",
+            anlass=f"gültig {gueltig_tage} Tage, bis "
+            f"{timezone.localtime(bindung.gueltig_bis):%d.%m.%Y}; "
+            "der alte Schlüssel gilt nicht mehr",
+        )
+    return schluessel
 
 
 def instanz_benutzt(instanz: WerkbankInstanz) -> bool:

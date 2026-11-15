@@ -90,7 +90,9 @@ def verwaltung(request: HttpRequest) -> dict:
     ):
         i.gesperrt = i.bindung is None or i.bindung.widerrufen_am is not None
         i.loeschbar = not werkbank.instanz_benutzt(i)
-        i.keine_antwort = werkbank.nicht_erreichbar(i)
+        i.zugang = werkbank.zugang_stand(i)
+        # Abgelaufen oder widerrufen erklärt die Stille; die 90-s-Marke entfällt dann.
+        i.keine_antwort = i.zugang["art"] in ("gueltig", "bald") and werkbank.nicht_erreichbar(i)
         i.erlaubt_ids = {p.pk for p in i.erlaubte_projekte.all()}
         i.bindungen = list(i.projekte.select_related("projekt").order_by("projekt__name"))
         for b in i.bindungen:
@@ -150,6 +152,29 @@ def werkbank_pflegen(request: HttpRequest, instanz_id: int, wahl: str) -> HttpRe
         elif wahl == "projekte":
             werkbank.instanz_projekte_setzen(akteur, instanz, _projekte_aus(request))
             messages.success(request, f"Erlaubte Projekte von „{instanz.name}“ gespeichert.")
+        elif wahl in ("pausieren", "fortsetzen"):
+            projekt = get_object_or_404(Projekt, pk=int(request.POST.get("projekt") or 0))
+            werkbank.projekt_pausieren(akteur, instanz, projekt, pausiert=wahl == "pausieren")
+            messages.success(
+                request,
+                f"„{instanz.name}“ ist für „{projekt.name}“ "
+                + ("pausiert: KI-PM weist sie dort ab." if wahl == "pausieren" else "fortgesetzt."),
+            )
+        elif wahl == "erneuern":
+            if request.POST.get("bestaetigt") != "1":
+                raise dienst.DienstFehler(
+                    "Bitte bestätigen, dass der bisherige Schlüssel danach nicht mehr gilt."
+                )
+            schluessel = werkbank.instanz_erneuern(
+                akteur, instanz, gueltig_tage=int(request.POST.get("tage") or 90)
+            )
+            instanz = _instanz(instanz.pk)
+            request.session["neue_werkbank"] = {
+                "name": instanz.name,
+                "schluessel": schluessel,
+                "code": werkbank.kopplungscode(instanz, schluessel, _adresse(request)),
+                "erneuert": True,
+            }
         elif wahl == "widerrufen":
             werkbank.instanz_widerrufen(akteur, instanz, request.POST.get("grund", ""))
             messages.success(request, f"Der Zugang von „{instanz.name}“ ist widerrufen.")
@@ -159,7 +184,7 @@ def werkbank_pflegen(request: HttpRequest, instanz_id: int, wahl: str) -> HttpRe
             messages.success(request, f"Werkbank „{name}“ ist gelöscht.")
         else:
             raise Http404
-    except dienst.DienstFehler as fehler:
+    except (dienst.DienstFehler, ValueError) as fehler:
         _fehler(request, fehler)
     return redirect(reverse("verbindungen") + "#werkbank")
 

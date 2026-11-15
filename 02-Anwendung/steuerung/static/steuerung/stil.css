@@ -153,6 +153,7 @@ form.inline { display: inline; }
 .status.bad { background: var(--blau); border-color: var(--blau); color: var(--lime); }
 .status.warn { background: var(--hell); border: 1.5px dashed var(--blau); }
 .status.aus { color: var(--schiefer); }
+.status.rot { background: var(--weiss); border: 1.5px solid var(--schlecht); color: var(--schlecht); white-space: normal; border-radius: 10px; }
 .issue { display: inline-block; font: 600 11px/1.6 var(--text); text-transform: uppercase; letter-spacing: .06em; color: var(--blau); background: var(--weiss); border: 1.5px solid var(--blau); border-radius: 999px; padding: 0 7px; vertical-align: middle; }
 .prio { font-size: 11.5px; font-weight: 600; color: var(--schiefer); padding: 0 2px; }
 .prio.prio-hoch { color: var(--blau); }

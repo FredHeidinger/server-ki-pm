@@ -1,7 +1,12 @@
 {% load steuerung_extras %}{% comment %}„Wartet auf dich“ im Überblick.{% endcomment %}
   <ul class="eingang">
   {% for w in wartet %}
-    {% if w.e %}
+    {% if w.werkbank %}
+    <li class="eintrag {% if w.werkbank.art == 'abgelaufen' %}eintrag-blockade{% else %}eintrag-faellig{% endif %}">
+      <div class="eintragkopf"><span class="eintragart">Werkbank-Zugang</span><span class="eintragzeit">{{ w.werkbank.am|date:"d.m. H:i" }}</span></div>
+      <p class="eintragtitel"><a href="{% url 'verbindungen' %}#werkbank">Zugang der Werkbank {{ w.werkbank.name }} {% if w.werkbank.art == 'abgelaufen' %}ist am {{ w.werkbank.am|date:"d.m.Y" }} abgelaufen{% else %}läuft am {{ w.werkbank.am|date:"d.m.Y" }} ab{% endif %} – erneuern</a></p>
+    </li>
+    {% elif w.e %}
     <li class="eintrag eintrag-frage">
       <div class="eintragkopf"><span class="eintragart">Offene Entscheidung</span><span class="eintragzeit">{{ w.e.vorgeschlagen_am|date:"d.m. H:i" }}</span></div>
       <p class="eintragtitel"><span class="nr">{{ w.e.nummer }}</span> {{ w.e.text|linebreaksbr }}</p>
