@@ -214,3 +214,78 @@ def test_abweichung_halt_lange_unbestaetigt(w_ausfuehrung):
 
 def test_keine_abweichung_im_normalfall(w_ausfuehrung):
     assert werkbank_lauf.abweichungen(w_ausfuehrung) == []
+
+
+# --- Altbestand verdichten (Freds Entscheidung 15.11.2026: „A, verdichten“) ------------------
+
+
+def _altbestand(ausf, instanz, anzahl, start=1):
+    """Lebenszeichen wie vor KIPM-02: je Takt eine Zeile und ein Operationsnachweis."""
+    import uuid
+
+    for nr in range(start, start + anzahl):
+        op = WerkbankOperation.objects.create(
+            instanz=instanz, operation_id=uuid.uuid4(), art="ereignis",
+            nutzlast_sha256="c" * 64, ausfuehrung=ausf, ausgang_status=200,
+        )  # fmt: skip
+        WerkbankEreignis.objects.create(
+            instanz=instanz, ereignis_id=uuid.uuid4(), art="lebenszeichen", ausfuehrung=ausf,
+            sequenz=nr, inhalt_sha256="d" * 64, operation=op, verarbeitung="angewendet",
+        )  # fmt: skip
+
+
+def test_verdichten_probelauf_aendert_nichts(client, w_ausfuehrung, w_instanz):
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    _altbestand(w_ausfuehrung, w_instanz, 50)
+    _senden(
+        client, w_ausfuehrung, w_instanz, "paket_status",
+        {"paket": "root", "zustand": "laeuft"}, sequenz=60,
+    )  # fmt: skip
+    vorher = (WerkbankEreignis.objects.count(), WerkbankOperation.objects.count())
+    aus = StringIO()
+    call_command("lebenszeichen_verdichten", stdout=aus)
+    assert (WerkbankEreignis.objects.count(), WerkbankOperation.objects.count()) == vorher
+    assert "Probelauf" in aus.getvalue() and "49" in aus.getvalue()
+
+
+def test_verdichten_behaelt_je_ausfuehrung_das_juengste(client, owner, w_ausfuehrung, w_instanz):
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from steuerung.models import Ereignis
+
+    _altbestand(w_ausfuehrung, w_instanz, 50)
+    _senden(
+        client, w_ausfuehrung, w_instanz, "paket_status",
+        {"paket": "root", "zustand": "laeuft"}, sequenz=60,
+    )  # fmt: skip
+    juengste = WerkbankEreignis.objects.get(ausfuehrung=w_ausfuehrung, sequenz=50)
+    aus = StringIO()
+    call_command("lebenszeichen_verdichten", "--ausfuehren", stdout=aus)
+    reste = WerkbankEreignis.objects.filter(ausfuehrung=w_ausfuehrung, art="lebenszeichen")
+    assert list(reste.values_list("pk", flat=True)) == [juengste.pk]
+    assert WerkbankOperation.objects.filter(pk=juengste.operation_id).exists()
+    assert WerkbankEreignis.objects.filter(art="paket_status").count() == 1
+    # Übrig: Übernahme, Paketmeldung, jüngstes Lebenszeichen
+    assert WerkbankOperation.objects.count() == 3
+    e = Ereignis.objects.get(ereignis="Lebenszeichen-Altbestand verdichtet")
+    assert "49" in e.anlass and "A, verdichten" in e.anlass
+    assert "49 Lebenszeichen" in aus.getvalue()
+    # Ein zweiter Lauf findet nichts mehr und schreibt keinen weiteren Verlaufseintrag.
+    call_command("lebenszeichen_verdichten", "--ausfuehren", stdout=StringIO())
+    assert Ereignis.objects.filter(ereignis="Lebenszeichen-Altbestand verdichtet").count() == 1
+
+
+def test_verdichten_braucht_ein_owner_konto(w_ausfuehrung, w_instanz, owner):
+    from django.contrib.auth import get_user_model
+    from django.core.management import CommandError, call_command
+
+    _altbestand(w_ausfuehrung, w_instanz, 3)
+    get_user_model().objects.filter(pk=owner.pk).update(is_superuser=False)
+    with pytest.raises(CommandError, match="Owner"):
+        call_command("lebenszeichen_verdichten", "--ausfuehren")
+    assert WerkbankEreignis.objects.filter(art="lebenszeichen").count() == 3

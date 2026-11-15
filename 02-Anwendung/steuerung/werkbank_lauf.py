@@ -697,6 +697,62 @@ def _lebenszeichen_ablegen(instanz, ausf, op, werte: dict) -> None:
         WerkbankOperation.objects.filter(pk=alte_op).delete()
 
 
+def altbestand_lebenszeichen(*, ausfuehren: bool = False, akteur=None, anlass: str = "") -> dict:
+    """Altbestand aus der Zeit vor KIPM-02 verdichten (Freds Entscheidung 15.11.2026: „A,
+    verdichten“): je Ausführung bleibt das jüngste Lebenszeichen (höchste Sequenz), alle älteren
+    Lebenszeichen und ihre Operationsnachweise werden gelöscht; nichts anderes. Ohne
+    ``ausfuehren`` nur zählen. Mit ``ausfuehren`` in einer Transaktion samt Verlaufseintrag."""
+    from django.db import transaction
+    from django.db.models import Max
+
+    juengste = {
+        r["ausfuehrung_id"]: r["hoechste"]
+        for r in WerkbankEreignis.objects.filter(art="lebenszeichen", ausfuehrung__isnull=False)
+        .values("ausfuehrung_id")
+        .annotate(hoechste=Max("sequenz"))
+    }
+    weg = WerkbankEreignis.objects.none()
+    for ausf_id, sequenz in juengste.items():
+        weg = weg | WerkbankEreignis.objects.filter(
+            art="lebenszeichen", ausfuehrung_id=ausf_id, sequenz__lt=sequenz
+        )
+    ids = list(weg.values_list("pk", flat=True))
+    op_ids = set(
+        WerkbankEreignis.objects.filter(pk__in=ids)
+        .exclude(operation__isnull=True)
+        .values_list("operation_id", flat=True)
+    )
+    je = {
+        a: WerkbankEreignis.objects.filter(pk__in=ids, ausfuehrung_id=a).count() for a in juengste
+    }
+    ergebnis = {"ereignisse": len(ids), "operationen": len(op_ids), "je_ausfuehrung": je}
+    if not ausfuehren or not ids:
+        return ergebnis
+    with transaction.atomic():
+        for i in range(0, len(ids), 500):
+            WerkbankEreignis.objects.filter(pk__in=ids[i : i + 500]).delete()
+        frei = [
+            o
+            for o in op_ids
+            if not WerkbankEreignis.objects.filter(operation_id=o).exists()
+            and not WerkbankAktion.objects.filter(operation_id=o).exists()
+        ]
+        frei.sort()
+        for i in range(0, len(frei), 500):
+            WerkbankOperation.objects.filter(pk__in=frei[i : i + 500]).delete()
+        ergebnis["operationen"] = len(frei)
+        dienst._ereignis(
+            akteur,
+            projekt=None,
+            objekt_typ="Werkbank",
+            objekt_kennung="Lebenszeichen-Altbestand",
+            ereignis="Lebenszeichen-Altbestand verdichtet",
+            anlass=f"{len(ids)} ältere Lebenszeichen und {len(frei)} Operationsnachweise "
+            f"gelöscht, je Ausführung das jüngste behalten. {anlass}".strip(),
+        )
+    return ergebnis
+
+
 # --- Liegengeblieben und Abweichungen (KIPM-02) ----------------------------------------------
 
 #: Ohne Fortschrittsmeldung so viele Stunden: die Ausführung steht in „Wartet auf dich“.
