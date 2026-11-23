@@ -199,9 +199,9 @@ def test_vorschau_weist_einen_abgelaufenen_oder_widerrufenen_zielzugang_ab(clien
     assert uebernehmen(vorschau_umfeld).status_code == 401
 
 
-def test_pc_pruefrecht_gilt_nur_fuer_das_konfigurierte_projekt(
-    client, vorschau_umfeld, akteur, projekt_b
-):
+def test_pc_zugang_prueft_in_jedem_projekt(client, vorschau_umfeld, akteur, projekt_b):
+    """Früher galt das Prüfrecht eines PC-Zugangs nur im konfigurierten Projekt. Freds Vorgabe vom
+    23.11.2026 (Codex und Claude sehen alles) erlaubt PC-Zugängen die lesende Prüfung überall."""
     auftrag, _, _ = vorschau_umfeld
     quelle, quelle_klartext = dienst.bindung_anlegen(akteur, None, name="Codex PC")
     ziel, ziel_klartext = dienst.bindung_anlegen(akteur, None, name="Claude PC")
@@ -211,7 +211,8 @@ def test_pc_pruefrecht_gilt_nur_fuer_das_konfigurierte_projekt(
     pruefrecht(umfeld)
     anderer = arbeitspaket(akteur, projekt_b)
     fehler, fremd = pruefen(client, (anderer, quelle, ziel))
-    assert fehler and "fehlt das Prüfrecht" in fremd["fehler"]
+    assert not fehler and fremd["uebernehmbar"] is False  # Entwurf: nicht freigegeben
+    assert "NICHT_FREIGEGEBEN" in {g["code"] for g in fremd["sperrgruende"]}
 
     fehler, ergebnis = pruefen(client, umfeld)
     assert not fehler and ergebnis["uebernehmbar"] is True

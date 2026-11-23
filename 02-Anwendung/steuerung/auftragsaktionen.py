@@ -958,7 +958,8 @@ def bearbeiter_danach(v: Aktionsvorschlag) -> dict | None:
 
 
 def aktionen_lesen(akteur: Akteur, projekt) -> dict:
-    """Lese- und Aktionsweg der Vorratsautomation: gültige Vollmachten dieses Zugangs und die
+    """Lese- und Aktionsweg der Vorratsautomation: gültige Vollmachten (PC-Zugänge sehen alle,
+    andere nur die eigenen) und die
     letzten Aktionen im Projekt (vorbereitet, ausgeführt, abgelehnt, veraltet) samt Folgemeldung
     des bisherigen Bearbeiters."""
     dienst._projekt_sichtbar(akteur, projekt)
@@ -967,7 +968,9 @@ def aktionen_lesen(akteur: Akteur, projekt) -> dict:
     ).select_related(
         "ausfuehrende_bindung", "bearbeiter_bindung", "auftrag__projekt", "entscheidung"
     )
-    if akteur.bindung is not None:
+    if akteur.bindung is not None and not akteur.ist_assistent:
+        # PC-Zugänge (Codex, Claude Desktop) sehen alle Vollmachten; ausführen darf nur der
+        # genannte Zugang (mit_vollmacht_ausfuehren).
         vollmachten = vollmachten.filter(ausfuehrende_bindung=akteur.bindung)
     aktionen = Aktionsvorschlag.objects.filter(auftrag__projekt=projekt).select_related(
         "auftrag__projekt", "entscheidung"

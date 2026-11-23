@@ -106,8 +106,8 @@ ANWEISUNGEN = (
     "Melde eigene Fehlprüfungen in fehlgeschlagen und belegte Fremdbefunde mit Modul und Beleg "
     "in fremde_befunde. KI-PM führt je Eigentümermodul ein offenes Sammelissue. Mit "
     "kipm_regelpruefung prüfst du den Bestand ohne Änderungen. "
-    "kipm_uebernahme_pruefen zeigt für eine konfigurierte Zielbindung mit Prüfrecht den "
-    "aktuellen Stand und konkrete Sperren, ohne Übernahme oder Ordnersperre. "
+    "kipm_uebernahme_pruefen zeigt für einen anderen Zugang (Nummer aus kipm_projekt unter "
+    "zugaenge) den aktuellen Stand und konkrete Sperren, ohne Übernahme oder Ordnersperre. "
     "Versionen und Installationen kommen aus GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
@@ -221,7 +221,13 @@ _VERSCHIEBUNG = {
 
 WERKZEUGE = [
     ("kipm_projekte", "Alle Projekte mit Modulen, Arbeitsorten und Zahl offener Aufträge", {}, []),
-    ("kipm_projekt", "Ein Projekt mit Modulen und Arbeitsorten", {}, []),
+    (
+        "kipm_projekt",
+        "Ein Projekt mit Modulen und Arbeitsorten; PC-Zugänge sehen zusätzlich unter zugaenge "
+        "alle gültigen Zugänge mit Nummer und Name (ohne Schlüssel).",
+        {},
+        [],
+    ),
     (
         "kipm_verschiebeziele",
         "Ziele zum Verschieben: alle Projekte, auch archivierte (archiviert=true), mit "
@@ -399,9 +405,11 @@ WERKZEUGE = [
     ),
     (
         "kipm_uebernahme_pruefen",
-        "Eine bestimmte Auftragsrevision für eine konfigurierte Zielbindung rein lesend prüfen. "
-        "Benötigt ausdrückliches Prüfrecht im Projekt. Liefert Prüfzeitpunkt, Revision und "
-        "Sperrgründe. Die eigentliche Übernahme prüft frisch; kein Startrecht aus der Vorschau.",
+        "Eine bestimmte Auftragsrevision rein lesend für einen Zugang prüfen (zielbindung_id aus "
+        "kipm_projekt unter zugaenge): Könnte er sie jetzt übernehmen, und wenn nicht, warum? "
+        "PC-Zugänge dürfen das in jedem Projekt, Projektschlüssel nur mit eingerichtetem "
+        "Prüfrecht. Liefert Prüfzeitpunkt, Revision und Sperrgründe. Die eigentliche Übernahme "
+        "prüft frisch; kein Startrecht aus der Vorschau.",
         {
             "auftrag": _AUFTRAG,
             "revision": {"type": "integer", "minimum": 1},
@@ -481,7 +489,8 @@ WERKZEUGE = [
     ),
     (
         "kipm_aktionen",
-        "Lesen für die Vorratsautomation: gültige Vollmachten dieses Zugangs (nummer, aktion, "
+        "Lesen für die Vorratsautomation: gültige Vollmachten (PC-Zugänge sehen alle; nummer, "
+        "aktion, ausfuehrender_zugang, "
         "bearbeiter, meldungsarten, auftrag, gueltig_bis) und die letzten Aktionen im Projekt mit "
         "zustand (OFFEN = vorbereitet und wartet auf Fred, AUSGEFUEHRT, ABGELEHNT, VERALTET), "
         "vollmacht, nachweis und bearbeiter_danach (erste fachliche Meldung des bisherigen "

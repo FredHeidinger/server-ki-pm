@@ -514,6 +514,21 @@ def projekt_lesen(request: HttpRequest) -> JsonResponse:
             "bindung": request.bindung.name,
             "zugang": request.bindung.art,
             "arbeitsort": request.arbeitsort.kennung if request.arbeitsort else None,
+            # PC-Zugänge sehen alle gültigen Zugänge des Projekts mit Nummer (für
+            # kipm_uebernahme_pruefen); Schlüssel stehen nie in einer Antwort.
+            **(
+                {
+                    "zugaenge": [
+                        {"id": b.pk, "name": b.name, "art": b.art}
+                        for b in ChatBindung.objects.exclude(art=ChatBindung.ART_WERKBANK)
+                        .filter(widerrufen_am__isnull=True)
+                        .order_by("id")
+                        if dienst._chatbindung_im_projekt_gilt(b, p)
+                    ]
+                }
+                if request.akteur.ist_assistent
+                else {}
+            ),
         }
     )
 
