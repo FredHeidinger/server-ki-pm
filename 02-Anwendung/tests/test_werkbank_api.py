@@ -8,6 +8,7 @@ Ereignisarten kommt in WP4/WP5; bis dahin antwortet die API klar „noch nicht v
 import json
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.utils import timezone
@@ -91,6 +92,85 @@ def pc_zugang(akteur):
 
 def kopf(instanz, **mehr):
     return {"HTTP_AUTHORIZATION": f"Bearer {instanz.klartext}"} | KOPF | mehr
+
+
+@pytest.mark.parametrize(
+    ("angebot", "status"),
+    [
+        (["kipm-werkbank/2", "kipm-werkbank/1"], 200),
+        (["kipm-werkbank/2"], 426),
+        ([], 400),
+        (["kipm-werkbank/1", "kipm-werkbank/1"], 400),
+        (["kipm-werkbank/1", ""], 400),
+        (["kipm-werkbank/01"], 400),
+        (["kipm-werkbank/" + "1" * 64], 400),
+        ([f"kipm-werkbank/{i}" for i in range(1, 102)], 400),
+        ([f"kipm-werkbank/{i}" for i in range(1, 101)], 200),
+    ],
+)
+def test_vertragsangebot_liefert_nur_die_gemeinsamen_fassungen(client, instanz, angebot, status):
+    antwort = client.get(
+        "/api/werkbank/faehigkeiten/",
+        {"vertrag": angebot},
+        HTTP_AUTHORIZATION=f"Bearer {instanz.klartext}",
+    )
+    assert antwort.status_code == status
+    if status == 200:
+        assert antwort.json() == {"schema_version": 1, "gemeinsam": ["kipm-werkbank/1"]}
+    else:
+        code = "VERTRAG_INKOMPATIBEL" if status == 426 else "UNGUELTIGE_NACHRICHT"
+        assert antwort.json()["fehler"]["code"] == code
+    instanz.refresh_from_db()
+    assert instanz.letzter_kontakt is None and not WerkbankOperation.objects.exists()
+
+
+def test_vertragsangebot_verlangt_aktiven_werkbankzugang(client, instanz, pc_zugang):
+    url = "/api/werkbank/faehigkeiten/?vertrag=kipm-werkbank/1"
+    assert client.get(url).status_code == 401
+    assert client.get(url, HTTP_AUTHORIZATION=f"Bearer {pc_zugang.klartext}").status_code == 403
+    WerkbankInstanz.objects.filter(pk=instanz.pk).update(aktiv=False)
+    assert client.get(url, HTTP_AUTHORIZATION=f"Bearer {instanz.klartext}").status_code == 401
+
+
+def test_vertragsangebot_startet_keine_operation_und_waehlt_keinen_ersatz(client, instanz):
+    url = "/api/werkbank/faehigkeiten/"
+    auth = {"HTTP_AUTHORIZATION": f"Bearer {instanz.klartext}"}
+    angebot = {"vertrag": "kipm-werkbank/1"}
+    assert client.post(url, angebot, **auth).status_code == 405
+    assert client.get(url, angebot | {"rolle": "review"}, **auth).status_code == 400
+    assert client.get(url, angebot, **kopf(instanz)).status_code == 400
+    assert client.get(url, angebot, **auth)["Cache-Control"] == "no-store"
+    abgewiesen = client.post(
+        BASIS + "uebernehmen/",
+        {},
+        content_type="application/json",
+        **kopf(instanz, HTTP_X_KIPM_VERTRAG="kipm-werkbank/2"),
+    )
+    assert abgewiesen.status_code == 426
+    instanz.refresh_from_db()
+    assert instanz.letzter_kontakt is None
+    assert not WerkbankOperation.objects.exists() and not WerkbankAusfuehrung.objects.exists()
+
+
+@pytest.mark.parametrize(
+    "vektor",
+    json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "vertrag/werkbank-aushandlung-1/vektoren.json"
+        ).read_text(encoding="utf-8")
+    ),
+    ids=lambda v: v["fall"],
+)
+def test_vertragsangebot_vertraegliche_http_vektoren(client, instanz, vektor):
+    antwort = client.get(
+        "/api/werkbank/faehigkeiten/?" + vektor["anfrage"],
+        HTTP_AUTHORIZATION=f"Bearer {instanz.klartext}",
+    )
+    assert antwort.status_code == vektor["status"]
+    if antwort.status_code == 200:
+        assert antwort.json() == vektor["antwort"]
+    else:
+        assert antwort.json()["fehler"]["code"] == vektor["fehlercode"]
 
 
 def quelle(instanz, pb, a, ausf=None):

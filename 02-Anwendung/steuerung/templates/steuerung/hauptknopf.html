@@ -1,6 +1,8 @@
 {% comment %}Der eine Knopf, der den Auftrag weiterbringt; gleich in „Wartet auf dich“ (ort="eingang"), auf der Board-Karte (ort="karte") und im Auftragskopf (ort="kopf"). Kein Knopf möglich: ein Satz, warum und was zu tun ist; auf der Karte nur kurz.{% endcomment %}
 {% if h.art == "freigeben" %}
 <form method="post" action="{% url 'auftrag_aktion' auftrag_id=a.pk aktion='freigeben' %}" class="inline hauptknopf">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><button type="submit" class="knopf{% if ort == 'karte' %} klein{% endif %}">{{ h.text }}</button></form>
+{% elif h.art == "vorschlag" %}
+{% if ort == "karte" %}<p class="kartenhinweis"><a href="{% url 'auftrag_detail' auftrag_id=a.pk %}#vorschlag">{{ h.kurz }}</a></p>{% else %}{% include "steuerung/vorschlag_box.html" %}{% endif %}
 {% elif h.art == "antworten" %}
 {% if ort == "karte" %}
 <details class="hauptknopf kartenantwort"><summary class="knopf klein">{{ h.text }}</summary>

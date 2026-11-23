@@ -3,8 +3,8 @@
 - Anmeldung mit ``Authorization: Bearer kipm_…`` (Chat-Bindung); keine Sitzung, kein CSRF.
 - Jede verändernde Anfrage trägt ``anfrage_kennung``: gleiche Kennung mit gleichem Inhalt
   liefert die gespeicherte Antwort erneut, mit anderem Inhalt wird sie abgewiesen.
-- Jede verändernde Anfrage außer der Arbeit an einem freigegebenen Auftrag trägt ``fred_sagte``:
-  Freds Worte aus dem Chat. Ohne sie wird nichts geändert, mit ihnen stehen sie im Verlauf.
+- Bisherige Änderungen außer der Arbeit am freigegebenen Auftrag tragen ``fred_sagte``.
+  Die expliziten W1-Wege verwenden stattdessen eine gespeicherte, versionsgebundene Erlaubnis.
 - Antworten sind JSON mit ``ok`` und entweder Daten oder ``fehler``.
 """
 
@@ -20,7 +20,17 @@ from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from . import akte, dienst, lieferungen
+from . import (
+    akte,
+    auftragsaktionen,
+    auftragsregeln,
+    dienst,
+    lieferungen,
+    ordnersperren,
+    regelpruefung,
+    uebernahmevorschau,
+    werkbank,
+)
 from .models import (
     AnfrageKennung,
     Arbeitsort,
@@ -40,13 +50,17 @@ def _fehler(status: int, text: str) -> JsonResponse:
     return JsonResponse({"ok": False, "fehler": text}, status=status)
 
 
-def bindung_erforderlich(view):
+def bindung_erforderlich(view=None, *, lesend=False):
+    if view is None:
+        return lambda funktion: bindung_erforderlich(funktion, lesend=lesend)
+
     @wraps(view)
     def innen(request: HttpRequest, *args, **kwargs):
         kopf = request.headers.get("Authorization", "")
         if not kopf.startswith("Bearer "):
             return _fehler(401, "Kein Zugangsschlüssel.")
-        bindung = dienst.bindung_pruefen(kopf[7:])
+        pruefen = dienst.bindung_finden if lesend else dienst.bindung_pruefen
+        bindung = pruefen(kopf[7:])
         if bindung is None and dienst.werkbank_bindung_finden(kopf[7:]) is not None:
             return _fehler(403, dienst.WERKBANK_ABWEISUNG)
         if bindung is None:
@@ -63,6 +77,8 @@ def bindung_erforderlich(view):
         elif bindung.art == bindung.ART_PC and ordner:
             projekt, arbeitsort = dienst.projekt_fuer_ordner(ordner)
             if projekt is None:
+                if lesend:
+                    return _fehler(404, "Nicht gefunden.")
                 dienst.ordner_unbekannt_melden(bindung, ordner)
                 return _fehler(
                     409,
@@ -72,9 +88,15 @@ def bindung_erforderlich(view):
                 )
         request.projekt = projekt
         request.arbeitsort = arbeitsort
-        ChatBindung.objects.filter(pk=bindung.pk).update(
-            letzter_ordner=ordner[:300], letztes_projekt=projekt, letzter_pfad=request.path[:120]
-        )
+        if lesend:
+            if kennung and projekt and kennung != projekt.kennung:
+                return _fehler(404, "Nicht gefunden.")
+        else:
+            ChatBindung.objects.filter(pk=bindung.pk).update(
+                letzter_ordner=ordner[:300],
+                letztes_projekt=projekt,
+                letzter_pfad=request.path[:120],
+            )
         request.akteur = dienst.Akteur.aus_bindung(bindung, projekt=projekt, ordner=ordner)
         return view(request, *args, **kwargs)
 
@@ -242,8 +264,11 @@ def _mit_wiederholungsschutz(view):
         if not kennung or len(kennung) > 80:
             return _fehler(400, "anfrage_kennung fehlt oder ist zu lang (max. 80 Zeichen).")
         inhalt = {k: v for k, v in daten.items() if k != "anfrage_kennung"}
+        hashdaten = {"pfad": request.path, "inhalt": inhalt}
+        if getattr(request, "w1_projekt_id", None) is not None:
+            hashdaten["w1_projekt_id"] = request.w1_projekt_id
         inhalt_hash = hashlib.sha256(
-            json.dumps({"pfad": request.path, "inhalt": inhalt}, sort_keys=True).encode("utf-8")
+            json.dumps(hashdaten, sort_keys=True).encode("utf-8")
         ).hexdigest()
         # Kennung VOR der Ausführung reservieren: eine gleichzeitige Wiederholung trifft auf die
         # Reservierung und wird abgewiesen, statt die Wirkung ein zweites Mal auszulösen.
@@ -287,6 +312,21 @@ def _mit_wiederholungsschutz(view):
 FRED_SAGTE_LAENGE = 500
 
 
+def _fred_akteur(akteur, daten):
+    worte = daten.get("fred_sagte")
+    worte = worte.strip() if isinstance(worte, str) else ""
+    if not worte:
+        raise dienst.DienstFehler(
+            "Frag Fred zuerst. Diese Änderung braucht seine Worte aus dem Chat in "
+            "„fred_sagte“; es wurde nichts geändert."
+        )
+    if len(worte) > FRED_SAGTE_LAENGE:
+        raise dienst.DienstFehler(
+            f"fred_sagte ist zu lang (höchstens {FRED_SAGTE_LAENGE} Zeichen); nichts geändert."
+        )
+    return dataclasses.replace(akteur, fred_sagte=akte._bereinigt(worte))
+
+
 def _fred_bestaetigt(view):
     """Der Chat fragt Fred, bevor er etwas ändert, und nennt dessen Worte in ``fred_sagte``. Steht
     vor dem Wiederholungsschutz: Eine Ablehnung verbraucht keine Kennung, der Chat sendet nach
@@ -296,23 +336,9 @@ def _fred_bestaetigt(view):
     @wraps(view)
     def innen(request: HttpRequest, *args, **kwargs):
         try:
-            daten = _json(request)
+            request.akteur = _fred_akteur(request.akteur, _json(request))
         except dienst.DienstFehler as fehler:
             return _fehler(400, str(fehler))
-        worte = daten.get("fred_sagte")
-        worte = worte.strip() if isinstance(worte, str) else ""
-        if not worte:
-            return _fehler(
-                400,
-                "Frag Fred zuerst. Diese Änderung braucht seine Worte aus dem Chat in "
-                "„fred_sagte“; es wurde nichts geändert.",
-            )
-        if len(worte) > FRED_SAGTE_LAENGE:
-            return _fehler(
-                400,
-                f"fred_sagte ist zu lang (höchstens {FRED_SAGTE_LAENGE} Zeichen); nichts geändert.",
-            )
-        request.akteur = dataclasses.replace(request.akteur, fred_sagte=akte._bereinigt(worte))
         return view(request, *args, **kwargs)
 
     innen.fred_noetig = True
@@ -336,8 +362,17 @@ def _behandeln(fn):
     return innen
 
 
-def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
+def _auftrag_json(auftrag: Auftrag, mit_details: bool = False, *, alle_halter=False) -> dict:
     rev = auftrag.aktuelle_revision
+    sperre = ordnersperren.belegung(ordnersperren.pfadschluessel(rev.arbeitsort))
+    ordnersperre = None
+    if sperre is not None:
+        sichtbar = alle_halter or sperre.auftrag.projekt_id == auftrag.projekt_id
+        ordnersperre = {
+            "auftrag": sperre.auftrag.nummer if sichtbar else None,
+            "halter": sperre.auftrag.bearbeiter_name if sichtbar else None,
+            "ablauf": sperre.ablauf.isoformat(),
+        }
     daten = {
         "nummer": auftrag.nummer,
         "alte_nummer": auftrag.alte_nummer,
@@ -356,7 +391,21 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
         "prioritaet": auftrag.prioritaet,
         "revision": auftrag.revision_nr,
         "bearbeiter": auftrag.bearbeiter_name or None,
-        "uebernehmbar": auftrag.zustand == Auftrag.FREIGEGEBEN and not auftrag.hat_bearbeiter,
+        "ordnersperre": ordnersperre,
+        "kriterien_erfuellt": auftragsregeln.kriterienstand(auftrag),
+        "blockadegrund": "festgefahren" if auftragsregeln.offene_festfahrfrage(auftrag) else None,
+        "nur_mensch": auftragsregeln.menschenschritt(auftrag, rev),
+        "uebernehmbar": (
+            auftrag.zustand == Auftrag.FREIGEGEBEN
+            and not auftrag.hat_bearbeiter
+            and sperre is None
+            and (
+                auftrag.typ != Auftrag.TYP_INTEGRATION
+                or not auftrag.abhaengigkeiten.exclude(
+                    vorgaenger__zustand=Auftrag.ERLEDIGT
+                ).exists()
+            )
+        ),
     }
     if mit_details:
         daten.update(
@@ -387,6 +436,8 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
                 "schreibumfang": rev.muster,
                 "quellen": rev.quellen,
                 "abnahmekriterien": rev.kriterien,
+                "kriterien": auftragsregeln.kriterien_anzeigen(rev),
+                "auftragsregeln": akte.auftragsregeln_stand(auftrag.projekt),
                 "vorgaenger": [
                     {"nummer": a.vorgaenger.nummer, "zustand": a.vorgaenger.zustand}
                     for a in auftrag.abhaengigkeiten.select_related("vorgaenger")
@@ -409,6 +460,19 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False) -> dict:
         )
     if mit_details:
         daten.update(lieferungen.details(auftrag))
+        daten["aktionsvorschlaege"] = [
+            auftragsaktionen.vorschlag_json(v)
+            for v in auftrag.aktionsvorschlaege.select_related("entscheidung")[:10]
+        ]
+        daten["aktion_wartegrund"] = auftragsaktionen.wartegrund(auftrag)
+    if auftrag.chat_delegation_id is not None:
+        daten["w1"] = {
+            "vertrag": W1_VERTRAG,
+            "delegation_id": auftrag.chat_delegation_id,
+            "delegation_revision": auftrag.chat_delegation_revision,
+            "budget": auftrag.chat_budget,
+            "budget_reserviert": auftrag.chat_budget_reserviert,
+        }
     return daten
 
 
@@ -425,6 +489,7 @@ def _ergebnis_json(ergebnis: Ergebnis | None) -> dict | None:
         "pruefungen": ergebnis.pruefungsliste,
         "fehlgeschlagen": ergebnis.fehlgeschlagenliste,
         "luecken": ergebnis.luecken,
+        "fremde_befunde": ergebnis.fremde_befunde,
         "vermerk": "ohne automatische Tests" if ergebnis.ohne_tests else None,
     }
 
@@ -462,6 +527,10 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
     ``?alle=1`` auch abgeschlossene."""
     if request.projekt is None and not request.akteur.ist_assistent:
         raise dienst.KeinZugriff("Nicht gefunden.")
+    modus = request.GET.get("unbeaufsichtigt", "0")
+    if modus not in ("0", "1", "false", "true"):
+        raise dienst.DienstFehler("unbeaufsichtigt muss wahr oder falsch sein.")
+    unbeaufsichtigt = modus in ("1", "true")
     auftraege = dienst.auftraege_fuer_bindung(
         request.bindung,
         request.projekt,
@@ -469,14 +538,22 @@ def meine_auftraege(request: HttpRequest) -> JsonResponse:
         alle=request.GET.get("alle") == "1",
         typ=request.GET.get("art") or None,
     )
-    return JsonResponse(
-        {
-            "ok": True,
-            "projekt": request.projekt.kennung if request.projekt else "alle",
-            "bindung": request.bindung.name,
-            "auftraege": [_auftrag_json(a) for a in auftraege],
-        }
-    )
+    antwort = {
+        "ok": True,
+        "projekt": request.projekt.kennung if request.projekt else "alle",
+        "bindung": request.bindung.name,
+        "auftraege": [],
+    }
+    if unbeaufsichtigt:
+        antwort["wartet_auf_fred"] = []
+    for auftrag in auftraege:
+        eintrag = _auftrag_json(auftrag, alle_halter=request.akteur.ist_assistent)
+        if unbeaufsichtigt and eintrag["nur_mensch"] and not auftrag.ist_endzustand:
+            eintrag["uebernehmbar"] = False
+            antwort["wartet_auf_fred"].append(eintrag)
+        else:
+            antwort["auftraege"].append(eintrag)
+    return JsonResponse(antwort)
 
 
 @csrf_exempt
@@ -501,7 +578,7 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
     prioritaet = str(daten.get("prioritaet") or "mittel")
     if prioritaet not in dict(Auftrag.PRIO):
         raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
-    planung = {feld: _liste(daten[feld]) for feld in PLANFELDER if feld in daten}
+    planung = {feld: _planwert(feld, daten[feld]) for feld in PLANFELDER if feld in daten}
     planung.pop("beschreibung", None)
     if daten.get("arbeitsort"):
         planung["arbeitsort"] = _nach_kennung(
@@ -520,6 +597,7 @@ def auftrag_anlegen(request: HttpRequest, daten: dict) -> JsonResponse:
         freigeben=bool(daten.get("freigeben", False)),
         meilenstein=_meilenstein(projekt, daten.get("meilenstein")),
         faellig=daten.get("faellig"),
+        nur_mensch=daten.get("nur_mensch", False),
     )
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)}, status=201
@@ -596,7 +674,14 @@ def _meilenstein(projekt: Projekt, wert) -> Meilenstein | None:
 @_behandeln
 def auftrag_lesen(request: HttpRequest, auftrag_id: int) -> JsonResponse:
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
-    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
+    return JsonResponse(
+        {
+            "ok": True,
+            "auftrag": _auftrag_json(
+                auftrag, mit_details=True, alle_halter=request.akteur.ist_assistent
+            ),
+        }
+    )
 
 
 def _revision(daten: dict) -> int:
@@ -607,13 +692,56 @@ def _revision(daten: dict) -> int:
 
 
 @csrf_exempt
+@require_GET
+@bindung_erforderlich(lesend=True)
+@_behandeln
+def uebernahme_pruefen(request: HttpRequest, auftrag_id: int) -> JsonResponse:
+    felder = ("revision", "zielbindung_id", "unbeaufsichtigt")
+    if any(len(request.GET.getlist(feld)) != 1 for feld in felder):
+        raise dienst.DienstFehler(
+            "revision, zielbindung_id und unbeaufsichtigt genau einmal angeben."
+        )
+    try:
+        revision, zielbindung_id = (int(request.GET[feld]) for feld in felder[:2])
+    except ValueError as fehler:
+        raise dienst.DienstFehler(
+            "revision und zielbindung_id müssen positive Ganzzahlen sein."
+        ) from fehler
+    if any(not 1 <= wert <= 2**63 - 1 for wert in (revision, zielbindung_id)):
+        raise dienst.DienstFehler("revision und zielbindung_id müssen positive Ganzzahlen sein.")
+    unbeaufsichtigt = request.GET["unbeaufsichtigt"]
+    if unbeaufsichtigt not in ("true", "false"):
+        raise dienst.DienstFehler("unbeaufsichtigt muss wahr oder falsch sein.")
+    return JsonResponse(
+        uebernahmevorschau.pruefen(
+            request.akteur,
+            _akte_projekt(request),
+            auftrag_id,
+            revision,
+            zielbindung_id,
+            unbeaufsichtigt == "true",
+        )
+    )
+
+
+@csrf_exempt
 @require_POST
 @bindung_erforderlich
 @_mit_wiederholungsschutz
 @_behandeln
 def uebernehmen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
-    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
-    auftrag = dienst.auftrag_uebernehmen(request.akteur, auftrag, _revision(daten))
+    akteur = request.akteur
+    auftrag = dienst.auftrag_holen(akteur, auftrag_id)
+    ersetzen = daten.get("ordnersperre_uebernehmen", False)
+    if ersetzen is True and akteur.ist_assistent:
+        akteur = _fred_akteur(akteur, daten)
+    auftrag = dienst.auftrag_uebernehmen(
+        akteur,
+        auftrag,
+        _revision(daten),
+        unbeaufsichtigt=daten.get("unbeaufsichtigt", False),
+        ordnersperre_uebernehmen=ersetzen,
+    )
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
 
 
@@ -624,7 +752,17 @@ def uebernehmen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonRespo
 @_behandeln
 def fortschritt(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
-    dienst.fortschritt_melden(request.akteur, auftrag, _revision(daten), str(daten.get("text", "")))
+    kriterien = daten.get("kriterien_erfuellt")
+    if "kriterien_erfuellt" in daten and kriterien is None:
+        raise dienst.DienstFehler("kriterien_erfuellt muss eine Liste sein.")
+    dienst.fortschritt_melden(
+        request.akteur,
+        auftrag,
+        _revision(daten),
+        str(daten.get("text", "")),
+        kriterien_erfuellt=kriterien,
+    )
+    auftrag.refresh_from_db()
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag)})
 
 
@@ -679,6 +817,12 @@ def _liste(wert) -> str:
     return str(wert or "")
 
 
+def _planwert(feld, wert):
+    if feld == "abnahmekriterien" and wert is not None:
+        return wert
+    return _liste(wert)
+
+
 @csrf_exempt
 @require_POST
 @bindung_erforderlich
@@ -688,6 +832,8 @@ def ergebnis(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse
     """Bestandene Prüfungen → erledigt, eine fehlgeschlagene → blockiert, keine → erledigt mit
     Vermerk „ohne automatische Tests“."""
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    if "fremde_befunde" in daten and not isinstance(daten["fremde_befunde"], list):
+        raise dienst.DienstFehler("fremde_befunde muss eine Liste sein.")
     e = dienst.ergebnis_einreichen(
         request.akteur,
         auftrag,
@@ -697,6 +843,7 @@ def ergebnis(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse
         pruefungen=_liste(daten.get("pruefungen")),
         fehlgeschlagen=_liste(daten.get("fehlgeschlagen")),
         luecken=str(daten.get("luecken", "")),
+        fremde_befunde=daten.get("fremde_befunde"),
     )
     return JsonResponse(
         {"ok": True, "auftrag": _auftrag_json(auftrag), "ergebnis": _ergebnis_json(e)}
@@ -1104,12 +1251,14 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     ``freigeben`` gibt der Assistent danach auf Freds Anweisung im Chat frei; scheitert die
     Freigabeprüfung, bleibt auch die Planung unverändert. Trennt die neue Revision technische
     Lieferketten, braucht es ``lieferketten_bestaetigt=true`` (sonst 409 mit den Ketten)."""
+    if "nur_mensch" in daten and type(daten["nur_mensch"]) is not bool:
+        raise dienst.DienstFehler("nur_mensch muss wahr oder falsch sein.")
     auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
     rev = auftrag.aktuelle_revision
     werte = {feld: getattr(rev, feld) for feld in PLANFELDER}
     for feld in PLANFELDER:
         if feld in daten:
-            werte[feld] = _liste(daten[feld])
+            werte[feld] = _planwert(feld, daten[feld])
     modul = auftrag.modul
     if "modul" in daten:
         modul = _nach_kennung(Modul, auftrag.projekt, daten["modul"], "Modul")
@@ -1132,8 +1281,11 @@ def planen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
                 anlass=str(daten.get("anlass") or "Geplant durch KI-Assistent"),
                 typ=str(daten["art"]) if daten.get("art") else None,
                 lieferketten_bestaetigt=daten.get("lieferketten_bestaetigt") is True,
+                nur_mensch=daten.get("nur_mensch"),
                 **werte,
             )
+        elif "meilenstein" in daten or "faellig" in daten:
+            dienst.auftragskreis_pruefen(auftrag)
         if "meilenstein" in daten:
             dienst.meilenstein_zuordnen(request.akteur, auftrag, meilenstein)
         if "faellig" in daten:
@@ -1163,6 +1315,86 @@ def antworten(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonRespons
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
 
 
+PLAN_UND_FREIGABE = (*auftragsaktionen.PLANFELDER, "freigeben")
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def aktion_vorschlagen(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Planung bereitet eine Aktion am Auftrag zur Bestätigung durch Fred vor (Wiederaufnahme
+    oder Neuschnitt). Ändert am Auftrag nichts; darum ohne ``fred_sagte``, wie eine offene Frage.
+    Bestätigen kann nur Fred selbst in der Oberfläche; dafür gibt es hier keinen Weg."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    entscheidung = None
+    if daten.get("entscheidung"):
+        nr = str(daten["entscheidung"]).strip().upper().removeprefix("E-")
+        if not nr.isdigit():
+            raise dienst.DienstFehler(f"Ungültige Entscheidung: {daten['entscheidung']}")
+        entscheidung = akte.entscheidung_holen(request.akteur, auftrag.projekt, int(nr))
+    plan = {k: daten[k] for k in PLAN_UND_FREIGABE if k in daten and daten[k] is not None}
+    meldung_id = daten.get("meldung_id")
+    if meldung_id is not None and type(meldung_id) is not int:
+        raise dienst.DienstFehler("meldung_id muss eine ganze Zahl sein.")
+    v = auftragsaktionen.vorschlagen(
+        request.akteur,
+        auftrag,
+        art=str(daten.get("art", "")),
+        revision=daten.get("revision"),
+        meldung_id=meldung_id,
+        text=str(daten.get("text", "")),
+        entscheidung=entscheidung,
+        plan=plan or None,
+    )
+    return JsonResponse(
+        {"ok": True, "vorschlag": auftragsaktionen.vorschlag_json(v, mit_auswirkungen=True)}
+    )
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
+def aktionen(request: HttpRequest) -> JsonResponse:
+    """Lese- und Aktionsweg der Vorratsautomation: gültige Vollmachten des Zugangs und die
+    letzten Aktionen des Projekts mit Folgemeldung des Bearbeiters
+    (01-Planung/AKTIONSVOLLMACHT.md)."""
+    projekt = _akte_projekt(request)
+    return JsonResponse({"ok": True, **auftragsaktionen.aktionen_lesen(request.akteur, projekt)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def aktion_mit_vollmacht(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
+    """Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen. Die Befugnis kommt
+    allein aus der Vollmacht, nie aus Chattext; darum ohne ``fred_sagte``."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    v, wiederholt = auftragsaktionen.mit_vollmacht_ausfuehren(
+        request.akteur,
+        auftrag,
+        vollmacht=daten.get("vollmacht"),
+        aktion=str(daten.get("aktion", "")),
+        revision=daten.get("revision"),
+        meldung_id=daten.get("meldung_id"),
+        nachweis=daten.get("nachweis"),
+        text=str(daten.get("text", "")),
+    )
+    auftrag.refresh_from_db()
+    return JsonResponse(
+        {
+            "ok": True,
+            "wiederholt": wiederholt,
+            "aktion": auftragsaktionen.vorschlag_json(v),
+            "auftrag": _auftrag_json(auftrag, mit_details=True),
+        }
+    )
+
+
 # --- Projektakte: lesen, Kontext, Texte ----------------------------------------------------------
 
 
@@ -1170,6 +1402,14 @@ def _akte_projekt(request: HttpRequest) -> Projekt:
     projekt = _projekt_noetig(request)
     dienst._projekt_sichtbar(request.akteur, projekt)
     return projekt
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich(lesend=True)
+@_behandeln
+def projekt_regelpruefung(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(regelpruefung.projekt_pruefen(_akte_projekt(request)))
 
 
 def _zeit(wert) -> str | None:
@@ -1472,4 +1712,206 @@ def lieferung_melden(request, daten, auftrag_id):
             "lieferung": {"nummer": lieferung.pk, "inhalt_sha256": lieferung.inhalt_sha256},
             "auftrag": _auftrag_json(auftrag, mit_details=True),
         }
+    )
+
+
+# --- Drei Wege: explizite W1-Delegation ---
+
+W1_VERTRAG = "kipm-chat-delegation/1"
+
+
+def _w1_anfrage(view):
+    @wraps(view)
+    def innen(request, *args, **kwargs):
+        # Rahmen, Wiederholungsnachweis und Wirkung teilen die Schreibtransaktion.
+        with transaction.atomic():
+            b = ChatBindung.objects.get(pk=request.bindung.pk)
+            if not b.aktiv:
+                raise dienst.KeinZugriff("Der Chat-Zugang ist nicht mehr aktiv.")
+            daten = _json(request)
+            if daten.get("vertrag") != W1_VERTRAG:
+                raise dienst.DienstFehler(f"Dieser Zugang verlangt den Vertrag {W1_VERTRAG}.")
+            nonce = daten.get("anfrage_kennung")
+            if not isinstance(nonce, str) or not 1 <= len(nonce.strip()) <= 80:
+                raise dienst.DienstFehler(
+                    "W1 braucht eine eigene anfrage_kennung mit 1–80 Zeichen."
+                )
+            request.w1_projekt_id = _projekt_noetig(request).pk
+            return view(request, *args, **kwargs)
+
+    innen.w1_delegiert = True
+    return innen
+
+
+@csrf_exempt
+@require_GET
+@bindung_erforderlich
+@_behandeln
+def erlaubnisse(request):
+    projekt = _projekt_noetig(request)
+    return JsonResponse(
+        {
+            "ok": True,
+            "vertrag": W1_VERTRAG,
+            "erlaubnisse": werkbank.delegation_sichten(request.akteur, projekt),
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_behandeln
+@_w1_anfrage
+@_mit_wiederholungsschutz
+@_behandeln
+def w1_auftrag_anlegen(request, daten):
+    projekt = _projekt_noetig(request)
+    erlaubt = {
+        "vertrag",
+        "anfrage_kennung",
+        "delegation_id",
+        "delegation_revision",
+        "budget",
+        "ziel_id",
+        "zuweisen",
+        "freigeben",
+        "titel",
+        "beschreibung",
+        "modul",
+        "prioritaet",
+        "erzwingen",
+        "art",
+        "meilenstein",
+        "faellig",
+        "arbeitsort",
+        *PLANFELDER,
+    }
+    if set(daten) - erlaubt:
+        raise dienst.DienstFehler("Unbekannte Felder im W1-Auftrag; Chattext erteilt keine Rechte.")
+    for feld in (
+        "titel",
+        "beschreibung",
+        "modul",
+        "prioritaet",
+        "art",
+        "arbeitsort",
+        "meilenstein",
+        "faellig",
+    ):
+        if feld in daten and not isinstance(daten[feld], str):
+            raise dienst.DienstFehler(f"{feld} muss Text sein.")
+    for feld in set(PLANFELDER) - {"beschreibung"}:
+        if feld in daten and not (
+            isinstance(daten[feld], str)
+            or isinstance(daten[feld], list)
+            and all(isinstance(v, str) for v in daten[feld])
+        ):
+            raise dienst.DienstFehler(f"{feld} muss Text oder eine Liste von Texten sein.")
+    prioritaet = daten.get("prioritaet", "mittel")
+    if prioritaet not in dict(Auftrag.PRIO):
+        raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
+    if type(daten.get("erzwingen", False)) is not bool:
+        raise dienst.DienstFehler("erzwingen muss wahr oder falsch sein.")
+    modul = _nach_kennung(Modul, projekt, daten["modul"], "Modul") if daten.get("modul") else None
+    planung = {k: _liste(daten[k]) for k in PLANFELDER if k in daten}
+    planung.pop("beschreibung", None)
+    if daten.get("arbeitsort"):
+        planung["arbeitsort"] = _nach_kennung(
+            Arbeitsort, projekt, daten["arbeitsort"], "Arbeitsort"
+        )
+    a = werkbank.delegation_auftrag_anlegen(
+        request.akteur,
+        projekt,
+        delegation_id=daten.get("delegation_id"),
+        revision=daten.get("delegation_revision"),
+        budget=daten.get("budget"),
+        ziel_id=daten.get("ziel_id"),
+        zuweisen=daten.get("zuweisen", True),
+        freigeben=daten.get("freigeben", False),
+        planung=planung,
+        titel=str(daten.get("titel", "")),
+        beschreibung=str(daten.get("beschreibung", "")),
+        modul=modul,
+        prioritaet=prioritaet,
+        typ=daten.get("art", Auftrag.TYP_AUFTRAG),
+        erzwingen=daten.get("erzwingen", False),
+        meilenstein=_meilenstein(projekt, daten.get("meilenstein")),
+        faellig=daten.get("faellig"),
+    )
+    return JsonResponse(
+        {"ok": True, "vertrag": W1_VERTRAG, "auftrag": _auftrag_json(a, mit_details=True)},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_behandeln
+@_w1_anfrage
+@_mit_wiederholungsschutz
+@_behandeln
+def w1_auftrag_aktion(request, daten, auftrag_id):
+    projekt = _projekt_noetig(request)
+    a = dienst.auftrag_holen(request.akteur, auftrag_id)
+    if a.projekt_id != projekt.pk:
+        raise dienst.KeinZugriff("Nicht gefunden.")
+    felder = {
+        "titel",
+        "beschreibung",
+        "ziel",
+        "nicht_ziele",
+        "schreibumfang",
+        "quellen",
+        "abnahmekriterien",
+        "arbeitsort",
+        "prioritaet",
+        "modul",
+        "anlass",
+    }
+    erlaubt = {
+        "vertrag",
+        "anfrage_kennung",
+        "delegation_id",
+        "delegation_revision",
+        "auftrag_revision",
+        "aktion",
+        "ziel_id",
+        *felder,
+    }
+    if set(daten) - erlaubt:
+        raise dienst.DienstFehler("Unbekannte Felder in der W1-Aktion.")
+    aktion = daten.get("aktion")
+    if not isinstance(aktion, str):
+        raise dienst.DienstFehler("Die W1-Aktion fehlt.")
+    if aktion != "auftrag_aendern" and set(daten) & felder:
+        raise dienst.DienstFehler("Planungsfelder gehören ausschließlich zu auftrag_aendern.")
+    werte = {}
+    for feld in felder & set(daten):
+        wert = daten[feld]
+        if feld in ("schreibumfang", "abnahmekriterien") and isinstance(wert, list):
+            if not all(isinstance(v, str) for v in wert):
+                raise dienst.DienstFehler(f"{feld} muss eine Liste von Texten sein.")
+            wert = _liste(wert)
+        if not isinstance(wert, str):
+            raise dienst.DienstFehler(f"{feld} muss Text sein.")
+        werte[feld] = wert
+    if "prioritaet" in werte and werte["prioritaet"] not in dict(Auftrag.PRIO):
+        raise dienst.DienstFehler("prioritaet muss hoch, mittel oder niedrig sein.")
+    for feld, modell, wort in (("arbeitsort", Arbeitsort, "Arbeitsort"), ("modul", Modul, "Modul")):
+        if feld in werte:
+            werte[feld] = _nach_kennung(modell, projekt, werte[feld], wort) if werte[feld] else None
+    a = werkbank.delegation_auftrag_aktion(
+        request.akteur,
+        a,
+        delegation_id=daten.get("delegation_id"),
+        revision=daten.get("delegation_revision"),
+        auftrag_revision=daten.get("auftrag_revision"),
+        aktion=aktion,
+        ziel_id=daten.get("ziel_id"),
+        werte=werte,
+    )
+    return JsonResponse(
+        {"ok": True, "vertrag": W1_VERTRAG, "auftrag": _auftrag_json(a, mit_details=True)}
     )

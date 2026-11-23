@@ -58,6 +58,50 @@ def _warten(chat, verbraucher, quelle, **extra):
     )
 
 
+def test_vorgaenger_sperrt_kreis_mit_bestehendem_lieferbedarf(paar, akteur):
+    chat, anbieter, verbraucher = paar
+    _warten(chat, verbraucher, anbieter)
+    weg = f"{anbieter.nummer} -> {verbraucher.nummer} -> {anbieter.nummer}"
+    with pytest.raises(dienst.DienstFehler, match=weg):
+        dienst.vorgaenger_eintragen(akteur, anbieter, verbraucher)
+    assert not anbieter.abhaengigkeiten.exists()
+
+
+def test_lieferbedarf_festlegen_nennt_gemischten_kreisweg(paar, akteur):
+    from steuerung import lieferungen
+
+    chat, anbieter, verbraucher = paar
+    dienst.vorgaenger_eintragen(akteur, anbieter, verbraucher)
+    hindernis = dienst._meldung(
+        chat,
+        verbraucher,
+        verbraucher.revision_nr,
+        Meldung.HINDERNIS,
+        "Anschluss fehlt",
+        "Blockiert",
+        neuer_zustand=Auftrag.BLOCKIERT,
+    )
+    weg = f"{verbraucher.nummer} -> {anbieter.nummer} -> {verbraucher.nummer}"
+    with pytest.raises(dienst.DienstFehler, match=weg):
+        lieferungen.festlegen(
+            akteur,
+            verbraucher,
+            verbraucher.revision_nr,
+            bedarf=_bedarf(anbieter),
+            nur_lieferungen=True,
+            hindernis_id=hindernis.pk,
+        )
+    assert not hindernis.lieferbedarf.exists()
+
+
+def test_vorgaenger_und_lieferbedarf_ohne_kreis_bleiben_moeglich(paar, akteur, projekt):
+    chat, anbieter, verbraucher = paar
+    dritter = arbeitspaket(akteur, projekt, titel="Dritter Anschluss", umfang="dritter/**")
+    _warten(chat, verbraucher, anbieter)
+    dienst.vorgaenger_eintragen(akteur, anbieter, dritter)
+    assert anbieter.abhaengigkeiten.filter(vorgaenger=dritter).exists()
+
+
 def _liefern(chat, quelle, **extra):
     from steuerung import lieferungen
 

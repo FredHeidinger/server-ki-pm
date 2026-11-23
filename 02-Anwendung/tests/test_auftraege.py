@@ -6,10 +6,42 @@ import pytest
 from django.db import connection
 
 from steuerung import dienst
-from steuerung.models import Auftrag, Ereignis, Meldung
+from steuerung.models import Abhaengigkeit, Auftrag, Ereignis, Meldung
 from tests.conftest import arbeitspaket
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.parametrize("aktion", ["planen", "freigeben"])
+def test_bestandskreis_sperrt_naechste_planung_und_freigabe(akteur, projekt, aktion):
+    a = arbeitspaket(akteur, projekt, titel="Erster Altauftrag", umfang="eins/**")
+    b = arbeitspaket(akteur, projekt, titel="Zweiter Altauftrag", umfang="zwei/**")
+    Abhaengigkeit.objects.create(auftrag=a, vorgaenger=b)
+    Abhaengigkeit.objects.create(auftrag=b, vorgaenger=a)
+    stand = a.revision_nr
+    weg = f"{a.nummer} -> {b.nummer} -> {a.nummer}"
+
+    with pytest.raises(dienst.DienstFehler, match=weg):
+        if aktion == "freigeben":
+            dienst.auftrag_freigeben(akteur, a)
+        else:
+            rev = a.aktuelle_revision
+            dienst.auftrag_bearbeiten(
+                akteur,
+                a,
+                titel="Plan überarbeitet",
+                beschreibung=rev.beschreibung,
+                ziel=rev.ziel,
+                nicht_ziele=rev.nicht_ziele,
+                arbeitsort=rev.arbeitsort,
+                schreibumfang=rev.schreibumfang,
+                quellen=rev.quellen,
+                abnahmekriterien=rev.abnahmekriterien,
+                prioritaet=a.prioritaet,
+                modul=a.modul,
+            )
+    a.refresh_from_db()
+    assert a.revision_nr == stand and a.zustand == Auftrag.ENTWURF
 
 
 def test_wunsch_ist_entwurf_und_unvollstaendig(akteur, projekt):

@@ -17,6 +17,7 @@ TABELLEN = (
     "arbeitsort",
     "chatbindung",
     "ordneranfrage",
+    "uebernahmepruefrecht",
     "anfragekennung",
     "auftrag",
     "revision",
@@ -25,6 +26,8 @@ TABELLEN = (
     "meldung",
     "lieferung",
     "lieferbedarf",
+    "aktionsvorschlag",
+    "aktionsvollmacht",
     "ergebnis",
     "pruefung",
     "kriteriumsbewertung",
@@ -56,6 +59,8 @@ TABELLEN = (
     "werkbankaktion",
     "werkbankoperation",
     "werkbankereignis",
+    "werkbankchatdelegation",
+    "werkbankchatdelegationsfassung",
 )
 NUR_ANHAENGEND = {"ereignis", "meldung"}
 

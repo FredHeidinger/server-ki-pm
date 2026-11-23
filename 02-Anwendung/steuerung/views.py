@@ -21,9 +21,12 @@ from django.views.decorators.http import require_POST
 from . import (
     abgleich,
     akte,
+    auftragsaktionen,
     dienst,
     lieferungen,
+    ordnersperren,
     sicherung,
+    views_delegation,
     views_werkbank,
     werkbank,
     werkbank_lauf,
@@ -40,6 +43,7 @@ from .forms import (
 )
 from .kontext import modulwahl
 from .models import (
+    Aktionsvorschlag,
     Arbeitsort,
     Auftrag,
     ChatBindung,
@@ -259,10 +263,25 @@ def _werkbank_hauptaktion(auftrag: Auftrag) -> dict:
     return {"art": "hinweis", "satz": satz, "kurz": "", "ziel": ziel}
 
 
-def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
+def _ordnerwartehinweis(auftrag: Auftrag) -> str:
+    if auftrag.zustand != Auftrag.FREIGEGEBEN or auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT:
+        return ""
+    sperre = ordnersperren.fremde_belegung(auftrag)
+    if sperre is None:
+        return ""
+    halter = (
+        sperre.auftrag.nummer
+        if sperre.auftrag.projekt_id == auftrag.projekt_id
+        else "einen Auftrag in einem anderen Projekt"
+    )
+    return f"Freigegeben – wartet auf {halter}"
+
+
+def hauptaktion(auftrag: Auftrag, pruefpunkte=None, *, mit_wirkung: bool = True) -> dict:
     """Der eine Knopf, der den Auftrag jetzt weiterbringt; gleich in „Wartet auf dich“, auf der
     Board-Karte und im Auftragskopf. Ohne möglichen Knopf ein Satz: warum und was zu tun ist
-    (``kurz`` für die Karte)."""
+    (``kurz`` für die Karte). Ein offener Aktionsvorschlag der Planung geht vor: Fred sieht seine
+    Auswirkungen und bestätigt oder lehnt ab (die Karte zeigt nur den Hinweis)."""
     z = auftrag.zustand
     if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK and z in (
         Auftrag.IN_ARBEIT,
@@ -270,6 +289,15 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
         Auftrag.FREIGEGEBEN,
     ):
         return _werkbank_hauptaktion(auftrag)
+    vorschlag = auftragsaktionen.offener_vorschlag(auftrag)
+    if vorschlag is not None:
+        return {
+            "art": "vorschlag",
+            "text": "Bestätigen und ausführen",
+            "kurz": "Vorschlag zur Bestätigung",
+            "vorschlag": vorschlag,
+            "wirkung": auftragsaktionen.auswirkungen(vorschlag) if mit_wirkung else None,
+        }
     if z == Auftrag.BLOCKIERT:
         frage = auftrag.meldungen.filter(art__in=Meldung.BLOCKIERENDE, historisch=False).first()
         bedarf = lieferungen.offener_bedarf(auftrag)
@@ -335,6 +363,9 @@ def hauptaktion(auftrag: Auftrag, pruefpunkte=None) -> dict:
             satz = f"{satz} {termin}"
         kurz = "Chat beendet" if still["beendet"] else "keine Meldung"
         return {"art": "hinweis", "satz": satz, "kurz": kurz}
+    if wartehinweis := _ordnerwartehinweis(auftrag):
+        satz = f"{wartehinweis}. {termin}" if dienst.ist_faellig(auftrag) else wartehinweis
+        return {"art": "hinweis", "satz": satz, "kurz": wartehinweis}
     if dienst.ist_faellig(auftrag):
         # Vor „nichts zu tun“: Ein fälliger Eintrag bleibt in „Wartet auf dich“.
         return {"art": "hinweis", "satz": termin, "kurz": ""}
@@ -395,7 +426,7 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
     if ansicht == "board":
         alle = list(liste)
         for a in alle:
-            a.haupt = hauptaktion(a)
+            a.haupt = hauptaktion(a, mit_wirkung=False)
         kontext["spalten"] = _spalten(alle)
         kontext["zaehlleiste"] = [
             (s["titel"], len(s["karten"]), s["klasse"])
@@ -420,7 +451,7 @@ def _auftragsliste(request: HttpRequest, liste, vorlage: str, kontext: dict) -> 
         stufe = _reifegrad(a)
         if reifegrad and not stufe.startswith(reifegrad):
             continue
-        zeilen.append({"a": a, "reifegrad": stufe})
+        zeilen.append({"a": a, "reifegrad": stufe, "ordnerwartehinweis": _ordnerwartehinweis(a)})
     kontext.update(
         {
             "zeilen": zeilen,
@@ -1173,6 +1204,31 @@ def antwort(request: HttpRequest, auftrag_id: int) -> HttpResponse:
 
 
 @login_required
+@require_POST
+def vorschlag_entscheiden(request: HttpRequest, vorschlag_id: int, wahl: str) -> HttpResponse:
+    """Fred bestätigt (und KI-PM führt sofort aus) oder lehnt einen Aktionsvorschlag ab."""
+    v = get_object_or_404(Aktionsvorschlag.objects.select_related("auftrag"), pk=vorschlag_id)
+    akteur = _akteur(request)
+    try:
+        if wahl == "bestaetigen":
+            v = auftragsaktionen.bestaetigen(akteur, v, pruefcode=request.POST.get("pruefcode", ""))
+            v.auftrag.refresh_from_db()
+            messages.success(
+                request,
+                f"{v.nummer} ({v.get_art_display()}) bestätigt und ausgeführt: {v.auftrag.nummer} "
+                f"ist jetzt {v.auftrag.get_zustand_display()} (Revision {v.ergebnis_revision}).",
+            )
+        elif wahl == "ablehnen":
+            auftragsaktionen.ablehnen(akteur, v, request.POST.get("grund", ""))
+            messages.success(request, f"{v.nummer} abgelehnt; am Auftrag ändert sich nichts.")
+        else:
+            raise Http404
+    except dienst.DienstFehler as fehler:
+        _fehler_anzeigen(request, fehler)
+    return _zurueck(request, f"/auftraege/{v.auftrag_id}/")
+
+
+@login_required
 def eigenes_ergebnis(request: HttpRequest, auftrag_id: int) -> HttpResponse:
     auftrag = _auftrag_oder_404(auftrag_id)
     form = EigenesErgebnisForm(
@@ -1272,6 +1328,7 @@ def verbindungen(request: HttpRequest) -> HttpResponse:
             "github": abgleich.zugang_anzeige(_akteur(request)),
             "github_form": GitHubSchluesselForm(prefix="g"),
             **views_werkbank.verwaltung(request),
+            **views_delegation.verwaltung(request),
             **_zugaenge(ChatBindung.objects.exclude(art=ChatBindung.ART_WERKBANK)),
         },
     )

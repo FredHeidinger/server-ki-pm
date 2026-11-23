@@ -7,17 +7,19 @@ import re
 from django.db import transaction
 from django.db.models import F, Max
 
-from . import dienst
-from .models import Abhaengigkeit, Auftrag, Lieferbedarf, Lieferung, Meldung
+from . import auftragsregeln, dienst, ordnersperren
+from .models import Auftrag, Lieferbedarf, Lieferung, Meldung
 
 
-def _aktuell(akteur, auftrag, revision):
+def _aktuell(akteur, auftrag, revision, *, entwurf_erlaubt=False):
     aktuell = Auftrag.objects.select_related("projekt").get(pk=auftrag.pk)
     dienst._projekt_sichtbar(akteur, aktuell.projekt)
     if type(revision) is not int or revision != aktuell.revision_nr:
         raise dienst.Konflikt("Veraltete Auftragsrevision.")
     if not aktuell.projekt.aktiv or aktuell.ausfuehrungsweg != Auftrag.WEG_CHAT:
         raise dienst.Konflikt("Lieferautomatik gilt nur für aktive Chat-Aufträge.")
+    if entwurf_erlaubt and aktuell.zustand == Auftrag.ENTWURF:
+        return aktuell
     if not aktuell.hat_bearbeiter or aktuell.uebernommene_revision != revision:
         raise dienst.Konflikt("Keine gültige Übernahme dieser Revision.")
     if aktuell.zustand not in Auftrag.BEARBEITER_ZUSTAENDE:
@@ -191,30 +193,6 @@ def warnung_antworten(ketten):
     )
 
 
-def _kreis(auftrag, quelle):
-    offen, gesehen = {quelle.pk}, set()
-    while offen:
-        if auftrag.pk in offen:
-            raise dienst.DienstFehler("Der Lieferbedarf würde einen Abhängigkeitskreis erzeugen.")
-        gesehen |= offen
-        vorgaenger = set(
-            Abhaengigkeit.objects.filter(auftrag_id__in=offen)
-            .exclude(vorgaenger__zustand__in=Auftrag.ENDZUSTAENDE)
-            .values_list("vorgaenger_id", flat=True)
-        )
-        bedarfe = Lieferbedarf.objects.filter(
-            meldung__auftrag_id__in=offen,
-            meldung__auftrag__zustand=Auftrag.BLOCKIERT,
-            meldung__revision_nr=F("meldung__auftrag__revision_nr"),
-            erfuellt_durch__isnull=True,
-        ).select_related("meldung__auftrag")
-        for bedarf in bedarfe:
-            aktuell = _blocker(bedarf.meldung.auftrag)
-            if aktuell and aktuell.pk == bedarf.meldung_id:
-                vorgaenger.add(bedarf.lieferauftrag_id)
-        offen = vorgaenger - gesehen
-
-
 def _bedarf_pruefen(akteur, auftrag, bedarf):
     if not isinstance(bedarf, list) or not 1 <= len(bedarf) <= 20:
         raise dienst.DienstFehler("Lieferbedarf braucht 1 bis 20 konkrete Lieferungen.")
@@ -266,7 +244,9 @@ def _bedarf_pruefen(akteur, auftrag, bedarf):
         if ident in eindeutig:
             raise dienst.DienstFehler("Doppelter Lieferbedarf.")
         eindeutig.add(ident)
-        _kreis(auftrag, quelle)
+        weg = auftragsregeln.kreisweg(auftrag, quelle)
+        if weg:
+            raise dienst.DienstFehler(f"Der Lieferbedarf erzeugt einen Abhängigkeitskreis ({weg}).")
         geprueft.append((quelle, revision, lieferkennung, nach))
     return geprueft
 
@@ -341,7 +321,8 @@ def _registrieren(akteur, auftrag, meldung, geprueft, *, neu_binden=False):
             ereignis="Technischen Lieferbedarf registriert",
             revision=str(auftrag.revision_nr),
         )
-    _freisetzen(akteur, meldung)
+    if meldung.art != Meldung.LIEFERPLAN:
+        _freisetzen(akteur, meldung)
 
 
 @dienst._ohne_aktive_werkbank("Auf technische Lieferung warten")
@@ -389,7 +370,9 @@ def festlegen(akteur, auftrag, revision, *, bedarf, nur_lieferungen, hindernis_i
     gebunden werden."""
     dienst._planung_erforderlich(akteur, "Technischen Lieferbedarf festlegen")
     with transaction.atomic():
-        aktuell = _aktuell(akteur, auftrag, revision)
+        aktuell = _aktuell(akteur, auftrag, revision, entwurf_erlaubt=hindernis_id is None)
+        if aktuell.zustand == Auftrag.ENTWURF and hindernis_id is None:
+            return _lieferplan_festlegen(akteur, aktuell, bedarf, nur_lieferungen)
         meldung = _blocker(aktuell)
         if (
             nur_lieferungen is not True
@@ -410,6 +393,92 @@ def festlegen(akteur, auftrag, revision, *, bedarf, nur_lieferungen, hindernis_i
     return meldung
 
 
+def _lieferplan_festlegen(akteur, auftrag, bedarf, nur_lieferungen):
+    if nur_lieferungen is not True:
+        raise dienst.DienstFehler("Planbarer Lieferbedarf umfasst ausschließlich Lieferungen.")
+    auftrag.meldungen.filter(
+        revision_nr=auftrag.revision_nr, art=Meldung.LIEFERPLAN, historisch=False
+    ).update(historisch=True)
+    if bedarf == []:
+        dienst._ereignis(
+            akteur,
+            projekt=auftrag.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=auftrag.nummer,
+            ereignis="Geplanten Lieferbedarf aufgehoben",
+            revision=str(auftrag.revision_nr),
+        )
+        return None
+    geprueft = _bedarf_pruefen(akteur, auftrag, bedarf)
+    meldung = Meldung.objects.create(
+        auftrag=auftrag,
+        revision_nr=auftrag.revision_nr,
+        art=Meldung.LIEFERPLAN,
+        text="Technischer Lieferbedarf zur Vorbereitung der Freigabe",
+        akteur_name=akteur.name,
+        bindung=akteur.bindung,
+    )
+    _registrieren(akteur, auftrag, meldung, geprueft)
+    return meldung
+
+
+def _geplante_bedarfe(auftrag, revision):
+    return Lieferbedarf.objects.filter(
+        meldung__auftrag=auftrag,
+        meldung__revision_nr=revision,
+        meldung__art=Meldung.LIEFERPLAN,
+        meldung__historisch=False,
+        lieferauftrag__projekt_id=auftrag.projekt_id,
+    )
+
+
+def offene_uebernahmebedarfe(auftrag):
+    """Gründe aktueller Planbedarfe und eines noch wirksamen Lieferblockers."""
+    bedarfe = list(
+        _geplante_bedarfe(auftrag, auftrag.revision_nr).select_related("lieferauftrag__projekt")
+    )
+    meldung = _blocker(auftrag) if auftrag.zustand == Auftrag.BLOCKIERT else None
+    if meldung and meldung.art == Meldung.HINDERNIS:
+        bedarfe.extend(meldung.lieferbedarf.select_related("lieferauftrag__projekt"))
+    for bedarf in bedarfe:
+        _, grund, _ = _bedarf_stand(bedarf, auftrag.projekt_id)
+        if grund:
+            yield grund
+
+
+def lieferplan_uebertragen(akteur, auftrag, vorige_revision):
+    bedarfe = list(_geplante_bedarfe(auftrag, vorige_revision))
+    if not bedarfe:
+        return
+    meldung = Meldung.objects.create(
+        auftrag=auftrag,
+        revision_nr=auftrag.revision_nr,
+        art=Meldung.LIEFERPLAN,
+        text=f"Planbedarf aus Revision {vorige_revision} übernommen.",
+        akteur_name=akteur.name,
+        bindung=akteur.bindung,
+    )
+    Lieferbedarf.objects.bulk_create(
+        [
+            Lieferbedarf(
+                meldung=meldung,
+                lieferauftrag_id=b.lieferauftrag_id,
+                lieferrevision=b.lieferrevision,
+                lieferkennung=b.lieferkennung,
+                nach_lieferung=b.nach_lieferung,
+            )
+            for b in bedarfe
+        ]
+    )
+
+
+def wiederaufnahme_pruefen(akteur, auftrag):
+    """Beim nächsten Bericht prüfen, falls eine Ordnersperre die Lieferung zuvor aufhielt."""
+    blocker = _blocker(auftrag)
+    if blocker is not None:
+        _freisetzen(akteur, blocker)
+
+
 def _freisetzen(akteur, meldung):
     # Jeder Abbruchgrund steht in _blocker_grund oder _bedarf_stand und ist in details sichtbar.
     auftrag = Auftrag.objects.select_related("projekt").get(pk=meldung.auftrag_id)
@@ -421,7 +490,7 @@ def _freisetzen(akteur, meldung):
         if status != GELIEFERT:
             return
         passend.append((bedarf, lieferung))
-    if not passend:
+    if not passend or ordnersperren.sichern(auftrag) is not None:
         return
     # Aufruf ausschließlich innerhalb derselben IMMEDIATE-Transaktion wie Registrierung/Lieferung.
     if (
@@ -509,6 +578,7 @@ def melden(
             inhalt_sha256=sha,
         ).first()
         if vorhanden:
+            dienst._ordnersperre_sichern(akteur, aktuell)
             return vorhanden
         meldung = dienst._meldung(
             akteur,
@@ -565,6 +635,7 @@ def details(auftrag):
             historisch=False,
             lieferbedarf__isnull=False,
         )
+        .exclude(art=Meldung.LIEFERPLAN)
         .distinct()
         .first()
     )
@@ -627,6 +698,17 @@ def details(auftrag):
     return {
         "lieferungen": lieferungen,
         "lieferbedarf": bedarf,
+        "geplanter_lieferbedarf": [
+            {
+                "auftrag": b.lieferauftrag.nummer,
+                "revision": b.lieferrevision,
+                "lieferkennung": b.lieferkennung,
+                "nach_lieferung": b.nach_lieferung,
+            }
+            for b in _geplante_bedarfe(auftrag, auftrag.revision_nr)
+            .select_related("lieferauftrag__projekt")
+            .order_by("pk")
+        ],
         "lieferbedarf_ausgeblendet": ausgeblendet,
         "angeforderte_lieferungen": angefordert,
         "verwaiste_anforderungen": verwaist,

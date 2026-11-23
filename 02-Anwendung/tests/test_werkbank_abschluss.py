@@ -22,6 +22,20 @@ from tests.werkbank_hilfen import (
 
 pytestmark = pytest.mark.django_db
 
+
+def test_neuer_w1_aktionsweg_aendert_keine_laufende_werkbankausfuehrung(akteur, w_ausfuehrung):
+    with pytest.raises(dienst.Konflikt, match="läuft auf einer KI-Werkbank"):
+        werkbank.delegation_auftrag_aktion(
+            akteur,
+            w_ausfuehrung.auftrag,
+            delegation_id=1,
+            revision=1,
+            auftrag_revision=w_ausfuehrung.auftrag.revision_nr,
+            aktion="auftrag_aendern",
+            werte={"titel": "Nicht unter laufendem Prozess ändern"},
+        )
+
+
 PLAN = "c" * 64
 COMMIT = "abc1234"
 

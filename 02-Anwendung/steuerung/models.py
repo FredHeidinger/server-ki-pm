@@ -161,6 +161,22 @@ class ChatBindung(models.Model):
         return self.widerrufen_am is None and self.gueltig_bis > timezone.now()
 
 
+class UebernahmePruefrecht(models.Model):
+    """Erlaubt einer Bindung die lesende Übernahmeprüfung für ein festes Ziel im Projekt."""
+
+    projekt = models.ForeignKey(Projekt, on_delete=models.CASCADE)
+    pruefbindung = models.ForeignKey(ChatBindung, on_delete=models.CASCADE, related_name="+")
+    zielbindung = models.ForeignKey(ChatBindung, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["projekt", "pruefbindung", "zielbindung"],
+                name="uebernahmepruefrecht_je_bindungspaar",
+            )
+        ]
+
+
 class OrdnerAnfrage(models.Model):
     """Ein PC-Zugang hat aus einem Ordner gearbeitet, der keinem Projekt zugeordnet ist.
     Erscheint im Posteingang, bis der Mensch ihn einem Projekt zuordnet oder verwirft."""
@@ -181,6 +197,17 @@ class OrdnerAnfrage(models.Model):
 
 
 class Auftrag(models.Model):
+    # Drei Wege C01: nur neue delegierte W1-Auftraege; Bestand bleibt unveraendert.
+    chat_delegation = models.ForeignKey(
+        "WerkbankChatDelegation",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="auftraege",
+    )
+    chat_delegation_revision = models.PositiveIntegerField(default=0)
+    chat_budget = models.JSONField(default=dict, blank=True)
+    chat_budget_reserviert = models.BooleanField(default=False)
     """Ein Auftrag beginnt als Entwurf, wird freigegeben, bearbeitet und mit dem Ergebnis
     erledigt (bestandene technische Prüfungen) oder blockiert. Nummer ist ``A-<id>``."""
 
@@ -207,7 +234,8 @@ class Auftrag(models.Model):
     PRIO = [("hoch", "hoch"), ("mittel", "mittel"), ("niedrig", "niedrig")]
     TYP_AUFTRAG = "auftrag"
     TYP_ISSUE = "issue"
-    TYPEN = [(TYP_AUFTRAG, "Auftrag"), (TYP_ISSUE, "Issue")]
+    TYP_INTEGRATION = "integration"
+    TYPEN = [(TYP_AUFTRAG, "Auftrag"), (TYP_ISSUE, "Issue"), (TYP_INTEGRATION, "Integration")]
     # Wer den Auftrag bearbeitet: ein Chat (Bestand) oder die KI-Werkbank (Werkbank-Anbindung).
     WEG_CHAT = "chat"
     WEG_WERKBANK = "werkbank"
@@ -225,9 +253,11 @@ class Auftrag(models.Model):
     zustand = models.CharField("Zustand", max_length=24, choices=ZUSTAENDE, default=ENTWURF)
     zustand_vor_pause = models.CharField(max_length=24, blank=True)
     prioritaet = models.CharField("Priorität", max_length=10, choices=PRIO, default="mittel")
+    nur_mensch = models.BooleanField("Nur im begleiteten Chat", default=False)
+    fremdbefund_sammelissue = models.BooleanField(default=False)
     typ = models.CharField(
         "Art",
-        max_length=10,
+        max_length=11,
         choices=TYPEN,
         default=TYP_AUFTRAG,
         help_text="Issue: Fehler oder Problem",
@@ -338,6 +368,7 @@ class Revision(models.Model):
     schreibumfang = models.TextField("Schreibumfang (Pfadmuster je Zeile)", blank=True)
     quellen = models.TextField("Quellen und Verträge", blank=True)
     abnahmekriterien = models.TextField("Abnahmekriterien (eines je Zeile)", blank=True)
+    kriterienregeln = models.JSONField(default=list, blank=True)
     erstellt_am = models.DateTimeField(auto_now_add=True)
     erstellt_von_name = models.CharField(max_length=120)
     anlass = models.CharField("Anlass der Revision", max_length=200, blank=True)
@@ -402,6 +433,14 @@ class FruehereNummer(models.Model):
         return f"{self.projekt.kuerzel}-{self.projekt_nummer}"
 
 
+class Ordnersperre(models.Model):
+    """Zuordnung eines normalisierten Arbeitsordners während einer Sitzung."""
+
+    pfad = models.CharField(max_length=320, primary_key=True)
+    auftrag = models.ForeignKey(Auftrag, on_delete=models.CASCADE)
+    ablauf = models.DateTimeField()
+
+
 class Meldung(models.Model):
     """Fortschritt, Hindernis, Vorschlag oder Prüfbericht eines Bearbeiters oder Chats."""
 
@@ -413,6 +452,8 @@ class Meldung(models.Model):
     PRUEFBERICHT = "PRUEFBERICHT"
     ANTWORT = "ANTWORT"
     SITZUNGSENDE = "SITZUNGSENDE"
+    LIEFERPLAN = "LIEFERPLAN"
+    FREMDBEFUND = "FREMDBEFUND"
     ARTEN = [
         (FORTSCHRITT, "Fortschritt"),
         (HINDERNIS, "Hindernis"),
@@ -422,6 +463,8 @@ class Meldung(models.Model):
         (PRUEFBERICHT, "Prüfbericht"),
         (ANTWORT, "Antwort"),
         (SITZUNGSENDE, "Chat beendet"),
+        (LIEFERPLAN, "Lieferbedarf geplant"),
+        (FREMDBEFUND, "Fremder Prüfbefund"),
     ]
     BLOCKIERENDE = (HINDERNIS, RUECKFRAGE, FEHLER)
     OFFEN = "OFFEN"
@@ -441,6 +484,8 @@ class Meldung(models.Model):
     historisch = models.BooleanField(
         "Bezieht sich auf eine überholte Revision oder erloschene Übernahme", default=False
     )
+    kriterien_erfuellt = models.JSONField(blank=True, null=True)
+    festgefahren = models.BooleanField(default=False)
     vorschlag_status = models.CharField(
         max_length=12, choices=VORSCHLAG_STATUS, default=OFFEN, blank=True
     )
@@ -457,6 +502,7 @@ class Ergebnis(models.Model):
     pruefschritte = models.TextField("Bestandene Prüfungen (eine je Zeile)", blank=True)
     fehlgeschlagen = models.TextField("Fehlgeschlagene Prüfungen (eine je Zeile)", blank=True)
     luecken = models.TextField("Bekannte Lücken", blank=True)
+    fremde_befunde = models.JSONField(blank=True, default=list)
     eingereicht_von_name = models.CharField(max_length=120)
     bindung = models.ForeignKey(
         ChatBindung, null=True, blank=True, on_delete=models.PROTECT, related_name="ergebnisse"
@@ -1599,5 +1645,180 @@ class Lieferbedarf(models.Model):
             models.UniqueConstraint(
                 fields=["meldung", "lieferauftrag", "lieferrevision", "lieferkennung"],
                 name="lieferbedarf_je_blocker_einmal",
+            )
+        ]
+
+
+class Aktionsvorschlag(models.Model):
+    """Von der Planung vorbereitete konkrete Aktion an einem Auftrag, gebunden an Revision und
+    maßgebliche Meldung; wirkt erst mit Freds Bestätigung in der Oberfläche (Regeln in
+    ``steuerung.auftragsaktionen``)."""
+
+    WIEDERAUFNAHME = "wiederaufnahme"
+    NEUSCHNITT = "neuschnitt"
+    ARTEN = [(WIEDERAUFNAHME, "Wiederaufnahme"), (NEUSCHNITT, "Neuschnitt")]
+    OFFEN = "OFFEN"
+    AUSGEFUEHRT = "AUSGEFUEHRT"
+    ABGELEHNT = "ABGELEHNT"
+    VERALTET = "VERALTET"
+    ZUSTAENDE = [
+        (OFFEN, "offen"),
+        (AUSGEFUEHRT, "bestätigt und ausgeführt"),
+        (ABGELEHNT, "abgelehnt"),
+        (VERALTET, "veraltet"),
+    ]
+
+    auftrag = models.ForeignKey(
+        Auftrag, on_delete=models.PROTECT, related_name="aktionsvorschlaege"
+    )
+    art = models.CharField(max_length=16, choices=ARTEN)
+    zustand = models.CharField(max_length=12, choices=ZUSTAENDE, default=OFFEN)
+    erwartete_revision = models.PositiveIntegerField()
+    meldung = models.ForeignKey(
+        Meldung, null=True, blank=True, on_delete=models.PROTECT, related_name="aktionsvorschlaege"
+    )
+    entscheidung = models.ForeignKey(
+        Entscheidung,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="aktionsvorschlaege",
+    )
+    text = models.TextField()
+    plan = models.JSONField(default=dict, blank=True)
+    vorgeschlagen_von_name = models.CharField(max_length=120)
+    bindung = models.ForeignKey(
+        ChatBindung,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="aktionsvorschlaege",
+    )
+    vorgeschlagen_am = models.DateTimeField(auto_now_add=True)
+    bestaetigt_von = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="bestaetigte_aktionen",
+    )
+    bestaetigt_am = models.DateTimeField(null=True, blank=True)
+    ausgefuehrt_am = models.DateTimeField(null=True, blank=True)
+    ergebnis_revision = models.PositiveIntegerField(null=True, blank=True)
+    abgeschlossen_am = models.DateTimeField(null=True, blank=True)
+    grund = models.TextField(blank=True)
+    # Ausführung ohne Einzelbestätigung: die gespeicherte Vollmacht und der geprüfte Nachweis.
+    vollmacht = models.ForeignKey(
+        "Aktionsvollmacht",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ausfuehrungen",
+    )
+    nachweis = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-id"]
+        constraints = [
+            # Je Blockademeldung höchstens eine Ausführung mit Vollmacht (auch bei Parallelität).
+            models.UniqueConstraint(
+                fields=["auftrag", "meldung"],
+                condition=models.Q(vollmacht__isnull=False),
+                name="vollmacht_einmal_je_meldung",
+            )
+        ]
+
+    @property
+    def nummer(self) -> str:
+        return f"V-{self.pk}"
+
+
+class Aktionsvollmacht(models.Model):
+    """Von Fred in der Oberfläche erteilte, serverseitig geprüfte Vollmacht für einen technischen
+    Standardfall (Regeln in ``steuerung.auftragsaktionen``). Kein Chattext ersetzt sie."""
+
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="vollmachten")
+    aktion = models.CharField(max_length=16, choices=Aktionsvorschlag.ARTEN)
+    ausfuehrende_bindung = models.ForeignKey(
+        ChatBindung, on_delete=models.PROTECT, related_name="ausfuehrbare_vollmachten"
+    )
+    bearbeiter_bindung = models.ForeignKey(
+        ChatBindung, on_delete=models.PROTECT, related_name="bearbeiter_vollmachten"
+    )
+    meldungsarten = models.JSONField(default=list)
+    auftrag = models.ForeignKey(
+        Auftrag, null=True, blank=True, on_delete=models.PROTECT, related_name="vollmachten"
+    )
+    entscheidung = models.ForeignKey(
+        Entscheidung, null=True, blank=True, on_delete=models.PROTECT, related_name="vollmachten"
+    )
+    # Optional: nur genau diese gemeldete Lieferung gilt als Nachweis.
+    lieferung = models.ForeignKey(
+        "Lieferung", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    gueltig_bis = models.DateTimeField()
+    erteilt_von = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="erteilte_vollmachten"
+    )
+    erteilt_am = models.DateTimeField(auto_now_add=True)
+    widerrufen_am = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-id"]
+
+    @property
+    def nummer(self) -> str:
+        return f"VM-{self.pk}"
+
+    @property
+    def meldungsarten_text(self) -> str:
+        return ", ".join(dict(Meldung.ARTEN).get(a, a) for a in self.meldungsarten)
+
+
+class WerkbankChatDelegation(models.Model):
+    """Vom Owner gespeicherte W1-Befugnis; weder Chattext noch eine neue Ownerrolle."""
+
+    bindung = models.ForeignKey(
+        ChatBindung, on_delete=models.PROTECT, related_name="werkbank_delegationen"
+    )
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="chat_delegationen")
+    aussteller = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    revision = models.PositiveIntegerField(default=1)
+    reserviert = models.JSONField(default=dict)
+    widerrufen_am = models.DateTimeField(null=True, blank=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bindung", "projekt"],
+                condition=models.Q(widerrufen_am__isnull=True),
+                name="eine_unwiderrufene_w1_delegation",
+            )
+        ]
+
+
+class WerkbankChatDelegationsfassung(models.Model):
+    """Unveraenderliche Fassung der ausdruecklich erteilten W1-Befugnis."""
+
+    delegation = models.ForeignKey(
+        WerkbankChatDelegation, on_delete=models.PROTECT, related_name="fassungen"
+    )
+    revision = models.PositiveIntegerField()
+    aktionen = models.JSONField(default=list)
+    ziele = models.JSONField(default=list)
+    standard_ziel = models.PositiveIntegerField(null=True, blank=True)
+    budget = models.JSONField(default=dict)
+    gueltig_ab = models.DateTimeField()
+    gueltig_bis = models.DateTimeField()
+    widerrufen = models.BooleanField(default=False)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["delegation", "revision"], name="w1_delegation_fassung_eindeutig"
             )
         ]

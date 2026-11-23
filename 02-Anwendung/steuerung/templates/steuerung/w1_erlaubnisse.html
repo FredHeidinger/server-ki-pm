@@ -1,0 +1,36 @@
+<section id="w1-erlaubnisse" class="box" aria-labelledby="h-w1-erlaubnisse">
+  <h2 id="h-w1-erlaubnisse">W1: Chat an die Werkbank delegieren</h2>
+  <p class="gedaempft">Lege fest, welcher Chat in welchem Projekt Aufträge anlegen, planen, zuweisen oder freigeben darf. Ziele, Aktionen, Laufzeit und Gesamtbudget sind begrenzt. Diese Erlaubnis startet keinen Lauf; Start und Integration sind noch nicht verfügbar.</p>
+  {% if not w1_owner %}
+    <p>Erlaubnisse verwaltet nur der Owner.</p>
+  {% else %}
+    <ul class="eingang">
+    {% for d in w1_erlaubnisse %}
+      <li class="eintrag">
+        <p class="eintragtitel">{{ d.bindung.name }} · {{ d.projekt.name }} <span class="status {% if d.status_text == 'gültig' %}ok{% else %}aus{% endif %}">{{ d.status_text }}</span></p>
+        <p>{{ d.aktionstexte|join:", " }} · gültig bis {{ d.stand.gueltig_bis|date:"d.m.Y H:i" }}</p>
+        <p>Erlaubte Ziele: {{ d.zieltexte|join:"; " }}.</p>
+        <p>Geldrahmen {{ d.geld|floatformat:6 }} {{ d.stand.budget.waehrung }} · davon reserviert {{ d.geld_reserviert|floatformat:6 }} · {{ d.minuten|floatformat:2 }} Minuten · {{ d.stand.budget.aufrufe }} KI-Aufrufe insgesamt.</p>
+        {% if not d.widerrufen_am %}<form method="post" action="{% url 'w1_widerrufen' delegation_id=d.pk %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ d.revision }}"><button class="knopf zweit klein" type="submit">Erlaubnis widerrufen</button></form>{% endif %}
+      </li>
+    {% empty %}<li>Noch keine W1-Erlaubnis. Bestehende Zugänge erhalten keine zusätzlichen Rechte.</li>{% endfor %}
+    </ul>
+    <details class="mehr"{% if w1_form.is_bound %} open{% endif %}><summary>W1-Erlaubnis erteilen</summary>
+      <form method="post" action="{% url 'w1_erteilen' %}" class="formular">
+        {% csrf_token %}
+        {% if w1_form.non_field_errors %}<div class="fehler" role="alert">{{ w1_form.non_field_errors }}</div>{% endif %}
+        {% for feld in w1_form %}
+          {% if feld.name == 'aktionen' or feld.name == 'ziele' %}
+          <fieldset class="feld"><legend>{{ feld.label }} {% include "steuerung/stufe.html" with stufe=feld.field.stufe %}</legend>{% for option in feld %}<p><label>{{ option.tag }} {{ option.choice_label }}</label></p>{% endfor %}
+          {% for fehler in feld.errors %}<p class="fehlertext" role="alert">{{ fehler }}</p>{% endfor %}</fieldset>
+          {% else %}
+          <div class="feld{% if feld.errors %} ungueltig{% endif %}"><label for="{{ feld.id_for_label }}">{{ feld.label }} {% include "steuerung/stufe.html" with stufe=feld.field.stufe %}</label>{{ feld }}
+          {% if feld.help_text %}<p class="hilfe" id="{{ feld.auto_id }}_helptext">{{ feld.help_text }}</p>{% endif %}
+          {% for fehler in feld.errors %}<p class="fehlertext" role="alert">{{ fehler }}</p>{% endfor %}</div>
+          {% endif %}
+        {% endfor %}
+        <button class="knopf" type="submit">Begrenzte Erlaubnis speichern</button>
+      </form>
+    </details>
+  {% endif %}
+</section>

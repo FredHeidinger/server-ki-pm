@@ -120,7 +120,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 24px 48px; min-width: 0;
 .werkzeuge, .kopfaktionen { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* Bedienelemente: Lime-Knopf mit Technikblau-Text, Zweitknopf mit Rahmen */
-select, input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="search"], input[type="url"], textarea {
+select, input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="search"], input[type="url"], textarea, #w1-erlaubnisse input[type="datetime-local"] {
   font: inherit; color: var(--blau); padding: 8px 11px; border: 1.5px solid var(--rahmen); border-radius: 9px; background: var(--weiss); }
 textarea { width: 100%; max-width: 680px; }
 input[type="text"], input[type="password"] { width: 100%; max-width: 480px; }
@@ -325,6 +325,8 @@ ol.letzte.naechste { list-style: decimal; padding-left: 22px; }
 .github-schluessel, .github-anleitung { margin-top: 10px; }
 .github-schluessel > summary, .github-anleitung > summary { cursor: pointer; }
 #github select { max-width: 100%; min-width: 0; }
+#w1-erlaubnisse select { width: 100%; max-width: 100%; min-width: 0; }
+#w1-erlaubnisse fieldset { min-width: 0; }
 
 /* Board: Signalleiste als Zählzeile, Spalten mit eigenem Scrollbereich */
 .signalleiste { position: relative; display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 4px 0 14px; padding: 2px 0 2px; }
@@ -403,6 +405,16 @@ ol.letzte.naechste { list-style: decimal; padding-left: 22px; }
 .kopfknopf div.hauptknopf .status.warn { background: var(--weiss); }
 .kopfknopf div.hauptknopf input[type="text"] { border-color: var(--weiss); }
 .kopfknopf .lieferhaekchen { color: var(--weiss); }
+/* Aktionsvorschlag der Planung: eigene helle Fläche, auch im dunklen Auftragskopf lesbar. */
+div.hauptknopf.vorschlag, .kopfknopf div.hauptknopf.vorschlag { background: var(--weiss); color: var(--blau); border: 2px solid var(--blau); border-radius: 12px; padding: 12px 14px; max-width: 760px; }
+.kopfknopf div.hauptknopf.vorschlag .frage { background: var(--hell); color: var(--blau); }
+.vorschlag .eintragtext { color: var(--blau); }
+.vorschlag ul.eintragtext { padding-left: 20px; overflow-wrap: anywhere; }
+table.wirkung { table-layout: fixed; margin: 6px 0 8px; }
+table.wirkung caption { caption-side: top; text-align: left; font-weight: 600; padding: 0 0 4px; }
+table.wirkung th, table.wirkung td { overflow-wrap: break-word; hyphens: auto; padding: 7px 9px; }
+table.wirkung thead th:first-child, table.wirkung tbody th { width: 30%; overflow-wrap: normal; hyphens: auto; }
+.vorschlag details { margin-top: 6px; }
 .auftragskopf .weitere-aktionen { margin-top: 12px; border-top: 1px solid var(--linie); padding-top: 10px; }
 .weitere-liste { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .weitere-liste p { margin: 0; }

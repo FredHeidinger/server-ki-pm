@@ -103,6 +103,37 @@
   <p>KI-Programme verbindest du unter <a href="{% url 'verbindungen' %}">Konto &amp; KI verbinden</a>.</p>
 </section>
 
+<section id="vollmachten" class="box" aria-labelledby="h-vollmachten">
+  <h2 id="h-vollmachten">Vollmachten für Auftragsaktionen <span class="stufe optional">optional</span></h2>
+  <p class="gedaempft">Mit einer Vollmacht darf ein Zugang einen klar geregelten technischen Fall ohne erneute Rückfrage ausführen: einen blockierten Auftrag beim bisherigen Bearbeiter fortsetzen, sobald eine belegte Korrektur (Lieferung) vorliegt. KI-PM prüft dabei jedes Mal Revision, Blockade, Bearbeiter, Nachweis und Ordnersperre. Eine Entscheidung im Wissen allein genügt dafür nicht.</p>
+  {% if vollmachten %}
+  <table class="klein">
+    <thead><tr><th scope="col">Vollmacht</th><th scope="col" class="nur-breit">Wer führt aus</th><th scope="col">Bearbeiter</th><th scope="col" class="nur-breit">Blockaden</th><th scope="col" class="nur-mittel">Gültig bis</th><th scope="col">Stand</th></tr></thead>
+    <tbody>
+    {% for vm in vollmachten %}
+      <tr>
+        <td>{{ vm.nummer }} · {{ vm.get_aktion_display }}{% if vm.entscheidung %}<br><span class="gedaempft klein">Bezug {{ vm.entscheidung.nummer }}</span>{% endif %}{% if vm.auftrag %}<br><span class="gedaempft klein">nur {{ vm.auftrag.nummer }}</span>{% endif %}{% if vm.lieferung_id %}<br><span class="gedaempft klein">nur mit L-{{ vm.lieferung_id }}</span>{% endif %}</td>
+        <td class="nur-breit">{{ vm.ausfuehrende_bindung.name }}</td>
+        <td>{{ vm.bearbeiter_bindung.name }}</td>
+        <td class="nur-breit">{{ vm.meldungsarten_text }}</td>
+        <td class="nur-mittel">{{ vm.gueltig_bis|date:"d.m.Y H:i" }}</td>
+        <td>{% if vm.widerrufen_am %}<span class="status bad">widerrufen</span>{% elif vm.gueltig_bis <= jetzt %}<span class="status warn">abgelaufen</span>{% else %}<span class="status gut">gültig</span>
+          <form method="post" action="{% url 'vollmacht_widerrufen' kennung=projekt.kennung nummer=vm.pk %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>Noch keine Vollmacht erteilt.</p>{% endif %}
+  <details>
+    <summary class="knopf zweit">+ Vollmacht erteilen</summary>
+    <form method="post" action="{% url 'vollmacht_erteilen' kennung=projekt.kennung %}">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=vollmacht_form %}
+      <button type="submit" class="knopf">Vollmacht erteilen</button>
+    </form>
+  </details>
+</section>
+
 <section id="archivieren" class="box" aria-labelledby="h-archivieren">
   <h2 id="h-archivieren">Projekt archivieren</h2>
   {% if projekt.aktiv %}

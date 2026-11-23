@@ -53,7 +53,7 @@
       <td>{% if z.a.typ == "issue" %}<span class="issue">Issue</span> {% endif %}<a href="{% url 'auftrag_detail' auftrag_id=z.a.pk %}">{{ z.a.titel }}</a> {{ z.a|faellig_marke }}</td>
       <td class="nur-mittel">{{ z.a.modul.name|default:"–" }}</td>
       <td class="nur-breit">{{ z.reifegrad|default:"–" }}</td>
-      <td>{{ z.a.zustand|zustand }}</td>
+      <td>{% if z.ordnerwartehinweis %}{{ z.ordnerwartehinweis }}{% else %}{{ z.a.zustand|zustand }}{% endif %}</td>
       <td class="nur-breit">{{ z.a.bearbeiter_name|default:"–" }}</td>
       <td class="nur-mittel">{{ z.a.prioritaet }}</td>
       <td class="nur-breit">{{ z.a.revision_nr }}</td>

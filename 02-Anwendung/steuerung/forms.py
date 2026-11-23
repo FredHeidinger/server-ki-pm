@@ -1,8 +1,10 @@
 from django import forms
+from django.db import models
 
 from .models import (
     Arbeitsort,
     Auftrag,
+    ChatBindung,
     Meilenstein,
     Modul,
     Projekt,
@@ -388,3 +390,61 @@ def listen_zusammenfuehren(post, *felder: str):
         if eintraege or feld not in post:
             daten[feld] = "\n".join(eintraege)
     return daten
+
+
+class VollmachtForm(forms.Form):
+    """Vollmacht für einen technischen Standardfall; nur Fred erteilt sie."""
+
+    aktion = forms.ChoiceField(
+        label="Aktion",
+        choices=[("wiederaufnahme", "Wiederaufnahme beim bisherigen Bearbeiter")],
+        help_text="Setzt einen blockierten Auftrag beim selben Bearbeiter fort.",
+    )
+    ausfuehrende_bindung = NamensAuswahl(
+        label="Wer darf ausführen",
+        queryset=ChatBindung.objects.none(),
+        help_text="PC-Zugang der Automation, z. B. Claude Desktop.",
+    )
+    bearbeiter_bindung = NamensAuswahl(
+        label="Bei welchem Bearbeiter",
+        queryset=ChatBindung.objects.none(),
+        help_text="Nur Aufträge, die dieser Zugang gerade bearbeitet.",
+    )
+    meldungsarten = forms.MultipleChoiceField(
+        label="Bei welchen Blockaden",
+        choices=[("FEHLER", "Fehler"), ("HINDERNIS", "Hindernis"), ("RUECKFRAGE", "Rückfrage")],
+        initial=["FEHLER"],
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Reine Lieferblockaden laufen immer über die Lieferautomatik.",
+    )
+    gueltig_bis = forms.DateField(
+        label="Gültig bis",
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+        help_text="Höchstens 90 Tage; der Tag zählt bis 23:59.",
+    )
+    auftrag = forms.CharField(
+        label="Nur für Auftrag",
+        max_length=40,
+        required=False,
+        help_text="z. B. NEX-63; leer = alle",
+    )
+    entscheidung = forms.CharField(
+        label="Bezug", max_length=20, required=False, help_text="z. B. E-213"
+    )
+    lieferung = forms.CharField(
+        label="Nur mit Nachweis",
+        max_length=20,
+        required=False,
+        help_text="Liefernummer der belegten Korrektur, z. B. L-1; leer = jede passende",
+    )
+
+    def __init__(self, *args, projekt=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        zugaenge = ChatBindung.objects.filter(widerrufen_am__isnull=True).exclude(
+            art=ChatBindung.ART_WERKBANK
+        )
+        if projekt is not None:
+            zugaenge = zugaenge.filter(models.Q(art=ChatBindung.ART_PC) | models.Q(projekt=projekt))
+        self.fields["ausfuehrende_bindung"].queryset = zugaenge.filter(art=ChatBindung.ART_PC)
+        self.fields["bearbeiter_bindung"].queryset = zugaenge
+        _stufen(self)

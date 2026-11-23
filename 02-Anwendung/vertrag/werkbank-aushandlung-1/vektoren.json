@@ -1,0 +1,7 @@
+[
+  {"fall":"v1","anfrage":"vertrag=kipm-werkbank%2F1","status":200,"antwort":{"schema_version":1,"gemeinsam":["kipm-werkbank/1"]}},
+  {"fall":"gemischt","anfrage":"vertrag=kipm-werkbank%2F2&vertrag=kipm-werkbank%2F1","status":200,"antwort":{"schema_version":1,"gemeinsam":["kipm-werkbank/1"]}},
+  {"fall":"nur-v2","anfrage":"vertrag=kipm-werkbank%2F2","status":426,"fehlercode":"VERTRAG_INKOMPATIBEL"},
+  {"fall":"unbekannter-parameter","anfrage":"vertrag=kipm-werkbank%2F1&rolle=review","status":400,"fehlercode":"UNGUELTIGE_NACHRICHT"},
+  {"fall":"doppelt","anfrage":"vertrag=kipm-werkbank%2F1&vertrag=kipm-werkbank%2F1","status":400,"fehlercode":"UNGUELTIGE_NACHRICHT"}
+]

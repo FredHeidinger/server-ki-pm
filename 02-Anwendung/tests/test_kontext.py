@@ -80,6 +80,115 @@ def test_kontext_ohne_auftrag_passt_in_einen_teil_und_nennt_fehlendes(akteur, pr
         assert weg not in text
 
 
+def test_mcp_liefert_jede_pflichtquelle_bis_zum_letzten_absatz(client, akteur, projekt, bindung):
+    zeile = "Wert je Einheit: 17 µm.\n"
+    lang = zeile * 1100
+    projekt.beschreibung = lang + "Ende Profil"
+    projekt.save(update_fields=["beschreibung"])
+    akte.entscheidung_eintragen(
+        akteur, projekt, entscheidung=lang + "Ende Entscheidung", warum=lang + "Ende Begründung"
+    )
+    u = akte.text_anlegen(akteur, projekt, titel="Tabelle", text=lang + "Ende Tabelle")
+    fehler, erste = _werkzeug(client, bindung.klartext, "kipm_projektkontext")
+    assert not fehler and erste["teile"] > 1
+    teile = [erste["text"]]
+    for nr in range(2, erste["teile"] + 1):
+        fehler, folge = _werkzeug(
+            client,
+            bindung.klartext,
+            "kipm_projektkontext",
+            kontext_id=erste["manifest"]["kontext_id"],
+            teil=nr,
+        )
+        assert not fehler and folge["hash"] == erste["hash"]
+        teile.append(folge["text"])
+    zusammen = "\n".join(teile)
+    assert zusammen.count(zeile.rstrip()) == 4400
+    for ende in ("Ende Profil", "Ende Entscheidung", "Ende Begründung", "Ende Tabelle"):
+        assert zusammen.count(ende) == 1
+    u.versionen.update(text=lang + "Neue Fassung")
+    with pytest.raises(dienst.Konflikt, match="überholt"):
+        akte.kontext_teil(akteur, projekt, erste["manifest"]["kontext_id"], erste["teile"])
+
+
+def test_kontext_nachladen_behaelt_die_urspruengliche_teilgroesse(akteur, projekt, settings):
+    akte.text_anlegen(akteur, projekt, titel="Tabelle", text="Messung am Prüfstand.\n" * 800)
+    k = akte.kontext_erzeugen(akteur, projekt, budget=3000)
+    settings.KIPM_KONTEXT_BUDGET = 8000
+    erneut, text = akte.kontext_teil(akteur, projekt, k.kontext_id, len(k.teile))
+    assert erneut.hash == k.hash and text == k.teile[-1]
+
+
+def test_kontext_mit_gespeichertem_manifest_ohne_teilgroesse(akteur, projekt):
+    k = akte.kontext_erzeugen(akteur, projekt)
+    bezug = Kontextbezug.objects.get(kontext_id=k.kontext_id)
+    bezug.manifest.pop("teilbudget", None)
+    bezug.save(update_fields=["manifest"])
+    erneut, text = akte.kontext_teil(akteur, projekt, k.kontext_id, 1)
+    assert erneut.hash == k.hash and text == k.teile[0]
+
+
+@pytest.mark.parametrize(
+    "freigegeben,pruefung,erwartet",
+    [(True, "sauber", True), (False, "sauber", False), (True, "ausstehend", False)],
+)
+def test_kontext_alte_datei_liefert_den_erlaubten_extrakt(
+    akteur, projekt, freigegeben, pruefung, erwartet
+):
+    from steuerung.models import Unterlage, Unterlagenversion
+
+    u = Unterlage.objects.create(
+        projekt=projekt,
+        nummer=1,
+        titel="Messblatt",
+        art=Unterlage.DATEI,
+        ki_freigegeben=freigegeben,
+        aktuelle_nr=1,
+    )
+    v = Unterlagenversion.objects.create(
+        unterlage=u,
+        nummer=1,
+        pruefung=pruefung,
+        extraktion="teilweise",
+        extrakt="Tabelle (µm)\n" * 2000 + "Letzte Messzeile",
+        autor_name="Prüfung",
+    )
+    k = akte.kontext_erzeugen(akteur, projekt)
+    assert ("Letzte Messzeile" in k.vollstaendig_text) is erwartet
+    if erwartet:
+        assert "teilweise" in k.vollstaendig_text
+        u.ki_freigegeben = False
+        u.save(update_fields=["ki_freigegeben"])
+        with pytest.raises(dienst.Konflikt, match="überholt"):
+            akte.kontext_teil(akteur, projekt, k.kontext_id, len(k.teile))
+    else:
+        assert "nicht lesbar" in k.vollstaendig_text
+    assert not v.blob
+
+
+def test_kontext_zeigt_gebundene_beschreibung_auch_wenn_das_ziel_abgeklaert_ist(akteur, projekt):
+    a = arbeitspaket(akteur, projekt)
+    a.revisionen.update(beschreibung="Bedienablauf an der linken Seite beginnen.")
+    k = akte.kontext_erzeugen(akteur, projekt, auftrag=a)
+    assert "Bedienablauf an der linken Seite beginnen." in k.vollstaendig_text
+
+
+def test_kontext_linkadresse_und_quellversion_sind_bereinigte_daten(akteur, projekt):
+    from tests.test_kontext_daten import _datenzeilen
+
+    platzhalter = "kipm_000000000000_nur_ein_testmuster"
+    akte.link_anlegen(
+        akteur,
+        projekt,
+        titel="Testverweis",
+        uri="https://example.org/spec/" + platzhalter,
+        quellversion="Stand A",
+    )
+    text = akte.kontext_erzeugen(akteur, projekt).vollstaendig_text
+    assert platzhalter not in text
+    assert any("example.org/spec/[Schlüssel entfernt] @ Stand A" in z for z in _datenzeilen(text))
+
+
 def test_mcp_projektkontext_und_akte(client, akteur, projekt, bindung):
     akte.text_anlegen(akteur, projekt, titel="Anmeldung", text="Hinweise zur Anmeldung")
     fehler, daten = _werkzeug(client, bindung.klartext, "kipm_projektkontext")

@@ -20,11 +20,15 @@ WORTE = "Ja, trag das so ein."
 # Jedes Werkzeug steht in genau einer Liste; ein neues Werkzeug ohne Einordnung lässt
 # test_jedes_werkzeug_ist_eingeordnet scheitern.
 LESEN = {
+    "kipm_aktionen",
+    "kipm_w1_erlaubnisse",
     "kipm_projekte",
     "kipm_projekt",
     "kipm_auftraege",
     "kipm_lesen",
     "kipm_projektkontext",
+    "kipm_regelpruefung",
+    "kipm_uebernahme_pruefen",
     "kipm_projektakte",
     "kipm_verlauf",
     "kipm_unterlage_lesen",
@@ -44,7 +48,12 @@ ARBEIT = {
     "kipm_lieferung_melden",
 }
 # Legt nichts fest; erst Freds Antwort macht daraus eine Entscheidung (tests/test_offene_entscheidungen.py).
-FRAGE = {"kipm_entscheidung_fragen"}
+# Ein Aktionsvorschlag wirkt erst mit Freds Bestätigung in der Oberfläche (tests/test_auftragsaktionen.py).
+FRAGE = {"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen"}
+# Befugnis allein aus Freds gespeicherter Vollmacht (tests/test_aktionsvollmacht.py).
+VOLLMACHT = {"kipm_aktion_ausfuehren"}
+# Nur diese neuen W1-Routen prüfen gespeicherte, versionsgebundene Rechte statt Chattext.
+DELEGIERT = {"kipm_w1_auftrag_anlegen", "kipm_w1_auftrag_aktion"}
 AENDERND = {
     "kipm_projekt_anlegen",
     "kipm_projekt_archivieren",
@@ -185,8 +194,8 @@ def _abbild() -> dict:
 
 def test_jedes_werkzeug_ist_eingeordnet():
     katalog = {w["name"] for w in mcp.werkzeugliste()}
-    assert katalog == LESEN | ARBEIT | FRAGE | AENDERND
-    gruppen = (LESEN, ARBEIT, FRAGE, AENDERND)
+    assert katalog == LESEN | ARBEIT | FRAGE | AENDERND | DELEGIERT | VOLLMACHT
+    gruppen = (LESEN, ARBEIT, FRAGE, AENDERND, DELEGIERT, VOLLMACHT)
     assert sum(len(g) for g in gruppen) == len(katalog), "ein Werkzeug steht doppelt"
 
 
@@ -198,7 +207,8 @@ def test_katalog_verlangt_das_feld_genau_bei_aendernden():
             assert "fred_sagte" in schema["properties"], w["name"]
         else:
             assert "fred_sagte" not in schema["required"], w["name"]
-            assert "fred_sagte" not in schema["properties"], w["name"]
+            # Die Arbeitsübernahme trägt das Feld nur für Freds ausdrückliche Ablösung.
+            assert ("fred_sagte" in schema["properties"]) == (w["name"] == "kipm_uebernehmen")
 
 
 def test_jede_aendernde_route_ist_eingeordnet():
@@ -218,11 +228,19 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "fehler",
         "ergebnis",
         "entscheidung_fragen",
+        "aktion_vorschlagen",
+        "aktion_mit_vollmacht",
         "auf_lieferung_warten",
         "lieferung_melden",
         "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats
+        "w1_auftrag_anlegen",
+        "w1_auftrag_aktion",
     }
-    assert len(routen) == len(AENDERND) + len(ARBEIT) + len(FRAGE) + 1
+    assert getattr(routen["w1_auftrag_anlegen"], "w1_delegiert", False)
+    assert getattr(routen["w1_auftrag_aktion"], "w1_delegiert", False)
+    assert len(routen) == (
+        len(AENDERND) + len(ARBEIT) + len(FRAGE) + len(DELEGIERT) + len(VOLLMACHT) + 1
+    )
 
 
 @pytest.mark.parametrize("werkzeug", sorted(AENDERND))
@@ -389,7 +407,12 @@ def test_ablehnung_verbraucht_die_kennung_nicht(client, pc_zugang, projekt):
 # --- Ausnahmen -----------------------------------------------------------------------------
 
 
-def test_lesen_braucht_das_feld_nicht(client, pc_zugang, projekt, freigegeben):
+def test_lesen_braucht_das_feld_nicht(client, pc_zugang, projekt, freigegeben, bindung):
+    from steuerung.models import UebernahmePruefrecht
+
+    UebernahmePruefrecht.objects.create(
+        projekt=projekt, pruefbindung=pc_zugang, zielbindung=bindung
+    )
     fehler, daten = _werkzeug(
         client,
         pc_zugang.klartext,
@@ -402,6 +425,12 @@ def test_lesen_braucht_das_feld_nicht(client, pc_zugang, projekt, freigegeben):
     assert not fehler, daten
     argumente = {
         "kipm_lesen": {"auftrag": freigegeben.nummer},
+        "kipm_uebernahme_pruefen": {
+            "auftrag": freigegeben.nummer,
+            "revision": freigegeben.revision_nr,
+            "zielbindung_id": bindung.pk,
+            "unbeaufsichtigt": True,
+        },
         "kipm_unterlage_lesen": {"unterlage": daten["unterlage"]["kennung"]},
     }
     for werkzeug in sorted(LESEN):
@@ -476,7 +505,9 @@ def test_anweisungen_fordern_das_fragen():
     text = mcp.ANWEISUNGEN
     assert "Frag Fred, bevor du" in text and "fred_sagte" in text
     assert "Erfinde sie nie" in text
-    assert "direkt" not in text
+    assert "W2 (Chat → Werkbank direkt)" in text
+    assert "ausschließlich eine vom Owner gespeicherte" in text
+    assert "fehlende Rechte verlangen eine echte Rückfrage" in text
     assert "trägst du Offenes" not in text
 
 

@@ -10,6 +10,7 @@ Assistent, ohne eigenes Projekt, mit den erlaubten Projekten an ``WerkbankInstan
 import base64
 import binascii
 import json
+import re
 import secrets
 import uuid
 from collections.abc import Callable
@@ -177,6 +178,8 @@ def instanz_projekte_setzen(
             ereignis="Werkbank: erlaubte Projekte geändert",
             anlass="Projekte: " + ", ".join(p.kennung for p in projekte),
         )
+        for b in instanz.projekte.select_related("projekt"):
+            delegation_freigaben_pruefen(akteur, b.projekt)
 
 
 def projekt_pausieren(
@@ -224,6 +227,7 @@ def projekt_pausieren(
             ereignis="Werkbank: Projekt pausiert" if pausiert else "Werkbank: Projekt fortgesetzt",
             anlass=projekt.kennung,
         )
+        delegation_freigaben_pruefen(akteur, projekt)
 
 
 def instanz_aktiv_setzen(akteur: dienst.Akteur, instanz: WerkbankInstanz, aktiv: bool) -> None:
@@ -240,6 +244,8 @@ def instanz_aktiv_setzen(akteur: dienst.Akteur, instanz: WerkbankInstanz, aktiv:
             objekt_kennung=instanz.name,
             ereignis="Werkbank aktiviert" if aktiv else "Werkbank deaktiviert",
         )
+        for b in instanz.projekte.select_related("projekt"):
+            delegation_freigaben_pruefen(akteur, b.projekt)
 
 
 def instanz_widerrufen(akteur: dienst.Akteur, instanz: WerkbankInstanz, grund: str = "") -> None:
@@ -475,12 +481,106 @@ def kontext_hash(snapshot: dict) -> str:
     return werkbank_vertrag.sha256_hex(teil)
 
 
+def delegierter_quellenhash(projekt_id: int) -> str:
+    """Freigabebasis der lesbaren Projektunterlagen, Profilfelder und Entscheidungen.
+
+    W1 bindet auch Text jenseits der v1-Transportvorschau. Links bleiben Adressen.
+    Die Zielbindung mit Arbeitsort und Repo wird bereits über die Delegationsfassung geprüft.
+    """
+    from django.db.models import OuterRef, Q, Subquery
+
+    from . import akte
+    from .models import Entscheidung, Projekt, Unterlage, Unterlagenversion
+
+    projekt = Projekt.objects.get(pk=projekt_id)
+    profil = {
+        feld: getattr(projekt, feld)
+        for feld in (*akte.PROFILFELDER, "beschreibung", "profil_revision")
+    }
+    entscheidungen = akte.entscheidungen_des_projekts(projekt).filter(
+        zustand=Entscheidung.ENTSCHIEDEN
+    )
+    entscheidungshashes = [
+        werkbank_vertrag.sha256_hex(e)
+        for e in entscheidungen.order_by("id")
+        .values("id", "stand", "titel", "text", "warum", "verweis")
+        .iterator()
+    ]
+    neueste = Unterlagenversion.objects.filter(unterlage_id=OuterRef("unterlage_id")).order_by(
+        "-nummer"
+    )
+    fassungen = Unterlagenversion.objects.filter(
+        unterlage__projekt_id=projekt_id,
+        unterlage__archiviert=False,
+        pk=Subquery(neueste.values("pk")[:1]),
+    ).order_by("unterlage_id")
+    unterlagenhashes = [
+        werkbank_vertrag.sha256_hex(v)
+        for v in fassungen.filter(unterlage__art__in=(Unterlage.TEXT, Unterlage.LINK))
+        .values(
+            "unterlage_id",
+            "unterlage__art",
+            "unterlage__titel",
+            "nummer",
+            "text",
+            "uri",
+            "quellversion",
+        )
+        .iterator(chunk_size=16)
+    ]
+    basis = {
+        "bindung": "w1-projektquellen/1",
+        "projekt_id": projekt_id,
+        "profil": profil,
+        "entscheidungen": entscheidungshashes,
+        "unterlagen": unterlagenhashes,
+    }
+    # Für Altdateien gilt dieselbe Lesegrenze wie im Projektchat (akte.ki_lesbar).
+    # Der neueste Stand wird vor der Rechtefilterung bestimmt. Kein Dateizugriff.
+    altfassungen = fassungen.filter(
+        Q(unterlage__art=Unterlage.REPO)
+        | Q(
+            unterlage__art=Unterlage.DATEI,
+            unterlage__ki_freigegeben=True,
+            pruefung=Unterlagenversion.SAUBER,
+        )
+    )
+    althashes = [
+        werkbank_vertrag.sha256_hex(v)
+        for v in altfassungen.values(
+            "unterlage_id",
+            "unterlage__art",
+            "unterlage__titel",
+            "nummer",
+            "uri",
+            "quellversion",
+            "blob",
+            "sha256",
+            "herkunft",
+            "originalname",
+            "groesse",
+            "inhaltstyp",
+            "rolle",
+            "text",
+            "extrakt",
+            "extraktion",
+            "extrakt_hinweis",
+        ).iterator(chunk_size=16)
+    ]
+    if althashes:
+        basis["altquellen"] = althashes
+    return werkbank_vertrag.sha256_hex(basis)
+
+
 def kontext_binden(auftrag: Auftrag) -> None:
     """Die Freigabe eines Werkbank-Auftrags bindet die Kontextbasis (``dienst.auftrag_freigeben``
     ruft das im selben Commit)."""
     zuweisung = WerkbankZuweisung.objects.filter(auftrag=auftrag).first()
     if zuweisung is not None:
-        zuweisung.kontext_sha256 = kontext_hash(snapshot_bauen(auftrag))
+        if auftrag.chat_delegation_id is not None:
+            zuweisung.kontext_sha256 = delegierter_quellenhash(auftrag.projekt_id)
+        else:
+            zuweisung.kontext_sha256 = kontext_hash(snapshot_bauen(auftrag))
         zuweisung.save(update_fields=["kontext_sha256", "geaendert_am"])
 
 
@@ -515,14 +615,19 @@ def zuweisen(
     projektbindung: WerkbankProjektbindung,
     *,
     freigeben: bool = False,
+    w1_revision=None,
 ) -> WerkbankZuweisung:
     """Das Ausführungsziel eines Auftrags festlegen (nur der Owner). Reserviert nur das Ziel und
     setzt keinen Bearbeiter. Ein neues oder anderes Ziel hebt die Freigabe auf und erhöht beim
     Wechsel die Zuweisungsfassung; dasselbe Ziel noch einmal ändert nichts. Mit ``freigeben`` wird
     im selben Vorgang freigegeben (alles oder nichts)."""
-    dienst._owner_erforderlich(akteur, "Aufträge einer Werkbank zuweisen")
     with transaction.atomic():
         a = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if a.chat_delegation_id is not None:
+            _, stand = delegation_auftrag_pruefen(akteur, a, "zuweisen", revision=w1_revision)
+            delegation_ziel_pruefen(stand, projektbindung.pk)
+        else:
+            dienst._owner_erforderlich(akteur, "Aufträge einer Werkbank zuweisen")
         ziel = WerkbankProjektbindung.objects.select_related("instanz", "projekt").get(
             pk=projektbindung.pk
         )
@@ -573,7 +678,7 @@ def zuweisen(
             )
             zuweisung.save()
         if freigeben and a.zustand == Auftrag.ENTWURF:
-            dienst.auftrag_freigeben(akteur, a)
+            dienst.auftrag_freigeben(akteur, a, w1_revision=w1_revision)
             zuweisung.refresh_from_db()
     return zuweisung
 
@@ -669,6 +774,32 @@ class WerkbankFehler(Exception):
         if details:
             fehler["details"] = details
         return {"fehler": fehler}
+
+
+def vertragsangebot(angebot: list[str]) -> dict:
+    """Die tatsächlich implementierten Verträge mit dem ausdrücklichen Angebot abgleichen."""
+    if (
+        not 1 <= len(angebot) <= 100
+        or any(
+            len(name) > 64 or not re.fullmatch(r"kipm-werkbank/[1-9][0-9]*", name)
+            for name in angebot
+        )
+        or len(set(angebot)) != len(angebot)
+    ):
+        raise WerkbankFehler(
+            400,
+            "UNGUELTIGE_NACHRICHT",
+            "Das Angebot enthält eine fehlende, ungültige oder doppelte Fassung.",
+            "Eine bis 100 unterschiedliche Vertragsfassungen als vertrag angeben.",
+        )
+    if werkbank_vertrag.VERTRAG not in angebot:
+        raise WerkbankFehler(
+            426,
+            "VERTRAG_INKOMPATIBEL",
+            "Für dieses Angebot gibt es keine gemeinsame Vertragsfassung.",
+            "Die benötigte Fassung auf beiden Seiten bereitstellen.",
+        )
+    return {"schema_version": 1, "gemeinsam": [werkbank_vertrag.VERTRAG]}
 
 
 class Ausgang(NamedTuple):
@@ -896,6 +1027,11 @@ def _uebernehmen(instanz, n, q: QuellePruefung, op: WerkbankOperation) -> Ausgan
     von ``operation_ausfuehren`` zusammen mit dem Wiederholungsnachweis."""
     pb = q.projektbindung
     a = Auftrag.objects.select_for_update().select_related("projekt").get(pk=q.auftrag.pk)
+    if a.chat_delegation_id is not None:
+        raise _konflikt(
+            "Dieser W1-Auftrag braucht den delegationsgebundenen Vertrag v2.",
+            "Kein Rückfall auf v1; die v2-Anbindung muss zuerst verfügbar sein.",
+        )
     zuweisung = q.zuweisung
     abgleich = "Abgleich abrufen und den aktuellen Stand abwarten."
     if not a.projekt.aktiv:
@@ -1149,6 +1285,7 @@ def abgleich_seite(
             instanz=instanz,
             projektbindung__projekt__in=erlaubt,
             auftrag__revision_nr__gte=1,
+            auftrag__chat_delegation__isnull=True,
             pk__gt=pos["z"],
         )
         .select_related("auftrag", "projektbindung")
@@ -1223,9 +1360,61 @@ def abgleich_seite(
 def _teilmodule():
     """Die Teilmodule laden (sie tragen ihre Wirkungen in ``HANDLER`` ein). Erst beim Gebrauch,
     damit kein Importzyklus entsteht, egal welches Modul zuerst geladen wird."""
-    from . import werkbank_abschluss, werkbank_aktionen, werkbank_lauf
+    from . import werkbank_abschluss, werkbank_aktionen, werkbank_delegation, werkbank_lauf
 
-    return werkbank_abschluss, werkbank_aktionen, werkbank_lauf
+    return werkbank_abschluss, werkbank_aktionen, werkbank_lauf, werkbank_delegation
+
+
+def delegation_erteilen(*args, **kwargs):
+    return _teilmodule()[3].erteilen(*args, **kwargs)
+
+
+def delegation_widerrufen(*args, **kwargs):
+    return _teilmodule()[3].widerrufen(*args, **kwargs)
+
+
+def delegation_pruefen(*args, **kwargs):
+    return _teilmodule()[3].pruefen(*args, **kwargs)
+
+
+def delegation_auftrag_pruefen(*args, **kwargs):
+    return _teilmodule()[3].auftrag_pruefen(*args, **kwargs)
+
+
+def delegation_ziel_pruefen(*args, **kwargs):
+    return _teilmodule()[3].ziel_pruefen(*args, **kwargs)
+
+
+def delegation_budget_reservieren(*args, **kwargs):
+    return _teilmodule()[3].budget_reservieren(*args, **kwargs)
+
+
+def delegation_budget_freigeben(*args, **kwargs):
+    return _teilmodule()[3].budget_vor_start_freigeben(*args, **kwargs)
+
+
+def delegation_sichten(*args, **kwargs):
+    return _teilmodule()[3].sichten(*args, **kwargs)
+
+
+def delegation_budget_pruefen(*args, **kwargs):
+    return _teilmodule()[3].budget_pruefen(*args, **kwargs)
+
+
+def delegation_auftrag_anlegen(*args, **kwargs):
+    return _teilmodule()[3].auftrag_anlegen(*args, **kwargs)
+
+
+def delegation_auftrag_aktion(*args, **kwargs):
+    return _teilmodule()[3].auftrag_aktion(*args, **kwargs)
+
+
+def delegation_freigaben_pruefen(*args, **kwargs):
+    return _teilmodule()[3].freigaben_pruefen(*args, **kwargs)
+
+
+def delegation_zugang_geaendert(*args, **kwargs):
+    return _teilmodule()[3].zugang_geaendert(*args, **kwargs)
 
 
 def aktion_erstellen(*args, **kwargs):

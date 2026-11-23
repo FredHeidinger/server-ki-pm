@@ -1,0 +1,28 @@
+{% comment %}Offener Aktionsvorschlag der Planung mit den tatsächlichen Auswirkungen (Probelauf); Fred bestätigt und führt aus oder lehnt ab. Parameter: a (Auftrag), h (Hauptaktion mit vorschlag und wirkung), zurueck.{% endcomment %}
+{% with v=h.vorschlag w=h.wirkung %}
+<div class="hauptknopf vorschlag" id="vorschlag">
+  <p class="frage"><strong>Vorschlag {{ v.nummer }}: {{ v.get_art_display }}</strong> <span class="gedaempft klein">von {{ v.vorgeschlagen_von_name }}, {{ v.vorgeschlagen_am|date:"d.m. H:i" }}, für Revision {{ v.erwartete_revision }}{% if v.entscheidung %}, Bezug {{ v.entscheidung.nummer }}{% endif %}</span></p>
+  {% if v.meldung %}<p class="eintragtext"><strong>Zu {{ v.meldung.get_art_display }} von {{ v.meldung.akteur_name }}:</strong> {{ v.meldung.text|truncatechars:300 }}</p>{% endif %}
+  <p class="eintragtext"><strong>Vorgesehen:</strong> {{ v.text|linebreaksbr }}</p>
+  {% if v.plan %}<ul class="eintragtext">{% for feld, wert in v.plan.items %}{% if feld != "freigeben" %}<li>{{ feld }}: {{ wert|linebreaksbr }}</li>{% endif %}{% endfor %}<li>danach freigeben: {% if v.plan.freigeben %}ja{% else %}nein{% endif %}</li></ul>{% endif %}
+  {% if w.gueltig %}
+  <table class="wirkung">
+    <caption>Was die Bestätigung jetzt bewirkt</caption>
+    <thead><tr><th scope="col"></th><th scope="col">Vorher</th><th scope="col">Nachher</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Zustand</th><td>{{ w.vorher.zustand }}</td><td>{{ w.nachher.zustand }}</td></tr>
+      <tr><th scope="row">Bearbeiter</th><td>{{ w.vorher.bearbeiter }}</td><td>{{ w.nachher.bearbeiter }}</td></tr>
+      <tr><th scope="row">Revision</th><td>{{ w.vorher.revision }}</td><td>{{ w.nachher.revision }}</td></tr>
+    </tbody>
+  </table>
+  <p class="eintragtext"><strong>Lieferkette:</strong> {% if w.lieferketten %}</p><ul class="eintragtext">{% for k in w.lieferketten %}<li><span class="status warn">betroffen</span> {{ k }}</li>{% endfor %}</ul>{% else %}keine betroffen.</p>{% endif %}
+  {% for x in w.hinweise %}<p class="eintragtext">{{ x }}</p>{% endfor %}
+  <form method="post" action="{% url 'vorschlag_entscheiden' vorschlag_id=v.pk wahl='bestaetigen' %}" class="inline">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><input type="hidden" name="pruefcode" value="{{ w.pruefcode }}"><button type="submit" class="knopf">{{ h.text }}</button></form>
+  {% else %}
+  <p class="eintragtext"><span class="knopf" aria-disabled="true">{{ h.text }} – nicht möglich</span> <span class="status bad">{% if w.nachher is None and w.grund %}veraltet oder nicht ausführbar{% endif %}</span> {{ w.grund }}</p>
+  {% endif %}
+  <details class="inline"><summary class="knopf zweit">Ablehnen</summary>
+    <form method="post" action="{% url 'vorschlag_entscheiden' vorschlag_id=v.pk wahl='ablehnen' %}">{% csrf_token %}<input type="hidden" name="zurueck" value="{{ zurueck }}"><label>Grund (optional)<br><input type="text" name="grund"></label> <button type="submit" class="knopf zweit">Ablehnen</button></form>
+  </details>
+</div>
+{% endwith %}

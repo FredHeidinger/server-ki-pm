@@ -1,5 +1,4 @@
-"""Regel „Arbeit nur in KI-PM, nie als Datei“: Jede verbundene KI bekommt sie über die
-MCP-instructions und über den Projektkontext; der Server bleibt die einzige führende Stelle."""
+"""Konzept 21.1: Führende Stelle pro Weg, ohne doppelte Auftragsführung."""
 
 import json
 
@@ -12,7 +11,15 @@ from tests.test_mcp import _rpc, _werkzeug
 pytestmark = pytest.mark.django_db
 pc_zugang = test_mcp.pc_zugang  # Fixture wiederverwenden
 
-KERNWORTE = ("nie als Datei", "nur in KI-PM", "fred_sagte", "keinen Auftragsstand")
+KERNWORTE = (
+    "nur in KI-PM",
+    "fred_sagte",
+    "keine parallelen Auftragsdateien",
+    "Fachakte",
+    "technische Pakete",
+    "W2",
+    "W3",
+)
 
 
 def test_anweisungen_enthalten_die_regel():
@@ -25,7 +32,7 @@ def test_anweisungen_enthalten_die_regel():
 def test_regel_kommt_beim_verbindungsaufbau_an(client, pc_zugang):
     antwort = _rpc(client, pc_zugang.klartext, "initialize", {"protocolVersion": "2025-06-18"})
     anweisungen = antwort.json()["result"]["instructions"]
-    assert "nie als Datei" in anweisungen and "nur in KI-PM" in anweisungen
+    assert all(w in anweisungen for w in KERNWORTE)
 
 
 def test_projektkontext_nennt_die_regel(client, bindung, projekt):
@@ -40,4 +47,4 @@ def test_regel_bleibt_auch_bei_knappem_budget(akteur, projekt):
     k = akte.kontext_erzeugen(akteur, projekt, budget=1500, _speichern=False)
     assert "Arbeitsregel" in k.manifest["abschnitte"]
     assert "Arbeitsregel" not in k.manifest["ausgelassen"]
-    assert "nie als Datei" in "\n".join(k.teile)
+    assert all(w in "\n".join(k.teile) for w in KERNWORTE)

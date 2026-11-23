@@ -205,6 +205,7 @@ def kontext_geaendert(akteur: dienst.Akteur, projekt) -> None:
     """Hat sich der fachliche Kontext einer laufenden Werkbank-Ausführung geändert (Hash des
     Snapshots weicht ab), werden neue Schritte gesperrt und ein Halt „kontext_veraltet“
     angefordert. Fortschritt, Termine, Meilensteine und Git-Fortschreibung zählen nicht."""
+    werkbank.delegation_freigaben_pruefen(akteur, projekt)
     laufende = WerkbankAusfuehrung.objects.filter(
         auftrag__projekt=projekt, zustand__in=AUSFUEHRUNG_AKTIV, halt_zweck=""
     ).select_related("auftrag")

@@ -10,9 +10,10 @@ from django.contrib.auth.decorators import login_required
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.timezone import now as timezone_now
 from django.views.decorators.http import require_POST
 
-from . import abgleich, ablage, akte, dienst
+from . import abgleich, ablage, akte, auftragsaktionen, dienst
 from .forms import (
     ArbeitsortForm,
     EntscheidungEintragForm,
@@ -21,11 +22,14 @@ from .forms import (
     ProfilForm,
     UnterlageLinkForm,
     UnterlageTextForm,
+    VollmachtForm,
 )
 from .models import (
+    Aktionsvollmacht,
     Auftrag,
     ChatBindung,
     Entscheidung,
+    Lieferung,
     Meilenstein,
     Projekt,
     Unterlage,
@@ -415,6 +419,11 @@ def einstellungen(request: HttpRequest, kennung: str) -> HttpResponse:
             github=zugang,
             version=version,
             repo_namen=repo_namen,
+            vollmachten=projekt.vollmachten.select_related(
+                "ausfuehrende_bindung", "bearbeiter_bindung", "auftrag__projekt", "entscheidung"
+            ),
+            vollmacht_form=VollmachtForm(prefix=None, projekt=projekt),
+            jetzt=timezone_now(),
         ),
     )
 
@@ -464,3 +473,80 @@ def meilenstein_bearbeiten(request: HttpRequest, kennung: str, pk: int) -> HttpR
     else:
         messages.error(request, "Meilenstein: Name ist erforderlich, das Datum muss gültig sein.")
     return redirect(reverse("projekt_detail", kwargs={"kennung": kennung}) + "#meilensteine")
+
+
+def _vollmacht_daten(form: VollmachtForm, projekt: Projekt, akteur) -> dict:
+    from datetime import datetime, time
+
+    from django.utils import timezone
+
+    d = form.cleaned_data
+    auftrag = None
+    if d["auftrag"].strip():
+        auftrag = dienst.auftrag_holen(akteur, dienst.auftrag_id_aus_nummer(d["auftrag"]))
+    entscheidung = None
+    if d["entscheidung"].strip():
+        nr = d["entscheidung"].strip().upper().removeprefix("E-")
+        if not nr.isdigit():
+            raise dienst.DienstFehler("Bezug: z. B. E-213.")
+        entscheidung = akte.entscheidung_holen(akteur, projekt, int(nr))
+    lieferung = None
+    if d["lieferung"].strip():
+        nr = d["lieferung"].strip().upper().removeprefix("L-")
+        lieferung = (
+            Lieferung.objects.filter(pk=nr, auftrag__projekt=projekt).first()
+            if nr.isdigit()
+            else None
+        )
+        if lieferung is None:
+            raise dienst.DienstFehler(
+                f"Lieferung {d['lieferung']} gibt es in diesem Projekt nicht."
+            )
+    return {
+        "lieferung": lieferung,
+        "aktion": d["aktion"],
+        "ausfuehrende_bindung": d["ausfuehrende_bindung"],
+        "bearbeiter_bindung": d["bearbeiter_bindung"],
+        "meldungsarten": d["meldungsarten"],
+        "gueltig_bis": timezone.make_aware(datetime.combine(d["gueltig_bis"], time(23, 59))),
+        "auftrag": auftrag,
+        "entscheidung": entscheidung,
+    }
+
+
+@login_required
+@require_POST
+def vollmacht_erteilen(request: HttpRequest, kennung: str) -> HttpResponse:
+    projekt = _projekt(kennung)
+    akteur = _akteur(request)
+    form = VollmachtForm(request.POST, projekt=projekt)
+    if not form.is_valid():
+        messages.error(
+            request,
+            "Vollmacht nicht erteilt: "
+            + "; ".join(f"{form.fields[f].label}: {' '.join(e)}" for f, e in form.errors.items()),
+        )
+    else:
+        try:
+            vm = auftragsaktionen.vollmacht_erteilen(
+                akteur, projekt, **_vollmacht_daten(form, projekt, akteur)
+            )
+            messages.success(request, f"{vm.nummer} erteilt.")
+        except dienst.DienstFehler as fehler:
+            messages.error(request, f"Vollmacht nicht erteilt: {fehler}")
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#vollmachten")
+
+
+@login_required
+@require_POST
+def vollmacht_widerrufen(request: HttpRequest, kennung: str, nummer: int) -> HttpResponse:
+    projekt = _projekt(kennung)
+    vm = get_object_or_404(Aktionsvollmacht, pk=nummer, projekt=projekt)
+    _ausfuehren(
+        request,
+        f"{vm.nummer} widerrufen.",
+        auftragsaktionen.vollmacht_widerrufen,
+        _akteur(request),
+        vm,
+    )
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#vollmachten")

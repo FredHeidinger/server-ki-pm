@@ -1,6 +1,14 @@
 from django.urls import path
 
-from . import api, mcp, views, views_akte, views_werkbank, werkbank_api
+from . import (
+    api,
+    mcp,
+    views,
+    views_akte,
+    views_delegation,
+    views_werkbank,
+    werkbank_api,
+)
 
 urlpatterns = [
     path("anmelden/", views.Anmelden.as_view(), name="anmelden"),
@@ -29,6 +37,21 @@ urlpatterns = [
     ),
     path("auftraege/<int:auftrag_id>/ergebnis/", views.eigenes_ergebnis, name="eigenes_ergebnis"),
     path("auftraege/<int:auftrag_id>/antwort/", views.antwort, name="antwort"),
+    path(
+        "vorschlaege/<int:vorschlag_id>/<slug:wahl>/",
+        views.vorschlag_entscheiden,
+        name="vorschlag_entscheiden",
+    ),
+    path(
+        "projekt/<slug:kennung>/vollmachten/",
+        views_akte.vollmacht_erteilen,
+        name="vollmacht_erteilen",
+    ),
+    path(
+        "projekt/<slug:kennung>/vollmachten/<int:nummer>/widerrufen/",
+        views_akte.vollmacht_widerrufen,
+        name="vollmacht_widerrufen",
+    ),
     # Projekte als Arbeitsbereich
     path("projekte/", views.projekte, name="projekte"),
     path("projekte/archiv/", views.projekt_archiv, name="projekt_archiv"),
@@ -118,6 +141,12 @@ urlpatterns = [
     ),
     # Verbindungen
     path("verbindungen/", views.verbindungen, name="verbindungen"),
+    path("verbindungen/w1/erteilen/", views_delegation.erteilen, name="w1_erteilen"),
+    path(
+        "verbindungen/w1/<int:delegation_id>/widerrufen/",
+        views_delegation.widerrufen,
+        name="w1_widerrufen",
+    ),
     path("verbindungen/werkbank/neu/", views_werkbank.werkbank_anlegen, name="werkbank_anlegen"),
     path(
         "verbindungen/werkbank/<int:instanz_id>/<slug:wahl>/",
@@ -166,6 +195,7 @@ urlpatterns = [
     # MCP-Endpunkt und HTTP-Schnittstelle für Zugänge
     path("mcp/", mcp.endpunkt, name="mcp"),
     path("mcp/<str:schluessel>/", mcp.endpunkt, name="mcp_link"),
+    path("api/werkbank/faehigkeiten/", werkbank_api.faehigkeiten, name="werkbank_faehigkeiten"),
     path("api/werkbank/v1/abgleich/", werkbank_api.abgleich, name="werkbank_abgleich"),
     path(
         "api/werkbank/v1/operationen/<str:operation_id>/",
@@ -176,6 +206,7 @@ urlpatterns = [
     path("api/werkbank/v1/schritt/", werkbank_api.schritt, name="werkbank_schritt"),
     path("api/werkbank/v1/ereignisse/", werkbank_api.ereignisse, name="werkbank_ereignisse"),
     path("api/projekt/", api.projekt_lesen, name="api_projekt"),
+    path("api/projekt/regelpruefung/", api.projekt_regelpruefung, name="api_regelpruefung"),
     path("api/projekte/", api.projekte, name="api_projekte"),
     path("api/projekt/akte/", api.projektakte, name="api_projektakte"),
     path("api/projekt/kontext/", api.projektkontext, name="api_projektkontext"),
@@ -200,8 +231,30 @@ urlpatterns = [
     path("api/profil/aendern/", api.profil_aendern, name="api_profil_aendern"),
     path("api/auftraege/<int:auftrag_id>/planen/", api.planen, name="api_planen"),
     path("api/auftraege/<int:auftrag_id>/antworten/", api.antworten, name="api_antworten"),
+    path(
+        "api/auftraege/<int:auftrag_id>/aktionsvorschlag/",
+        api.aktion_vorschlagen,
+        name="api_aktion_vorschlagen",
+    ),
+    path(
+        "api/auftraege/<int:auftrag_id>/aktion/vollmacht/",
+        api.aktion_mit_vollmacht,
+        name="api_aktion_vollmacht",
+    ),
+    path("api/aktionen/", api.aktionen, name="api_aktionen"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),
+    path("api/w1/erlaubnisse/", api.erlaubnisse, name="api_w1_erlaubnisse"),
+    path(
+        "api/w1/auftraege/<int:auftrag_id>/aktion/",
+        api.w1_auftrag_aktion,
+        name="api_w1_auftrag_aktion",
+    ),
+    path(
+        "api/w1/auftraege/anlegen/",
+        api.w1_auftrag_anlegen,
+        name="api_w1_auftrag_anlegen",
+    ),
     path("api/verschiebeziele/", api.verschiebeziele, name="api_verschiebeziele"),
     path("api/auftraege/verschieben/", api.verschieben, name="api_verschieben"),
     path(
@@ -210,6 +263,11 @@ urlpatterns = [
         name="api_verschieben_pruefen",
     ),
     path("api/auftraege/<int:auftrag_id>/", api.auftrag_lesen, name="api_auftrag"),
+    path(
+        "api/auftraege/<int:auftrag_id>/uebernahme-pruefen/",
+        api.uebernahme_pruefen,
+        name="api_uebernahme_pruefen",
+    ),
     path("api/auftraege/<int:auftrag_id>/uebernehmen/", api.uebernehmen, name="api_uebernehmen"),
     path("api/auftraege/<int:auftrag_id>/fortschritt/", api.fortschritt, name="api_fortschritt"),
     path(

@@ -25,16 +25,27 @@ PROTOKOLLE = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 ANWEISUNGEN = (
     "Server-KI-PM ist Freds zentrale Projektsteuerung. Du arbeitest als sein Assistent. "
-    "Wichtigste Regel: Frag Fred, bevor du in KI-PM etwas anlegst oder änderst (Aufträge, Issues, "
+    "Für die bisherigen Werkzeuge gilt: Frag Fred, bevor du in KI-PM etwas anlegst oder änderst "
+    "(Aufträge, Issues, "
     "Entscheidungen, Texte, Meilensteine, Projekte, alles andere auch), und warte auf seine "
     "Antwort. Seine Worte aus dem Chat gehören wörtlich in fred_sagte; ohne dieses Feld lehnt "
     "KI-PM den Aufruf ab und ändert nichts, mit ihm stehen sie im Verlauf. Erfinde sie nie. "
+    "Für kipm_w1_auftrag_anlegen und kipm_w1_auftrag_aktion gilt stattdessen "
+    "ausschließlich eine vom Owner gespeicherte "
+    "W1-Erlaubnis aus kipm_w1_erlaubnisse. Sie ersetzt nur innerhalb ihres konkreten Umfangs "
+    "die Einzelanweisung; fehlende Rechte verlangen eine echte Rückfrage. Beide W1-Werkzeuge "
+    "erteilen oder erweitern keine Erlaubnis. Für Änderungen ist eine eigene anfrage_kennung "
+    "Pflicht; bei unklarem Ausgang denselben Inhalt mit derselben Kennung erneut abrufen. "
     + ARBEIT_NUR_IN_KIPM
     + " Ausgenommen sind nur das Lesen und die Arbeit an einem freigegebenen Auftrag "
     "(kipm_uebernehmen, kipm_fortschritt, kipm_rueckfrage, kipm_hindernis, kipm_fehler, "
     "kipm_ergebnis, kipm_warten_auf_lieferung, kipm_lieferung_melden) sowie eine "
     "offene Frage an Fred (kipm_entscheidung_fragen): Sie legt nichts "
-    "fest, erst seine Antwort macht daraus eine Entscheidung. "
+    "fest, erst seine Antwort macht daraus eine Entscheidung. Ebenso bereitet die Planung mit "
+    "kipm_aktion_vorschlagen eine Wiederaufnahme oder einen Neuschnitt vor; wirksam wird er erst "
+    "mit Freds Bestätigung in der Oberfläche. Hat Fred dem Zugang eine Vollmacht gespeichert "
+    "(kipm_aktionen), führt dieser den genannten technischen Standardfall mit "
+    "kipm_aktion_ausfuehren aus; Chattext ersetzt keine Vollmacht. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
     "Nachweis); nur Offenes, Größeres oder für einen anderen Chat schlägst du Fred für KI-PM vor. "
     "Ablauf eines Auftrags: Entwurf → Freigegeben → In Arbeit → Erledigt oder Blockiert "
@@ -80,6 +91,23 @@ ANWEISUNGEN = (
     "Lieferkette, lehnt KI-PM ab und nennt sie; erst nach Freds Ja mit "
     "lieferketten_bestaetigt=true wiederholen. Verwaiste Bedarfe bindet der Manager mit "
     "kipm_lieferbedarf_festlegen neu. "
+    "Lies im Projektkontext den Projekttext Auftragsregeln mit Kennung und Stand. Bei Planung "
+    "und Freigabe gib für jedes Kriterium erfuellbar_durch an: eigen, auftrag:<Nummer> oder fred. "
+    "Für einen Lieferauftrag brauchst du einen Vorgänger oder konkret geplanten Lieferbedarf. "
+    "Für fred verknüpfst du eine offene Entscheidung. Ordne Kriterien ihren Modulen zu. "
+    "Bei mehreren Modulen verwende art=integration und warte auf alle Vorgänger. Meldet KI-PM "
+    "einen Abhängigkeitskreis, kläre den gesamten genannten Kreisweg vor erneuter Freigabe. "
+    "Bei automatischer Arbeit verwende unbeaufsichtigt=true beim Listen und Übernehmen. "
+    "Wartet ein Auftrag auf Fred, bleibt er liegen. Eine Ordnersperre gilt 60 Minuten und "
+    "verlängert sich mit Meldungen. Bei fremder Sperre warte auf den angezeigten Ablauf oder "
+    "die Freigabe. Nur Freds PC-Chat kann die Sperre mit ausdrücklicher Zustimmung ablösen. "
+    "Melde in kriterien_erfuellt die vollständige Liste erfüllter Kriteriennummern. "
+    "Nach drei Sitzungsenden ohne Zuwachs entscheidet Fred über Zuschnitt oder Abbruch. "
+    "Melde eigene Fehlprüfungen in fehlgeschlagen und belegte Fremdbefunde mit Modul und Beleg "
+    "in fremde_befunde. KI-PM führt je Eigentümermodul ein offenes Sammelissue. Mit "
+    "kipm_regelpruefung prüfst du den Bestand ohne Änderungen. "
+    "kipm_uebernahme_pruefen zeigt für eine konfigurierte Zielbindung mit Prüfrecht den "
+    "aktuellen Stand und konkrete Sperren, ohne Übernahme oder Ordnersperre. "
     "Versionen und Installationen kommen aus GitHub (Releases "
     "und Bereitstellungen); KI-PM liest dort nur, du meldest sie hier nicht."
 )
@@ -118,6 +146,35 @@ _LIEFERKETTEN_BESTAETIGT = {
     "description": "Nur nach Freds ausdrücklichem Ja: Lieferketten trennen (siehe Ablehnung)",
 }
 _LISTE = {"type": "array", "items": {"type": "string"}}
+_KRITERIEN = {
+    "description": (
+        "Abnahmekriterien als strukturierte Liste. eigen prüft der Auftrag selbst. "
+        "auftrag:<Nummer> verlangt einen eingetragenen Vorgänger oder Lieferbedarf. "
+        "fred verlangt bei Freigabe eine verknüpfte offene Entscheidung E-…. "
+        "Für Kriterien über mehrere Module die Art integration verwenden."
+    ),
+    "anyOf": [
+        _LISTE,
+        {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "erfuellbar_durch": {
+                        "type": "string",
+                        "pattern": "^(eigen|fred|auftrag:[A-Za-z0-9-]+)$",
+                    },
+                    "entscheidung": {"type": "string"},
+                    "modul": {"type": "string"},
+                    "nur_mensch": {"type": "boolean"},
+                },
+                "required": ["text", "erfuellbar_durch"],
+                "additionalProperties": False,
+            },
+        },
+    ],
+}
 _MELDUNG = {"auftrag": _AUFTRAG, "revision": _REVISION, "text": _TEXT}
 _LIEFERBEDARF = {
     "type": "array",
@@ -296,11 +353,17 @@ WERKZEUGE = [
     (
         "kipm_auftraege",
         "Offene Aufträge und Issues; ohne projekt und ordner aus allen Projekten. alle=true auch "
-        "abgeschlossene, nur_meine=true nur übernehmbare und eigene, art=issue nur Issues",
+        "abgeschlossene, nur_meine=true nur übernehmbare und eigene, art=issue nur Issues. "
+        "Automatische Läufe setzen unbeaufsichtigt=true. Menschenschritte stehen in "
+        "wartet_auf_fred. Ein durch einen anderen Auftrag belegter Ordner lässt den Auftrag "
+        "freigegeben, aber uebernehmbar=false; ordnersperre zeigt Auftrag und Ablauf der Belegung. "
+        "Wähle für einen Start nur uebernehmbar=true und prüfe die Zielbindung bei Bedarf "
+        "mit kipm_uebernahme_pruefen.",
         {
             "alle": {"type": "boolean"},
             "nur_meine": {"type": "boolean"},
-            "art": {"type": "string", "enum": ["auftrag", "issue"]},
+            "unbeaufsichtigt": {"type": "boolean"},
+            "art": {"type": "string", "enum": ["auftrag", "issue", "integration"]},
         },
         [],
     ),
@@ -314,7 +377,7 @@ WERKZEUGE = [
         {
             "titel": _TEXT,
             "text": {"type": "string", "description": "Beschreibung in Alltagssprache"},
-            "art": {"type": "string", "enum": ["auftrag", "issue"]},
+            "art": {"type": "string", "enum": ["auftrag", "issue", "integration"]},
             "modul": {"type": "string", "description": "Modulkennung"},
             "meilenstein": _MEILENSTEIN,
             "faellig": _FAELLIG,
@@ -324,7 +387,8 @@ WERKZEUGE = [
             "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
             "schreibumfang": _LISTE,
             "quellen": _TEXT,
-            "abnahmekriterien": _LISTE,
+            "abnahmekriterien": _KRITERIEN,
+            "nur_mensch": {"type": "boolean"},
             "freigeben": {
                 "type": "boolean",
                 "description": "Nur auf Freds Anweisung im Chat; vermerkt das im Verlauf",
@@ -334,9 +398,33 @@ WERKZEUGE = [
         ["titel", "text"],
     ),
     (
+        "kipm_uebernahme_pruefen",
+        "Eine bestimmte Auftragsrevision für eine konfigurierte Zielbindung rein lesend prüfen. "
+        "Benötigt ausdrückliches Prüfrecht im Projekt. Liefert Prüfzeitpunkt, Revision und "
+        "Sperrgründe. Die eigentliche Übernahme prüft frisch; kein Startrecht aus der Vorschau.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": {"type": "integer", "minimum": 1},
+            "zielbindung_id": {"type": "integer", "minimum": 1},
+            "unbeaufsichtigt": {"type": "boolean"},
+        },
+        ["auftrag", "revision", "zielbindung_id", "unbeaufsichtigt"],
+    ),
+    (
+        "kipm_regelpruefung",
+        "Projekt gegen die Auftragsregeln R1–R7 prüfen, ohne etwas zu ändern. Meldet "
+        "Kreise, blockierende Kriterien, vorzeitige Integration, Ordnerbelegung, Festfahren "
+        "und Fremdbefunde. Hinweise aus Altdaten und bestätigte Befunde sind gekennzeichnet. "
+        "Menschenschritte stehen unter wartet_auf_fred.",
+        {"projekt": _PROJEKT},
+        ["projekt"],
+    ),
+    (
         "kipm_lesen",
         "Auftrag vollständig lesen: Ziel, Schreibumfang, Abnahmekriterien, Revision, Meldungen, "
-        "fuer_freigabe_fehlt",
+        "fuer_freigabe_fehlt. kriterien enthält Erfüllbarkeit und zugeordnete Entscheidung. "
+        "auftragsregeln nennt Kennung und Stand des Projekttexts. ordnersperre zeigt Halter "
+        "und Ablauf; blockadegrund nennt festgefahrene Aufträge.",
         {"auftrag": _AUFTRAG},
         ["auftrag"],
     ),
@@ -364,12 +452,13 @@ WERKZEUGE = [
             "arbeitsort": {"type": "string", "description": "Arbeitsort-Kennung"},
             "schreibumfang": _LISTE,
             "quellen": _TEXT,
-            "abnahmekriterien": _LISTE,
+            "abnahmekriterien": _KRITERIEN,
+            "nur_mensch": {"type": "boolean"},
             "modul": _TEXT,
             "meilenstein": _MEILENSTEIN,
             "faellig": _FAELLIG,
             "prioritaet": {"type": "string", "enum": ["hoch", "mittel", "niedrig"]},
-            "art": {"type": "string", "enum": ["auftrag", "issue"]},
+            "art": {"type": "string", "enum": ["auftrag", "issue", "integration"]},
             "anlass": _TEXT,
             "freigeben": {"type": "boolean"},
             "lieferketten_bestaetigt": _LIEFERKETTEN_BESTAETIGT,
@@ -391,12 +480,106 @@ WERKZEUGE = [
         ["auftrag", "text"],
     ),
     (
+        "kipm_aktionen",
+        "Lesen für die Vorratsautomation: gültige Vollmachten dieses Zugangs (nummer, aktion, "
+        "bearbeiter, meldungsarten, auftrag, gueltig_bis) und die letzten Aktionen im Projekt mit "
+        "zustand (OFFEN = vorbereitet und wartet auf Fred, AUSGEFUEHRT, ABGELEHNT, VERALTET), "
+        "vollmacht, nachweis und bearbeiter_danach (erste fachliche Meldung des bisherigen "
+        "Bearbeiters nach der Ausführung, sonst null).",
+        {},
+        [],
+    ),
+    (
+        "kipm_aktion_ausfuehren",
+        "Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen, zurzeit nur "
+        "aktion=wiederaufnahme beim bisherigen Bearbeiter. Pflicht: vollmacht (VM-n aus "
+        "kipm_aktionen), revision und meldung_id (maßgebliche Blockademeldung) aus kipm_lesen, "
+        "nachweis der belegten Korrektur als Lieferung {auftrag, revision, lieferung: L-n}, text "
+        "für den Bearbeiter, eigene anfrage_kennung. Braucht kein fred_sagte: Die Befugnis ist "
+        "allein die gespeicherte Vollmacht; Chattext erweitert sie nie. Je Blockademeldung wirkt "
+        "es höchstens einmal (wiederholt=true liefert die frühere Ausführung). Passt etwas "
+        "nicht, lehnt KI-PM mit dem Grund ab und hält ihn als Wartegrund fest; reine "
+        "Lieferblockaden bleiben bei kipm_warten_auf_lieferung.",
+        {
+            "auftrag": _AUFTRAG,
+            "vollmacht": {"type": "string", "description": "z. B. VM-3"},
+            "aktion": {"type": "string", "enum": ["wiederaufnahme"]},
+            "revision": _REVISION,
+            "meldung_id": {"type": "integer"},
+            "nachweis": {
+                "type": "object",
+                "properties": {
+                    "auftrag": {"type": "string"},
+                    "revision": {"type": "integer"},
+                    "lieferung": {"type": "string", "description": "z. B. L-1"},
+                },
+                "required": ["auftrag", "revision", "lieferung"],
+            },
+            "text": _TEXT,
+        },
+        ["auftrag", "vollmacht", "aktion", "revision", "meldung_id", "nachweis", "text"],
+    ),
+    (
+        "kipm_aktion_vorschlagen",
+        "Planung: eine konkrete Aktion am Auftrag zur Bestätigung durch Fred vorbereiten. "
+        "art=wiederaufnahme setzt einen blockierten Auftrag beim selben Bearbeiter fort; "
+        "art=neuschnitt legt mit den angegebenen Planfeldern eine neue Revision an, mit "
+        "freigeben=true danach freigegeben. Bindet die aktuelle revision und bei Blockade die "
+        "maßgebliche Meldung (meldung_id: id der letzten Rückfrage, des Hindernisses oder Fehlers "
+        "aus kipm_lesen). Ändert am Auftrag nichts und braucht kein fred_sagte; die Antwort "
+        "nennt die Auswirkungen (Zustand, Bearbeiter, Revision, Lieferketten). Fred bestätigt "
+        "oder lehnt in der Oberfläche ab, erst dann wirkt es; kipm_lesen zeigt den Stand unter "
+        "aktionsvorschlaege.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "art": {"type": "string", "enum": ["wiederaufnahme", "neuschnitt"]},
+            "meldung_id": {"type": "integer"},
+            "text": {
+                "type": "string",
+                "description": "Was der Bearbeiter tun soll oder warum neu geschnitten wird",
+            },
+            "entscheidung": {"type": "string", "description": "Bezug, z. B. E-12"},
+            "beschreibung": _TEXT,
+            "ziel": _TEXT,
+            "nicht_ziele": _TEXT,
+            "schreibumfang": _LISTE,
+            "quellen": _TEXT,
+            "abnahmekriterien": _LISTE,
+            "freigeben": {"type": "boolean"},
+        },
+        ["auftrag", "revision", "art", "text"],
+    ),
+    (
         "kipm_uebernehmen",
-        "Freigegebenen Auftrag selbst exklusiv übernehmen; revision muss die aktuelle sein",
-        {"auftrag": _AUFTRAG, "revision": _REVISION},
+        "Freigegebenen Auftrag samt Arbeitsordner für 60 Minuten exklusiv übernehmen. "
+        "Automatische Läufe setzen unbeaufsichtigt=true. Menschenschritte warten dann auf Fred. "
+        "Nur Freds PC-Chat kann mit ordnersperre_uebernehmen=true und Freds wörtlicher Zustimmung "
+        "in fred_sagte einen anderen Halter ablösen. Im Verlauf wird die Zustimmung dokumentiert.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "unbeaufsichtigt": {"type": "boolean"},
+            "ordnersperre_uebernehmen": {"type": "boolean"},
+            "fred_sagte": _FRED_SAGTE,
+        },
         ["auftrag", "revision"],
     ),
-    ("kipm_fortschritt", "Fortschritt melden", _MELDUNG, ["auftrag", "revision", "text"]),
+    (
+        "kipm_fortschritt",
+        "Fortschritt melden oder dieselbe Bearbeitung fortsetzen. Verlängert die Ordnersperre. "
+        "kriterien_erfuellt enthält die vollständige Liste jetzt erfüllter Kriteriennummern aus "
+        "kipm_lesen. Nach drei Sitzungsenden ohne Zuwachs wartet der Auftrag auf Fred.",
+        {
+            **_MELDUNG,
+            "kriterien_erfuellt": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 1},
+                "uniqueItems": True,
+            },
+        },
+        ["auftrag", "revision", "text"],
+    ),
     (
         "kipm_warten_auf_lieferung",
         "Nur eigener Bearbeiter: ausschließlich technische Lieferbedarfe registrieren "
@@ -408,7 +591,9 @@ WERKZEUGE = [
     ),
     (
         "kipm_lieferbedarf_festlegen",
-        "Manager: vorhandenen ausschließlich technischen Hindernisblocker auf Freds "
+        "Manager: Für einen Entwurf auf Freds Anweisung technische Lieferungen an der "
+        "aktuellen Auftragsrevision planen. Dazu hindernis_id weglassen, bedarf=[] hebt "
+        "den Planbedarf auf. Bei blockierten Aufträgen vorhandenen Hindernisblocker auf Freds "
         "Anweisung einem genauen Lieferprofil zuordnen; keine Rechte- oder "
         "Entscheidungsblockade. Neu binden: Steht ein Bedarf in kipm_lesen als "
         "verwaist (der Anbieter hat eine neue Revision), denselben Bedarf mit der aktuellen "
@@ -417,7 +602,7 @@ WERKZEUGE = [
         {
             "auftrag": _AUFTRAG,
             "revision": _REVISION,
-            "bedarf": _LIEFERBEDARF,
+            "bedarf": _LIEFERBEDARF | {"minItems": 0},
             "nur_lieferungen": {"const": True},
             "hindernis_id": {
                 "type": "integer",
@@ -425,7 +610,7 @@ WERKZEUGE = [
                 "description": "ID der zuvor gelesenen Hindernismeldung aus kipm_lesen",
             },
         },
-        ["auftrag", "revision", "bedarf", "nur_lieferungen", "hindernis_id"],
+        ["auftrag", "revision", "bedarf", "nur_lieferungen"],
     ),
     (
         "kipm_lieferung_melden",
@@ -466,9 +651,9 @@ WERKZEUGE = [
         "kipm_ergebnis",
         "Ergebnis einreichen; schließt den Auftrag ohne Nutzerabnahme ab. dateien: pfad@commit; "
         "pruefungen: bestandene Prüfungen „befehl: ergebnis“; fehlgeschlagen: gescheiterte "
-        "Prüfungen. Alle bestanden → erledigt; eine fehlgeschlagen → blockiert mit Grund; "
-        "keine Prüfungen (Projekt ohne automatische Tests) → erledigt mit Vermerk „ohne "
-        "automatische Tests“",
+        "eigene Prüfungen; sie blockieren mit Grund. Fremde Prüfbefunde mit belegtem "
+        "Eigentümermodul gehören in fremde_befunde; KI-PM sammelt sie in einem offenen Issue "
+        "je Modul. Ohne Prüfungen ergibt sich der Vermerk „ohne automatische Tests“.",
         {
             "auftrag": _AUFTRAG,
             "revision": _REVISION,
@@ -477,6 +662,15 @@ WERKZEUGE = [
             "pruefungen": _LISTE,
             "fehlgeschlagen": _LISTE,
             "luecken": _TEXT,
+            "fremde_befunde": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"text": _TEXT, "modul": _TEXT, "beleg": _TEXT},
+                    "required": ["text", "modul", "beleg"],
+                    "additionalProperties": False,
+                },
+            },
         },
         ["auftrag", "revision", "zusammenfassung", "dateien"],
     ),
@@ -594,8 +788,8 @@ WERKZEUGE = [
 
 # Werkzeug -> (URL-Name, Felder, die unverändert in den Rumpf gehen)
 _AUFTRAGSWERKZEUGE = {
-    "kipm_uebernehmen": ("api_uebernehmen", ()),
-    "kipm_fortschritt": ("api_fortschritt", ("text",)),
+    "kipm_uebernehmen": ("api_uebernehmen", ("unbeaufsichtigt", "ordnersperre_uebernehmen")),
+    "kipm_fortschritt": ("api_fortschritt", ("text", "kriterien_erfuellt")),
     "kipm_warten_auf_lieferung": (
         "api_auf_lieferung_warten",
         ("text", "bedarf", "nur_lieferungen"),
@@ -613,7 +807,7 @@ _AUFTRAGSWERKZEUGE = {
     "kipm_fehler": ("api_fehler", ("text",)),
     "kipm_ergebnis": (
         "api_ergebnis",
-        ("zusammenfassung", "dateien", "pruefungen", "fehlgeschlagen", "luecken"),
+        ("zusammenfassung", "dateien", "pruefungen", "fehlgeschlagen", "luecken", "fremde_befunde"),
     ),
 }
 
@@ -639,13 +833,99 @@ class _Ungueltig(Exception):
     pass
 
 
+_W1_DELEGIERT = frozenset({"kipm_w1_auftrag_anlegen", "kipm_w1_auftrag_aktion"})
+_w1_anlage = next(w for w in WERKZEUGE if w[0] == "kipm_auftrag_anlegen")
+WERKZEUGE.extend(
+    [
+        (
+            "kipm_w1_erlaubnisse",
+            "Die gespeicherten W1-Erlaubnisse dieses Chats im gewählten Projekt lesen",
+            {},
+            [],
+        ),
+        (
+            "kipm_w1_auftrag_anlegen",
+            "W1-Fachauftrag innerhalb einer echten gespeicherten Erlaubnis anlegen; "
+            "optional zuweisen und freigeben. Kein Laufstart und kein Rückfall auf v1.",
+            {
+                **_w1_anlage[2],
+                "delegation_id": {"type": "integer", "minimum": 1},
+                "delegation_revision": {"type": "integer", "minimum": 1},
+                "ziel_id": {"type": "integer", "minimum": 1},
+                "zuweisen": {"type": "boolean"},
+                "freigeben": {
+                    "type": "boolean",
+                    "description": "Nur mit delegiertem Freigaberecht",
+                },
+                "budget": {
+                    "type": "object",
+                    "properties": {
+                        "waehrung": {"type": "string", "enum": ["USD", "EUR"]},
+                        "geld_mikro": {"type": "integer", "minimum": 0, "maximum": 2**53 - 1},
+                        "zeit_ms": {"type": "integer", "minimum": 1, "maximum": 2**53 - 1},
+                        "aufrufe": {"type": "integer", "minimum": 1, "maximum": 2**53 - 1},
+                    },
+                    "required": ["waehrung", "geld_mikro", "zeit_ms", "aufrufe"],
+                    "additionalProperties": False,
+                },
+            },
+            ["titel", "text", "delegation_id", "delegation_revision", "budget", "anfrage_kennung"],
+        ),
+    ]
+)
+WERKZEUGE.append(
+    (
+        "kipm_w1_auftrag_aktion",
+        "Einen neuen W1-Auftrag innerhalb seiner gespeicherten Erlaubnis "
+        "neu planen, zuweisen oder freigeben. Fachrevision und Erlaubnisfassung sind Pflicht.",
+        {
+            "auftrag": _AUFTRAG,
+            "auftrag_revision": _REVISION,
+            "delegation_id": {"type": "integer", "minimum": 1},
+            "delegation_revision": {"type": "integer", "minimum": 1},
+            "aktion": {"type": "string", "enum": ["auftrag_aendern", "zuweisen", "freigeben"]},
+            "ziel_id": {"type": "integer", "minimum": 1},
+            **{
+                k: v
+                for k, v in _w1_anlage[2].items()
+                if k
+                in {
+                    "titel",
+                    "modul",
+                    "prioritaet",
+                    "ziel",
+                    "nicht_ziele",
+                    "arbeitsort",
+                    "schreibumfang",
+                    "quellen",
+                    "abnahmekriterien",
+                }
+            },
+            "text": _TEXT,
+            "anlass": _TEXT,
+        },
+        [
+            "auftrag",
+            "auftrag_revision",
+            "delegation_id",
+            "delegation_revision",
+            "aktion",
+            "anfrage_kennung",
+        ],
+    )
+)
+
+
 # Alles andere verlangt fred_sagte, auch jedes neue Werkzeug, das hier niemand einträgt.
 _NUR_LESEN = frozenset(
     {
         "kipm_projekte",
+        "kipm_aktionen",
         "kipm_projekt",
         "kipm_auftraege",
         "kipm_lesen",
+        "kipm_regelpruefung",
+        "kipm_uebernahme_pruefen",
         "kipm_projektkontext",
         "kipm_projektakte",
         "kipm_verlauf",
@@ -654,6 +934,7 @@ _NUR_LESEN = frozenset(
         "kipm_meilensteine",
         "kipm_verschiebeziele",
         "kipm_verschieben_pruefen",
+        "kipm_w1_erlaubnisse",
     }
 )
 _ARBEIT_AM_AUFTRAG = frozenset(
@@ -668,11 +949,15 @@ _ARBEIT_AM_AUFTRAG = frozenset(
         "kipm_ergebnis",
     }
 )
-_FRAGE_AN_FRED = frozenset({"kipm_entscheidung_fragen"})
+_FRAGE_AN_FRED = frozenset({"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen"})
+# Befugnis allein aus der gespeicherten Vollmacht (auftragsaktionen.mit_vollmacht_ausfuehren).
+_VOLLMACHT = frozenset({"kipm_aktion_ausfuehren"})
 
 
 def _werkzeug_eintrag(name: str, beschreibung: str, eigenschaften: dict, pflicht: list) -> dict:
-    braucht_fred = name not in _NUR_LESEN | _ARBEIT_AM_AUFTRAG | _FRAGE_AN_FRED
+    braucht_fred = name not in (
+        _NUR_LESEN | _ARBEIT_AM_AUFTRAG | _FRAGE_AN_FRED | _W1_DELEGIERT | _VOLLMACHT
+    )
     return {
         "name": name,
         "description": beschreibung,
@@ -749,8 +1034,71 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
     def rufe(pfad: str, daten=None) -> dict:
         return _intern(schluessel, request, a, pfad, daten)
 
+    if name == "kipm_aktionen":
+        return rufe(reverse("api_aktionen"))
     if name == "kipm_projekte":
         return rufe(reverse("api_projekte"))
+    if name == "kipm_w1_erlaubnisse":
+        return rufe(reverse("api_w1_erlaubnisse"))
+    if name == "kipm_w1_auftrag_aktion":
+        if not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip():
+            raise _Ungueltig(
+                "Für W1 ist eine eigene anfrage_kennung Pflicht; sie wird nicht erfunden."
+            )
+        felder = (
+            "delegation_id",
+            "delegation_revision",
+            "auftrag_revision",
+            "aktion",
+            "ziel_id",
+            "titel",
+            "modul",
+            "prioritaet",
+            "ziel",
+            "nicht_ziele",
+            "arbeitsort",
+            "schreibumfang",
+            "quellen",
+            "abnahmekriterien",
+            "anlass",
+        )
+        daten = _felder(a, felder)
+        daten["vertrag"] = "kipm-chat-delegation/1"
+        if "text" in a:
+            daten["beschreibung"] = a["text"]
+        return rufe(
+            reverse("api_w1_auftrag_aktion", kwargs={"auftrag_id": _nummer(a.get("auftrag"))}),
+            daten,
+        )
+    if name == "kipm_w1_auftrag_anlegen":
+        if not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip():
+            raise _Ungueltig(
+                "Für W1 ist eine eigene anfrage_kennung Pflicht; sie wird nicht erfunden."
+            )
+        felder = (
+            "delegation_id",
+            "delegation_revision",
+            "budget",
+            "ziel_id",
+            "zuweisen",
+            "freigeben",
+            "titel",
+            "modul",
+            "prioritaet",
+            "art",
+            "erzwingen",
+            "ziel",
+            "nicht_ziele",
+            "arbeitsort",
+            "schreibumfang",
+            "quellen",
+            "abnahmekriterien",
+            "meilenstein",
+            "faellig",
+        )
+        daten = _felder(a, felder)
+        daten.update({"vertrag": "kipm-chat-delegation/1", "beschreibung": a.get("text", "")})
+        return rufe(reverse("api_w1_auftrag_anlegen"), daten)
     if name == "kipm_projekt":
         return rufe(reverse("api_projekt"))
     if name == "kipm_verschiebeziele":
@@ -790,14 +1138,14 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         url_name, felder = _PFLEGEWERKZEUGE[name]
         return rufe(reverse(url_name), _felder(a, felder))
     if name == "kipm_auftraege":
-        abfrage = "&".join(f"{k}=1" for k in ("alle", "nur_meine") if a.get(k)) + (
-            f"&art={a['art']}" if a.get("art") else ""
-        )
+        abfrage = "&".join(
+            f"{k}=1" for k in ("alle", "nur_meine", "unbeaufsichtigt") if a.get(k)
+        ) + (f"&art={a['art']}" if a.get("art") else "")
         return rufe(reverse("api_auftraege") + "?" + abfrage.lstrip("&"))
     if name == "kipm_auftrag_anlegen":
         felder = ("titel", "modul", "prioritaet", "art", "erzwingen", "ziel", "nicht_ziele")
         felder += ("arbeitsort", "schreibumfang", "quellen", "abnahmekriterien")
-        daten = _felder(a, (*felder, "freigeben", "meilenstein", "faellig"))
+        daten = _felder(a, (*felder, "freigeben", "meilenstein", "faellig", "nur_mensch"))
         daten["beschreibung"] = a.get("text", "")
         return rufe(reverse("api_auftrag_anlegen"), daten)
     if name == "kipm_projektkontext":
@@ -805,6 +1153,20 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         if a.get("auftrag"):
             teile.append(f"auftrag=A-{_nummer(a['auftrag'])}")
         return rufe(reverse("api_projektkontext") + "?" + "&".join(teile))
+    if name == "kipm_uebernahme_pruefen":
+        revision, ziel = a.get("revision"), a.get("zielbindung_id")
+        unbeaufsichtigt = a.get("unbeaufsichtigt")
+        if any(type(wert) is not int or not 1 <= wert <= 2**63 - 1 for wert in (revision, ziel)):
+            raise _Ungueltig("revision und zielbindung_id müssen positive Ganzzahlen sein.")
+        if type(unbeaufsichtigt) is not bool:
+            raise _Ungueltig("unbeaufsichtigt muss wahr oder falsch sein.")
+        pfad = reverse("api_uebernahme_pruefen", args=[_nummer(a.get("auftrag", ""))])
+        return rufe(
+            f"{pfad}?revision={revision}&zielbindung_id={ziel}"
+            f"&unbeaufsichtigt={str(unbeaufsichtigt).lower()}"
+        )
+    if name == "kipm_regelpruefung":
+        return rufe(reverse("api_regelpruefung"))
     if name == "kipm_projektakte":
         return rufe(reverse("api_projektakte"))
     if name == "kipm_verlauf":
@@ -841,6 +1203,18 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         return rufe(
             reverse("api_antworten", kwargs=nr), _felder(a, ("text", "lieferketten_bestaetigt"))
         )
+    if name == "kipm_aktion_ausfuehren":
+        if not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip():
+            raise _Ungueltig(
+                "Für kipm_aktion_ausfuehren ist eine eigene anfrage_kennung Pflicht; sie wird "
+                "nicht erfunden."
+            )
+        felder = ("vollmacht", "aktion", "revision", "meldung_id", "nachweis", "text")
+        return rufe(reverse("api_aktion_vollmacht", kwargs=nr), _felder(a, felder))
+    if name == "kipm_aktion_vorschlagen":
+        felder = ("revision", "art", "meldung_id", "text", "entscheidung", "beschreibung", "ziel")
+        felder += ("nicht_ziele", "schreibumfang", "quellen", "abnahmekriterien", "freigeben")
+        return rufe(reverse("api_aktion_vorschlagen", kwargs=nr), _felder(a, felder))
     if name in _AUFTRAGSWERKZEUGE:
         url_name, felder = _AUFTRAGSWERKZEUGE[name]
         revision = (
@@ -881,7 +1255,8 @@ def endpunkt(request: HttpRequest, schluessel: str = "") -> HttpResponse:
         schluessel = kopf[7:] if kopf.startswith("Bearer ") else ""
     if schluessel and dienst.werkbank_bindung_finden(schluessel) is not None:
         return _fehlerantwort(403, -32001, dienst.WERKBANK_ABWEISUNG)
-    if not schluessel or dienst.bindung_pruefen(schluessel) is None:
+    bindung = dienst.bindung_finden(schluessel)
+    if bindung is None:
         return _fehlerantwort(
             401, -32001, "Link oder Schlüssel ungültig, abgelaufen oder widerrufen."
         )
@@ -891,11 +1266,18 @@ def endpunkt(request: HttpRequest, schluessel: str = "") -> HttpResponse:
         return _fehlerantwort(400, -32700, "Kein JSON.")
     if not isinstance(nachricht, dict):
         return _fehlerantwort(400, -32600, "Ungültig.")
+    methode = nachricht.get("method", "")
+    params = nachricht.get("params") or {}
+    if not isinstance(params, dict):
+        return _fehlerantwort(400, -32602, "Parameter müssen ein JSON-Objekt sein.")
+    if methode != "tools/call" or params.get("name") not in (
+        "kipm_regelpruefung",
+        "kipm_uebernahme_pruefen",
+    ):
+        dienst.bindung_aktivitaet_vermerken(bindung)
     if "id" not in nachricht:
         return HttpResponse(status=202)  # Benachrichtigung, z. B. notifications/initialized
     rid = nachricht["id"]
-    methode = nachricht.get("method", "")
-    params = nachricht.get("params") or {}
     if methode == "initialize":
         gewuenscht = params.get("protocolVersion")
         return _antwort(

@@ -77,7 +77,7 @@ def _roh(request: HttpRequest) -> bytes:
         return b"x" * (werkbank.MAX_NACHRICHT_BYTES + 1)
 
 
-def werkbank_ansicht(methode: str):
+def werkbank_ansicht(methode: str, *, vertragskopf: bool = True, kontakt: bool = True):
     """Methode, Anmeldung, Vertragskopf, Kontakt und Fehlerübersetzung für jede Ansicht."""
 
     def dekorator(view):
@@ -95,8 +95,9 @@ def werkbank_ansicht(methode: str):
                 )
             try:
                 instanz = _anmelden(request)
-                _vertrag_pruefen(request)
-                if view.__name__ != "operationen":
+                if vertragskopf:
+                    _vertrag_pruefen(request)
+                if kontakt:
                     werkbank.kontakt_setzen(instanz)
                 return view(request, instanz, *args, **kwargs)
             except werkbank.WerkbankFehler as fehler:
@@ -118,6 +119,22 @@ def werkbank_ansicht(methode: str):
     return dekorator
 
 
+@werkbank_ansicht("GET", vertragskopf=False, kontakt=False)
+def faehigkeiten(request: HttpRequest, instanz) -> JsonResponse:
+    try:
+        parameter = request.GET
+    except SuspiciousOperation:
+        parameter = {}
+    if set(parameter) != {"vertrag"} or "X-KIPM-Vertrag" in request.headers:
+        raise werkbank.WerkbankFehler(
+            400,
+            "UNGUELTIGE_NACHRICHT",
+            "Die Vertragsabfrage erwartet ausschließlich den Parameter vertrag.",
+            "Jede angebotene Fassung mit einem eigenen Parameter vertrag angeben.",
+        )
+    return _antwort(werkbank.vertragsangebot(parameter.getlist("vertrag")))
+
+
 @werkbank_ansicht("GET")
 def abgleich(request: HttpRequest, instanz) -> JsonResponse:
     return _antwort(
@@ -125,7 +142,7 @@ def abgleich(request: HttpRequest, instanz) -> JsonResponse:
     )
 
 
-@werkbank_ansicht("GET")
+@werkbank_ansicht("GET", kontakt=False)
 def operationen(request: HttpRequest, instanz, operation_id: str) -> JsonResponse:
     if not _UUID.match(operation_id):
         raise werkbank.WerkbankFehler(

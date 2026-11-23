@@ -21,6 +21,39 @@ def test_anfangsmigration_ist_nicht_neu_erzeugt():
     assert (MIGRATIONEN / "0002_zugaenge_verbindungen.py").exists()
 
 
+def test_kriterienmigration_erhaelt_alttext_und_sichert_neue_zuordnungen(
+    transactional_db, freigegeben
+):
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    from steuerung import auftragsregeln
+    from steuerung.models import Revision
+
+    basis = [("steuerung", "0021_lieferautomatik")]
+    neu = [("steuerung", "0023_auftragskriterien")]
+    revision_id = freigegeben.aktuelle_revision.pk
+    alter_text = freigegeben.aktuelle_revision.abnahmekriterien
+    MigrationExecutor(connection).migrate(basis)
+    try:
+        MigrationExecutor(connection).migrate(neu)
+        bestand = Revision.objects.get(pk=revision_id)
+        assert bestand.abnahmekriterien == alter_text and bestand.kriterienregeln == []
+        assert {k["erfuellbar_durch"] for k in auftragsregeln.kriterien_anzeigen(bestand)} == {
+            "eigen"
+        }
+        bestand.kriterienregeln = [
+            {"text": bestand.kriterien[0], "erfuellbar_durch": "fred", "nur_mensch": False}
+        ]
+        bestand.save(update_fields=["kriterienregeln"])
+        with pytest.raises(RuntimeError, match="gespeicherten Auftragsregeln"):
+            MigrationExecutor(connection).migrate(basis)
+        assert Revision.objects.get(pk=revision_id).kriterienregeln == bestand.kriterienregeln
+    finally:
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+
 def test_migration_nummern_je_projekt(transactional_db):
     """0014 → Folgestand: Festgelegte Kürzel greifen, übrige werden gebildet und sind eindeutig;
     jedes Projekt zählt in der bisherigen Reihenfolge lückenlos, die Zählung läuft danach weiter."""

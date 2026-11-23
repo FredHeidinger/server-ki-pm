@@ -24,9 +24,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 
+from . import auftragsregeln, ordnersperren
 from .models import (
     AUSFUEHRUNG_AKTIV,
     Abhaengigkeit,
+    Aktionsvorschlag,
     Arbeitsort,
     Auftrag,
     ChatBindung,
@@ -146,6 +148,7 @@ def _ereignis(
 
 def _bearbeiter_abloesen(auftrag: Auftrag) -> None:
     """Bearbeiter entfernen, Identität als „letzter Bearbeiter“ behalten."""
+    ordnersperren.freigeben(auftrag)
     if auftrag.hat_bearbeiter:
         auftrag.letzter_bearbeiter_name = auftrag.bearbeiter_name
         auftrag.letzter_bearbeiter_bindung = auftrag.bearbeiter_bindung
@@ -162,7 +165,7 @@ def _werkbank_aktiv(auftrag: Auftrag) -> bool:
     ).exists()
 
 
-def _ohne_aktive_werkbank(handlung: str):
+def _ohne_aktive_werkbank(handlung: str, *, w1_delegiert=False):
     """Aktive Werkbank-Aufträge ändern nur die Werkbank-Aktionen (Antworten, Bearbeitung ändern,
     Abbrechen): Dieser alte Weg darf sie weder neu planen, verschieben, entkoppeln noch
     vorzeitig abschließen (Auftrag 7.2). Termine und Meilensteine bleiben änderbar."""
@@ -173,6 +176,17 @@ def _ohne_aktive_werkbank(handlung: str):
             # Prüfung und Wirkung teilen eine Transaktion (BEGIN IMMEDIATE): Startet die Werkbank
             # dazwischen, sieht die Prüfung das, statt dass die Wirkung eine laufende Ausführung trifft.
             with transaction.atomic():
+                if (
+                    akteur.bindung is not None
+                    and Auftrag.objects.filter(
+                        pk=auftrag.pk, chat_delegation__isnull=False
+                    ).exists()
+                    and not w1_delegiert
+                ):
+                    raise KeinZugriff(
+                        "Dieser W1-Auftrag braucht eine ausdrücklich delegierte Aktion; "
+                        "die frühere Chatplanung erweitert seine Erlaubnis nicht."
+                    )
                 if _werkbank_aktiv(auftrag):
                     raise Konflikt(
                         f"{auftrag.nummer} läuft auf einer KI-Werkbank: {handlung} geht nur über die "
@@ -849,6 +863,9 @@ def bindung_widerrufen(akteur: Akteur, bindung: ChatBindung, grund: str = "") ->
             ereignis="Zugang widerrufen",
             anlass=grund,
         )
+        from . import werkbank
+
+        werkbank.delegation_zugang_geaendert(akteur, bindung)
 
 
 # Alle Tabellen, die einen Zugang vor dem Löschen schützen, auch die früherer Stufen.
@@ -861,6 +878,10 @@ BINDUNG_VERWEISE = (
     ("Nachweis", "bindung"),
     ("ExterneAktion", "bindung"),
     ("WerkbankInstanz", "bindung"),  # eigene Regel in bindung_benutzt
+    ("WerkbankChatDelegation", "bindung"),
+    ("Aktionsvorschlag", "bindung"),
+    ("Aktionsvollmacht", "ausfuehrende_bindung"),
+    ("Aktionsvollmacht", "bearbeiter_bindung"),
 )
 
 
@@ -970,8 +991,12 @@ def bindung_pruefen(schluessel: str) -> ChatBindung | None:
     Ein Werkbank-Schlüssel gilt hier nie: Chat-Wege liefert er nicht."""
     bindung = bindung_finden(schluessel)
     if bindung is not None:
-        ChatBindung.objects.filter(pk=bindung.pk).update(zuletzt_aktiv=timezone.now())
+        bindung_aktivitaet_vermerken(bindung)
     return bindung
+
+
+def bindung_aktivitaet_vermerken(bindung: ChatBindung) -> None:
+    ChatBindung.objects.filter(pk=bindung.pk).update(zuletzt_aktiv=timezone.now())
 
 
 def _bindung_laden(schluessel: str) -> ChatBindung | None:
@@ -986,6 +1011,17 @@ def _bindung_laden(schluessel: str) -> ChatBindung | None:
     if not secrets.compare_digest(bindung.schluessel_hash, _schluessel_hash(schluessel.strip())):
         return None
     return bindung
+
+
+def _chatbindung_im_projekt_gilt(bindung: ChatBindung, projekt: Projekt) -> bool:
+    return (
+        bindung.aktiv
+        and bindung.rolle == ChatBindung.ROLLE_BEARBEITER
+        and (
+            bindung.art == ChatBindung.ART_PC
+            or (bindung.art == ChatBindung.ART_PROJEKT and bindung.projekt_id == projekt.pk)
+        )
+    )
 
 
 def bindung_finden(schluessel: str) -> ChatBindung | None:
@@ -1128,6 +1164,7 @@ class Pruefpunkt:
     vorgaenger_angebot: Auftrag | None = None
     # Oberfläche zeigt an diesem Punkt die Auswahl vorhandener Arbeitsorte und „+ Arbeitsort“.
     arbeitsort_wahl: bool = False
+    code: str = "PLANUNG_UNVOLLSTAENDIG"
 
 
 def _ueberschneidungen(
@@ -1159,20 +1196,119 @@ def _ueberschneidungen(
 
 
 def _erzeugt_zyklus(auftrag: Auftrag, neuer_vorgaenger: Auftrag) -> bool:
-    """Wahr, wenn ``neuer_vorgaenger`` direkt oder indirekt von ``auftrag`` abhängt."""
-    gesehen: set[int] = set()
-    stapel = [neuer_vorgaenger.pk]
-    while stapel:
-        aktuell = stapel.pop()
-        if aktuell == auftrag.pk:
-            return True
-        if aktuell in gesehen:
-            continue
-        gesehen.add(aktuell)
-        stapel.extend(
-            Abhaengigkeit.objects.filter(auftrag_id=aktuell).values_list("vorgaenger_id", flat=True)
-        )
-    return False
+    return bool(auftragsregeln.kreisweg(auftrag, neuer_vorgaenger))
+
+
+def auftragskreis_pruefen(auftrag: Auftrag, weiterer_vorgaenger: Auftrag | None = None) -> None:
+    weg = auftragsregeln.kreisweg(auftrag, weiterer_vorgaenger)
+    if weg:
+        raise Konflikt(f"Kreis im Abhängigkeitsgraphen: {weg}")
+
+
+def _kriterien_planen(roh, projekt_id, bisher=()):
+    from .models import Entscheidung
+
+    if isinstance(roh, str) or (
+        isinstance(roh, list) and all(isinstance(eintrag, str) for eintrag in roh)
+    ):
+        texte = zeilen(roh if isinstance(roh, str) else "\n".join(roh))
+        zur_auswahl = list(bisher)
+        regeln = []
+        for text in texte:
+            index = next((i for i, regel in enumerate(zur_auswahl) if regel["text"] == text), None)
+            regeln.append(
+                zur_auswahl.pop(index)
+                if index is not None
+                else {"text": text, "erfuellbar_durch": "eigen", "nur_mensch": False}
+            )
+        if any(
+            k["erfuellbar_durch"] != "eigen" or k["nur_mensch"] or "modul_id" in k
+            for k in zur_auswahl
+        ):
+            raise Konflikt("Geänderte Kriterien mit Zuordnung als strukturierte Liste senden.")
+        return regeln
+    if not isinstance(roh, list):
+        raise DienstFehler("Abnahmekriterien brauchen Text oder eine Kriterienliste.")
+
+    regeln = []
+    for nr, eingabe in enumerate(roh, start=1):
+        if not isinstance(eingabe, dict) or set(eingabe) - {
+            "text",
+            "erfuellbar_durch",
+            "nur_mensch",
+            "entscheidung",
+            "modul",
+        }:
+            raise DienstFehler(f"Kriterium {nr} enthält unbekannte Felder oder ist kein Objekt.")
+        text = eingabe.get("text")
+        wer = eingabe.get("erfuellbar_durch")
+        nur_mensch = eingabe.get("nur_mensch", False)
+        if not isinstance(text, str) or len(text.strip().splitlines()) != 1:
+            raise DienstFehler(f"Kriterium {nr} braucht einen nichtleeren Text in einer Zeile.")
+        if not isinstance(wer, str) or type(nur_mensch) is not bool:
+            raise DienstFehler(
+                f"Kriterium {nr} braucht erfuellbar_durch und einen booleschen Wert."
+            )
+        regel = {"text": text.strip(), "erfuellbar_durch": wer, "nur_mensch": nur_mensch}
+        if wer.startswith("auftrag:"):
+            nummer = wer.removeprefix("auftrag:")
+            try:
+                pk = auftrag_id_aus_nummer(nummer)
+            except DienstFehler as fehler:
+                raise DienstFehler(f"Kriterium {nr} nennt keinen gültigen Auftrag.") from fehler
+            anbieter = Auftrag.objects.filter(pk=pk, projekt_id=projekt_id).first()
+            if anbieter is None:
+                raise DienstFehler(f"Kriterium {nr} nennt keinen Auftrag dieses Projekts.")
+            regel.update(auftrag_id=anbieter.pk, erfuellbar_durch=f"auftrag:{anbieter.nummer}")
+        elif wer not in ("eigen", "fred"):
+            raise DienstFehler(f"Kriterium {nr} braucht eigen, auftrag:<Nummer> oder fred.")
+
+        if "entscheidung" in eingabe:
+            referenz = eingabe["entscheidung"]
+            if (
+                wer != "fred"
+                or not isinstance(referenz, str)
+                or not re.fullmatch(r"E-[1-9][0-9]{0,17}", referenz)
+            ):
+                raise DienstFehler(f"Kriterium {nr} braucht bei fred eine Entscheidungskennung E-…")
+            entscheidung = Entscheidung.objects.filter(
+                pk=int(referenz[2:]), betroffene_projekte=projekt_id
+            ).first()
+            if entscheidung is None:
+                raise DienstFehler(f"Kriterium {nr} nennt keine Entscheidung dieses Projekts.")
+            regel.update(entscheidung=entscheidung.nummer, entscheidung_id=entscheidung.pk)
+
+        if "modul" in eingabe:
+            kennung = eingabe["modul"]
+            modul = (
+                Modul.objects.filter(projekt_id=projekt_id, kennung=kennung, aktiv=True).first()
+                if isinstance(kennung, str)
+                else None
+            )
+            if modul is None:
+                raise DienstFehler(f"Kriterium {nr} nennt kein aktives Modul dieses Projekts.")
+            regel.update(modul=modul.kennung, modul_id=modul.pk)
+        regeln.append(regel)
+    return regeln
+
+
+def _kriterien_graph_pruefen(auftrag, regeln, typ, modul):
+    weg = auftragsregeln.kreisweg(auftrag, neue_kriterien=regeln)
+    if weg:
+        raise Konflikt(f"Kreis im Abhängigkeitsgraphen: {weg}")
+    if typ != Auftrag.TYP_INTEGRATION and auftragsregeln.mehrere_module(
+        regeln, auftrag.projekt_id, modul.pk if modul is not None else None
+    ):
+        raise Konflikt("Abnahmekriterien über mehrere Module brauchen die Art Integration.")
+
+
+def _kriterien_zusatzregeln(regeln):
+    if any(
+        regel["erfuellbar_durch"] != "eigen" or regel["nur_mensch"] or "modul_id" in regel
+        for regel in regeln
+    ):
+        return regeln
+    return []
 
 
 def _arbeitsort_punkt(rev: Revision) -> Pruefpunkt:
@@ -1230,6 +1366,7 @@ def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
             if auftrag.abhaengigkeiten.exists()
             else "Abhängigkeiten erfüllt (keine)",
             ", ".join(f"{v.nummer} ist {v.get_zustand_display()}" for v in offene),
+            code="VORGAENGER_OFFEN",
         )
     )
     ueberschneidungen = _ueberschneidungen(auftrag, rev)
@@ -1243,10 +1380,15 @@ def freigabepruefung(auftrag: Auftrag) -> list[Pruefpunkt]:
                 f"„{m1}“ überschneidet „{m2}“. Ausweg: {anderer.nummer} als Vorgänger eintragen "
                 "oder den Umfang einschränken.",
                 angebot,
+                code="SCHREIBUMFANG_BELEGT",
             )
         )
     else:
         punkte.append(Pruefpunkt(True, "Keine Überschneidung mit laufenden Aufträgen"))
+    punkte.extend(
+        Pruefpunkt(False, text, "Die Zuordnung des Kriteriums vor der Freigabe klären.")
+        for text in auftragsregeln.kriterien_fehler(auftrag, rev)
+    )
     return punkte
 
 
@@ -1270,16 +1412,25 @@ def wunsch_erfassen(
     planung: dict | None = None,
     meilenstein: Meilenstein | None = None,
     faellig=None,
+    nur_mensch: bool = False,
+    w1_delegation_id: int | None = None,
+    w1_revision: int | None = None,
+    w1_budget: dict | None = None,
 ) -> Auftrag:
     """Auftrag im Entwurf anlegen. Menschen und Chats des Projekts; mit ``planung`` (Ziel,
     Nicht-Ziele, Arbeitsort, Schreibumfang, Quellen, Abnahmekriterien) gleich geplant, das dürfen
     nur Owner und Assistent. Gleicher Titel wie ein offener Auftrag gilt als Doppelung, außer
     ``erzwingen``."""
     _projekt_sichtbar(akteur, projekt)
+    if type(nur_mensch) is not bool:
+        raise DienstFehler("nur_mensch muss wahr oder falsch sein.")
+    if nur_mensch:
+        _planung_erforderlich(akteur, "Menschenschritte markieren")
     faellig = datum_lesen(faellig)
     planung = {k: v for k, v in (planung or {}).items() if v not in (None, "")}
     if planung:
-        _planung_erforderlich(akteur, "Aufträge planen")
+        if w1_delegation_id is None:
+            _planung_erforderlich(akteur, "Aufträge planen")
         if set(planung) - set(PLANFELDER):
             fremd = ", ".join(sorted(set(planung) - set(PLANFELDER)))
             raise DienstFehler(f"Unbekanntes Planungsfeld: {fremd}")
@@ -1293,7 +1444,7 @@ def wunsch_erfassen(
     if meilenstein is not None and meilenstein.projekt_id != projekt.pk:
         raise DienstFehler("Der Meilenstein gehört nicht zu diesem Projekt.")
     if typ not in dict(Auftrag.TYPEN):
-        raise DienstFehler("Die Art muss „auftrag“ oder „issue“ sein.")
+        raise DienstFehler("Die Art muss „auftrag“, „issue“ oder „integration“ sein.")
     if not erzwingen:
         doppelt = doppelte_auftraege(projekt, titel)
         if doppelt:
@@ -1303,6 +1454,26 @@ def wunsch_erfassen(
                 + "; zuerst dort nachsehen oder das Anlegen ausdrücklich erzwingen."
             )
     with transaction.atomic():
+        w1 = {}
+        if w1_delegation_id is not None:
+            from . import werkbank
+
+            delegation, _ = werkbank.delegation_pruefen(
+                akteur,
+                projekt,
+                delegation_id=w1_delegation_id,
+                revision=w1_revision,
+                aktion="auftrag_anlegen",
+                arbeitsort=planung.get("arbeitsort"),
+            )
+            w1 = {
+                "chat_delegation": delegation,
+                "chat_delegation_revision": w1_revision,
+                "chat_budget": werkbank.delegation_budget_pruefen(w1_budget),
+                "ausfuehrungsweg": Auftrag.WEG_WERKBANK,
+            }
+        elif w1_revision is not None or w1_budget is not None:
+            raise KeinZugriff("Die W1-Erlaubnis fehlt.")
         # Die Transaktion hält die Schreibsperre (IMMEDIATE): Zwei Anlagen bekommen nie dieselbe Zahl.
         Projekt.objects.filter(pk=projekt.pk).update(naechste_nummer=F("naechste_nummer") + 1)
         nummer = Projekt.objects.values_list("naechste_nummer", flat=True).get(pk=projekt.pk) - 1
@@ -1315,8 +1486,13 @@ def wunsch_erfassen(
             titel=titel.strip(),
             prioritaet=prioritaet,
             typ=typ,
+            nur_mensch=nur_mensch,
             revision_nr=1,
+            **w1,
         )
+        regeln = _kriterien_planen(planung.get("abnahmekriterien", ""), projekt.pk)
+        if regeln:
+            _kriterien_graph_pruefen(auftrag, regeln, typ, modul)
         Revision.objects.create(
             auftrag=auftrag,
             nummer=1,
@@ -1326,7 +1502,8 @@ def wunsch_erfassen(
             arbeitsort=planung.get("arbeitsort"),
             schreibumfang="\n".join(zeilen(planung.get("schreibumfang", ""))),
             quellen=str(planung.get("quellen", "")).strip(),
-            abnahmekriterien="\n".join(zeilen(planung.get("abnahmekriterien", ""))),
+            abnahmekriterien="\n".join(k["text"] for k in regeln),
+            kriterienregeln=_kriterien_zusatzregeln(regeln),
             erstellt_von_name=akteur.name,
             anlass="Angelegt und geplant" if planung else "Angelegt",
         )
@@ -1365,6 +1542,7 @@ def auftrag_anlegen(
     freigeben: bool = False,
     meilenstein: Meilenstein | None = None,
     faellig=None,
+    nur_mensch: bool = False,
 ) -> Auftrag:
     """Auftrag in einem Schritt anlegen, planen und auf Anweisung freigeben. Alles oder nichts:
     scheitert die Freigabeprüfung, wird auch nichts angelegt."""
@@ -1381,6 +1559,7 @@ def auftrag_anlegen(
             planung=planung,
             meilenstein=meilenstein,
             faellig=faellig,
+            nur_mensch=nur_mensch,
         )
         if freigeben:
             auftrag_freigeben(akteur, auftrag)
@@ -1396,7 +1575,7 @@ BEARBEITBARE_ZUSTAENDE = (
 )
 
 
-@_ohne_aktive_werkbank("Neu planen")
+@_ohne_aktive_werkbank("Neu planen", w1_delegiert=True)
 def auftrag_bearbeiten(
     akteur: Akteur,
     auftrag: Auftrag,
@@ -1408,12 +1587,14 @@ def auftrag_bearbeiten(
     arbeitsort: Arbeitsort | None,
     schreibumfang: str,
     quellen: str,
-    abnahmekriterien: str,
+    abnahmekriterien: str | list,
     prioritaet: str,
     modul: Modul | None,
     anlass: str = "",
     typ: str | None = None,
     lieferketten_bestaetigt: bool = False,
+    nur_mensch: bool | None = None,
+    w1_revision=None,
 ) -> Revision:
     """Neue Revision anlegen. Freigabe und laufende Übernahme erlöschen; der Auftrag geht zurück
     in den Entwurf und braucht eine neue Freigabe. Trennt die Revision offene technische
@@ -1421,7 +1602,10 @@ def auftrag_bearbeiten(
     ``lieferketten_bestaetigt``; dann hält der Verlauf fest, welche Bedarfe verwaist sind."""
     from . import lieferungen
 
-    _planung_erforderlich(akteur, "Aufträge bearbeiten")
+    if nur_mensch is not None and type(nur_mensch) is not bool:
+        raise DienstFehler("nur_mensch muss wahr oder falsch sein.")
+    if not Auftrag.objects.filter(pk=auftrag.pk, chat_delegation__isnull=False).exists():
+        _planung_erforderlich(akteur, "Aufträge bearbeiten")
     if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
         raise Konflikt(
             f"Ein Auftrag im Zustand „{auftrag.get_zustand_display()}“ kann nicht geändert werden."
@@ -1433,14 +1617,31 @@ def auftrag_bearbeiten(
     if not titel.strip():
         raise DienstFehler("Der Titel darf nicht leer sein.")
     if typ is not None and typ not in dict(Auftrag.TYPEN):
-        raise DienstFehler("Die Art muss „auftrag“ oder „issue“ sein.")
+        raise DienstFehler("Die Art muss „auftrag“, „issue“ oder „integration“ sein.")
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
+        if auftrag.chat_delegation_id is not None:
+            from . import werkbank
+
+            werkbank.delegation_auftrag_pruefen(
+                akteur,
+                auftrag,
+                "auftrag_aendern",
+                revision=w1_revision,
+                arbeitsort=arbeitsort,
+            )
+        else:
+            _planung_erforderlich(akteur, "Aufträge bearbeiten")
         if auftrag.zustand not in BEARBEITBARE_ZUSTAENDE:
             raise Konflikt(
                 f"Der Auftrag ist inzwischen „{auftrag.get_zustand_display()}“ "
                 "und kann nicht geändert werden."
             )
+        vorher = auftrag.aktuelle_revision
+        regeln = _kriterien_planen(
+            abnahmekriterien, auftrag.projekt_id, bisher=vorher.kriterienregeln
+        )
+        _kriterien_graph_pruefen(auftrag, regeln, typ or auftrag.typ, modul)
         ketten = lieferungen.betroffene_ketten(auftrag)
         if ketten and lieferketten_bestaetigt is not True:
             raise Konflikt(lieferungen.warnung_bearbeiten(auftrag, ketten))
@@ -1454,7 +1655,8 @@ def auftrag_bearbeiten(
             arbeitsort=arbeitsort,
             schreibumfang="\n".join(zeilen(schreibumfang)),
             quellen=quellen.strip(),
-            abnahmekriterien="\n".join(zeilen(abnahmekriterien)),
+            abnahmekriterien="\n".join(k["text"] for k in regeln),
+            kriterienregeln=_kriterien_zusatzregeln(regeln),
             erstellt_von_name=akteur.name,
             anlass=anlass.strip() or "Bearbeitet",
         )
@@ -1463,6 +1665,8 @@ def auftrag_bearbeiten(
         auftrag.modul = modul
         if typ is not None:
             auftrag.typ = typ
+        if nur_mensch is not None:
+            auftrag.nur_mensch = nur_mensch
         auftrag.revision_nr = nummer
         folge = ""
         if auftrag.zustand == Auftrag.FREIGEGEBEN:
@@ -1479,6 +1683,7 @@ def auftrag_bearbeiten(
             auftrag.freigegeben_am = None
             folge = f"Übernahme von {auftrag.letzter_bearbeiter_name} erloschen, zurück in Entwurf"
         auftrag.save()
+        lieferungen.lieferplan_uebertragen(akteur, auftrag, vorher.nummer)
         getrennt = f"Lieferketten getrennt: {lieferungen.ketten_text(ketten)}" if ketten else ""
         _ereignis(
             akteur,
@@ -1566,18 +1771,17 @@ def vorgaenger_eintragen(
 ) -> None:
     _planung_erforderlich(akteur, "Abhängigkeiten eintragen")
     if vorgaenger.pk == auftrag.pk:
-        raise DienstFehler("Ein Auftrag kann nicht von sich selbst abhängen.")
+        raise DienstFehler(
+            "Ein Auftrag kann nicht von sich selbst abhängen. "
+            f"Kreis: {auftrag.nummer} -> {auftrag.nummer}."
+        )
     if vorgaenger.projekt_id != auftrag.projekt_id:
         raise DienstFehler("Vorgänger müssen zum selben Projekt gehören.")
     try:
         with transaction.atomic():
             # BEGIN IMMEDIATE sperrt Schreiber; Zyklus- und Doppelprüfung sind damit atomar.
             Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-            if _erzeugt_zyklus(auftrag, vorgaenger):
-                raise Konflikt(
-                    f"{vorgaenger.nummer} hängt bereits von {auftrag.nummer} ab; "
-                    "das ergäbe einen Kreis."
-                )
+            auftragskreis_pruefen(auftrag, vorgaenger)
             Abhaengigkeit.objects.create(
                 auftrag=auftrag, vorgaenger=vorgaenger, grund=grund.strip()
             )
@@ -2219,17 +2423,40 @@ def _verschieben_anwenden(akteur: Akteur, p: dict) -> dict:
 IM_CHAT_FREIGEGEBEN = "freigegeben auf Freds Anweisung im Chat"
 
 
-def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
+def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag, *, w1_revision=None) -> None:
     """Freigabe bindet die aktuelle Revision; nur aus dem Entwurf. Der Owner gibt in der
     Oberfläche frei, sein Assistent auf Freds Anweisung im Chat (mit Vermerk)."""
     _projekt_sichtbar(akteur, auftrag.projekt)  # Fremdes gilt als nicht vorhanden
-    _planung_erforderlich(akteur, "Aufträge freigeben")
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if auftrag.chat_delegation_id is not None:
+            from . import werkbank
+
+            _, stand = werkbank.delegation_auftrag_pruefen(
+                akteur,
+                auftrag,
+                "freigeben",
+                revision=w1_revision,
+                arbeitsort=auftrag.aktuelle_revision.arbeitsort,
+            )
+            from .models import WerkbankZuweisung
+
+            zuweisung = WerkbankZuweisung.objects.filter(auftrag=auftrag).first()
+            if zuweisung is None:
+                raise Konflikt(
+                    "Den W1-Auftrag vor der Freigabe einem erlaubten Werkbankziel zuweisen."
+                )
+            ziel = werkbank.delegation_ziel_pruefen(stand, zuweisung.projektbindung_id, bereit=True)
+            if ziel.arbeitsort_id != auftrag.aktuelle_revision.arbeitsort_id:
+                raise Konflikt("Der geplante Arbeitsort passt nicht zum zugewiesenen Werkbankziel.")
+            werkbank.delegation_budget_reservieren(akteur, auftrag, revision=stand.revision)
+        else:
+            _planung_erforderlich(akteur, "Aufträge freigeben")
         if auftrag.zustand != Auftrag.ENTWURF:
             raise Konflikt(
                 f"Freigabe ist aus dem Zustand „{auftrag.get_zustand_display()}“ nicht möglich."
             )
+        auftragskreis_pruefen(auftrag)
         offen = [p for p in freigabepruefung(auftrag) if not p.erfuellt]
         if offen:
             raise Konflikt("Freigabe nicht möglich: " + "; ".join(p.text for p in offen))
@@ -2246,7 +2473,13 @@ def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag) -> None:
             objekt_typ="Auftrag",
             objekt_kennung=auftrag.nummer,
             ereignis="Freigegeben",
-            anlass=IM_CHAT_FREIGEGEBEN if akteur.bindung is not None else "",
+            anlass=(
+                f"W1-Erlaubnis {auftrag.chat_delegation_id}, Fassung {auftrag.chat_delegation_revision}"
+                if auftrag.chat_delegation_id is not None
+                else IM_CHAT_FREIGEGEBEN
+                if akteur.bindung is not None
+                else ""
+            ),
             revision=str(auftrag.revision_nr),
         )
 
@@ -2259,6 +2492,10 @@ def freigabe_zuruecknehmen(akteur: Akteur, auftrag: Auftrag, grund: str = "") ->
             raise Konflikt(
                 "Nur ein freigegebener, noch nicht übernommener Auftrag kann zurückgenommen werden."
             )
+        if auftrag.chat_delegation_id is not None:
+            from . import werkbank
+
+            werkbank.delegation_budget_freigeben(akteur, auftrag)
         auftrag.zustand = Auftrag.ENTWURF
         auftrag.freigegeben_am = None
         auftrag.save(update_fields=["zustand", "freigegeben_am", "aktualisiert_am"])
@@ -2329,62 +2566,186 @@ def bearbeitung_unklar(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
 # --- Aufträge: Bearbeiter (Chat oder Mensch) -----------------------------------------------
 
 
-def auftrag_uebernehmen(akteur: Akteur, auftrag: Auftrag, revision_nr: int) -> Auftrag:
+def _ordnersperrgrund(akteur, auftrag, fremd, *, nur_projekt=False):
+    halter = (
+        f"{fremd.auftrag.nummer} ({fremd.auftrag.bearbeiter_name})"
+        if fremd.auftrag.projekt_id == auftrag.projekt_id
+        or (not nur_projekt and (akteur.ist_assistent or akteur.ist_owner))
+        else "einen Auftrag in einem anderen Projekt"
+    )
+    return f"Arbeitsordner durch {halter} bis {fremd.ablauf.isoformat()} gesperrt."
+
+
+def _ordnersperre_sichern(akteur: Akteur, auftrag: Auftrag, *, ersetzen: bool = False):
+    fremd = ordnersperren.sichern(auftrag, ersetzen=ersetzen)
+    if fremd is not None and not ersetzen:
+        raise Konflikt(_ordnersperrgrund(akteur, auftrag, fremd))
+    return fremd
+
+
+def _uebernahme_hindernisse(
+    akteur: Akteur,
+    auftrag: Auftrag,
+    revision_nr: int,
+    *,
+    unbeaufsichtigt: bool,
+    ersetzen: bool = False,
+    pruefzeit=None,
+    nur_projekt=False,
+):
+    """Fachliche Prüfung für Vorschau und Übernahme. Führt ausschließlich Lesezugriffe aus."""
+    from . import lieferungen
+
+    _projekt_sichtbar(akteur, auftrag.projekt)
+    if akteur.bindung is None and not akteur.ist_owner:
+        raise KeinZugriff("Übernehmen dürfen Chat-Bindungen oder der Owner.")
+    if not auftrag.projekt.aktiv:
+        return [("PROJEKT_ARCHIVIERT", f"{auftrag.nummer} gehört zu einem archivierten Projekt.")]
+    if akteur.bindung is not None and not ersetzen:
+        if akteur.projekt is None or akteur.projekt.pk != auftrag.projekt_id:
+            raise KeinZugriff("Nicht gefunden.")
+    if auftrag.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
+        return [
+            (
+                "WERKBANK_ZUGEWIESEN",
+                f"{auftrag.nummer} ist einer KI-Werkbank zugewiesen und kann nicht von einem "
+                "Chat übernommen werden. Der Owner hebt die Zuweisung auf, wenn ein Chat ran soll.",
+            )
+        ]
+    gruende = []
+    bearbeiterwechsel = _wechsel_bei_uebernahme(auftrag, ersetzen)
+    if not bearbeiterwechsel and (auftrag.zustand != Auftrag.FREIGEGEBEN or auftrag.hat_bearbeiter):
+        if auftrag.hat_bearbeiter:
+            gruende.append(
+                (
+                    "BEREITS_UEBERNOMMEN",
+                    f"{auftrag.nummer} wurde bereits von {auftrag.bearbeiter_name} übernommen.",
+                )
+            )
+        else:
+            gruende.append(
+                (
+                    "NICHT_FREIGEGEBEN",
+                    f"{auftrag.nummer} ist nicht übernehmbar (Zustand {auftrag.get_zustand_display()}).",
+                )
+            )
+    if auftrag.revision_nr != revision_nr:
+        gruende.append(
+            (
+                "REVISION_VERALTET",
+                f"Revision {revision_nr} ist veraltet; aktuell ist Revision {auftrag.revision_nr}.",
+            )
+        )
+        return gruende
+    if unbeaufsichtigt and auftragsregeln.menschenschritt(auftrag):
+        gruende.append(
+            (
+                "MENSCHENSCHRITT",
+                f"{auftrag.nummer}: Wartet auf Fred. Ein Menschenschritt ist offen.",
+            )
+        )
+    for punkt in freigabepruefung(auftrag):
+        if not punkt.erfuellt:
+            grund = f"Übernahme nicht möglich: {punkt.text}"
+            if punkt.hinweis:
+                grund += f". {punkt.hinweis}"
+            gruende.append((punkt.code, grund))
+    gruende.extend(
+        ("LIEFERBEDARF_OFFEN", grund) for grund in lieferungen.offene_uebernahmebedarfe(auftrag)
+    )
+    pfad = ordnersperren.pfadschluessel(auftrag.aktuelle_revision.arbeitsort)
+    if bearbeiterwechsel and not pfad:
+        gruende.append(
+            (
+                "ARBEITSORDNER_FEHLT",
+                "Dieser Auftrag hat keinen Arbeitsordner für eine ausdrückliche Übernahme.",
+            )
+        )
+    if not ersetzen:
+        fremd = ordnersperren.belegung(pfad, jetzt=pruefzeit)
+        if fremd is not None and fremd.auftrag_id != auftrag.pk:
+            gruende.append(
+                (
+                    "ORDNER_GESPERRT",
+                    _ordnersperrgrund(akteur, auftrag, fremd, nur_projekt=nur_projekt),
+                )
+            )
+    return gruende
+
+
+def _wechsel_bei_uebernahme(auftrag, ersetzen):
+    return ersetzen and auftrag.zustand == Auftrag.IN_ARBEIT and auftrag.hat_bearbeiter
+
+
+def auftrag_uebernehmen(
+    akteur: Akteur,
+    auftrag: Auftrag,
+    revision_nr: int,
+    *,
+    unbeaufsichtigt: bool = False,
+    ordnersperre_uebernehmen: bool = False,
+) -> Auftrag:
     """Exklusive Übernahme in einer Transaktion. Genau eine konkurrierende Anfrage gewinnt."""
     _projekt_sichtbar(akteur, auftrag.projekt)
+    if type(unbeaufsichtigt) is not bool:
+        raise DienstFehler("unbeaufsichtigt muss wahr oder falsch sein.")
+    if type(ordnersperre_uebernehmen) is not bool:
+        raise DienstFehler("ordnersperre_uebernehmen muss wahr oder falsch sein.")
+    if ordnersperre_uebernehmen:
+        _planung_erforderlich(akteur, "Ordnersperre ausdrücklich übernehmen")
+        if unbeaufsichtigt:
+            raise DienstFehler("Eine ausdrückliche Ordnerübernahme braucht Freds Chat.")
+        if akteur.ist_assistent and not akteur.fred_sagte:
+            raise DienstFehler("Die ausdrückliche Ordnerübernahme braucht fred_sagte.")
     if akteur.bindung is None and not akteur.ist_owner:
         raise KeinZugriff("Übernehmen dürfen Chat-Bindungen oder der Owner.")
     with transaction.atomic():
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
-        if not aktuell.projekt.aktiv:
-            raise Konflikt(f"{aktuell.nummer} gehört zu einem archivierten Projekt.")
-        if aktuell.ausfuehrungsweg == Auftrag.WEG_WERKBANK:
-            raise Konflikt(
-                f"{aktuell.nummer} ist einer KI-Werkbank zugewiesen und kann nicht von einem "
-                "Chat übernommen werden. Der Owner hebt die Zuweisung auf, wenn ein Chat ran soll."
-            )
-        if aktuell.zustand != Auftrag.FREIGEGEBEN or aktuell.hat_bearbeiter:
-            if aktuell.hat_bearbeiter:
-                raise Konflikt(
-                    f"{aktuell.nummer} wurde bereits von {aktuell.bearbeiter_name} übernommen."
-                )
-            raise Konflikt(
-                f"{aktuell.nummer} ist nicht übernehmbar (Zustand {aktuell.get_zustand_display()})."
-            )
-        if aktuell.revision_nr != revision_nr:
-            raise Konflikt(
-                f"Revision {revision_nr} ist veraltet; aktuell ist Revision {aktuell.revision_nr}."
-            )
-        offen = [p for p in freigabepruefung(aktuell) if not p.erfuellt]
-        if offen:
-            raise Konflikt("Übernahme nicht möglich: " + "; ".join(p.text for p in offen))
-        if akteur.bindung is not None and (
-            akteur.projekt is None or akteur.projekt.pk != aktuell.projekt_id
-        ):
-            raise KeinZugriff("Nicht gefunden.")
-        geaendert = Auftrag.objects.filter(
-            pk=aktuell.pk,
-            zustand=Auftrag.FREIGEGEBEN,
-            bearbeiter_bindung=None,
-            bearbeiter_benutzer=None,
-            revision_nr=revision_nr,
-        ).update(
-            zustand=Auftrag.IN_ARBEIT,
-            bearbeiter_bindung=akteur.bindung,
-            bearbeiter_benutzer=akteur.benutzer,
-            bearbeiter_name=akteur.name,
-            uebernommen_am=timezone.now(),
-            uebernommene_revision=revision_nr,
-            aktualisiert_am=timezone.now(),
+        if akteur.bindung is not None:
+            bindung = ChatBindung.objects.filter(pk=akteur.bindung.pk).first()
+            if bindung is None or not _chatbindung_im_projekt_gilt(bindung, aktuell.projekt):
+                raise KeinZugriff("Der Chat-Zugang ist für dieses Projekt nicht mehr gültig.")
+        gruende = _uebernahme_hindernisse(
+            akteur,
+            aktuell,
+            revision_nr,
+            unbeaufsichtigt=unbeaufsichtigt,
+            ersetzen=ordnersperre_uebernehmen,
         )
-        if geaendert != 1:
-            raise Konflikt(f"{aktuell.nummer} wurde gerade von jemand anderem übernommen.")
+        if gruende:
+            raise Konflikt(gruende[0][1])
+        bearbeiterwechsel = _wechsel_bei_uebernahme(aktuell, ordnersperre_uebernehmen)
+        vorher = ""
+        if bearbeiterwechsel and not akteur.ist_bearbeiter_von(aktuell):
+            vorher = f"{aktuell.nummer} ({aktuell.bearbeiter_name})"
+            _bearbeiter_abloesen(aktuell)
+        fremd = _ordnersperre_sichern(akteur, aktuell, ersetzen=ordnersperre_uebernehmen)
+        if fremd is not None:
+            vorher = f"{fremd.auftrag.nummer} ({fremd.auftrag.bearbeiter_name})"
+            _ereignis(
+                akteur,
+                projekt=fremd.auftrag.projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=fremd.auftrag.nummer,
+                ereignis="Ordnersperre durch Freds Chat abgelöst",
+                revision=str(fremd.auftrag.revision_nr),
+            )
+        aktuell.zustand = Auftrag.IN_ARBEIT
+        aktuell.bearbeiter_bindung = akteur.bindung
+        aktuell.bearbeiter_benutzer = akteur.benutzer
+        aktuell.bearbeiter_name = akteur.name
+        aktuell.uebernommen_am = timezone.now()
+        aktuell.uebernommene_revision = revision_nr
+        aktuell.save()
         _ereignis(
             akteur,
             projekt=aktuell.projekt,
             objekt_typ="Auftrag",
             objekt_kennung=aktuell.nummer,
-            ereignis="Übernommen",
+            ereignis="Ordnersperre ausdrücklich übernommen"
+            if ordnersperre_uebernehmen
+            else "Übernommen",
+            anlass=f"Vorheriger Halter: {vorher}" if vorher else "",
             revision=str(revision_nr),
         )
     auftrag.refresh_from_db()
@@ -2420,12 +2781,35 @@ def _meldung(
     ereignis: str,
     *,
     neuer_zustand: str | None = None,
+    kriterien_erfuellt: list[int] | None = None,
 ) -> Meldung:
     if not text.strip():
         raise DienstFehler("Der Text darf nicht leer sein.")
     with transaction.atomic():
         auftrag = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
         grund = _bearbeiter_pruefen(akteur, auftrag, revision_nr)
+        if grund is None:
+            _nicht_festgefahren(auftrag)
+            if kriterien_erfuellt is not None:
+                maximal = len(auftrag.aktuelle_revision.kriterien)
+                if (
+                    not isinstance(kriterien_erfuellt, list)
+                    or any(
+                        type(nr) is not int or not 1 <= nr <= maximal for nr in kriterien_erfuellt
+                    )
+                    or len(set(kriterien_erfuellt)) != len(kriterien_erfuellt)
+                ):
+                    raise DienstFehler(
+                        f"kriterien_erfuellt braucht eindeutige Kriteriennummern von 1 bis {maximal}."
+                    )
+                kriterien_erfuellt = sorted(kriterien_erfuellt)
+            _ordnersperre_sichern(akteur, auftrag)
+            if art == Meldung.FORTSCHRITT and auftrag.zustand == Auftrag.BLOCKIERT:
+                from . import lieferungen
+
+                lieferungen.wiederaufnahme_pruefen(akteur, auftrag)
+            if neuer_zustand == Auftrag.BLOCKIERT:
+                ordnersperren.freigeben(auftrag)
         gewechselt = False
         if grund is None and neuer_zustand is not None and auftrag.zustand == Auftrag.IN_ARBEIT:
             auftrag.zustand = neuer_zustand
@@ -2439,6 +2823,7 @@ def _meldung(
             akteur_name=akteur.name,
             bindung=akteur.bindung,
             historisch=grund is not None,
+            kriterien_erfuellt=kriterien_erfuellt if grund is None else None,
         )
         if grund is None:
             Auftrag.objects.filter(pk=auftrag.pk).update(zuletzt_gemeldet_am=timezone.now())
@@ -2458,8 +2843,30 @@ def _meldung(
     return meldung
 
 
-def fortschritt_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
-    return _meldung(akteur, auftrag, revision_nr, Meldung.FORTSCHRITT, text, "Fortschritt gemeldet")
+def _nicht_festgefahren(auftrag: Auftrag) -> None:
+    if auftragsregeln.offene_festfahrfrage(auftrag) is not None:
+        raise Konflikt(
+            f"{auftrag.nummer}: festgefahren. Erst Freds Antwort erlaubt die Wiederaufnahme."
+        )
+
+
+def fortschritt_melden(
+    akteur: Akteur,
+    auftrag: Auftrag,
+    revision_nr: int,
+    text: str,
+    *,
+    kriterien_erfuellt: list[int] | None = None,
+) -> Meldung:
+    return _meldung(
+        akteur,
+        auftrag,
+        revision_nr,
+        Meldung.FORTSCHRITT,
+        text,
+        "Fortschritt gemeldet",
+        kriterien_erfuellt=kriterien_erfuellt,
+    )
 
 
 def rueckfrage_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: str) -> Meldung:
@@ -2506,6 +2913,14 @@ def rueckfrage_beantworten(
         raise DienstFehler("Die Antwort darf nicht leer sein.")
     with transaction.atomic():
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
+        if (
+            auftragsregeln.offene_festfahrfrage(aktuell)
+            and akteur.ist_assistent
+            and not akteur.fred_sagte
+        ):
+            raise DienstFehler(
+                "Die Wiederaufnahme eines festgefahrenen Auftrags braucht fred_sagte."
+            )
         ketten = lieferungen.betroffene_ketten(aktuell, als_anbieter=False)
         if ketten and lieferketten_bestaetigt is not True:
             raise Konflikt(lieferungen.warnung_antworten(ketten))
@@ -2518,6 +2933,8 @@ def rueckfrage_beantworten(
         )
         aufgehoben = False
         if aktuell.zustand == Auftrag.BLOCKIERT:
+            if aktuell.hat_bearbeiter:
+                _ordnersperre_sichern(akteur, aktuell)
             aktuell.zustand = Auftrag.IN_ARBEIT
             aktuell.save(update_fields=["zustand", "aktualisiert_am"])
             aufgehoben = True
@@ -2556,6 +2973,98 @@ def hindernis_melden(akteur: Akteur, auftrag: Auftrag, revision_nr: int, text: s
     return meldung
 
 
+def _fremde_befunde_pruefen(auftrag: Auftrag, eingabe):
+    if eingabe is None or eingabe == []:
+        return []
+    if not isinstance(eingabe, list) or len(eingabe) > 50:
+        raise DienstFehler("fremde_befunde muss eine Liste mit höchstens 50 Einträgen sein.")
+    eigene_module = {auftrag.modul_id} - {None}
+    eigene_module.update(
+        regel["modul_id"]
+        for regel in auftragsregeln.kriterien(auftrag.aktuelle_revision)
+        if regel.get("modul_id") and regel["erfuellbar_durch"] == "eigen"
+    )
+    module = {
+        modul.kennung: modul
+        for modul in auftrag.projekt.module.filter(aktiv=True).exclude(pk__in=eigene_module)
+    }
+    geprueft = []
+    for nr, befund in enumerate(eingabe, start=1):
+        grenzen = {"text": 4000, "modul": 120, "beleg": 4000}
+        if (
+            not isinstance(befund, dict)
+            or set(befund) != set(grenzen)
+            or any(
+                not isinstance(wert, str) or not 0 < len(wert.strip()) <= grenzen[feld]
+                for feld, wert in befund.items()
+            )
+        ):
+            raise DienstFehler(
+                f"fremde_befunde: Eintrag {nr} braucht Text, Modulkennung und Beleg."
+            )
+        modul = module.get(befund["modul"].strip())
+        if modul is None or not eigene_module:
+            raise DienstFehler(
+                f"fremde_befunde: Eintrag {nr} braucht ein zuständiges fremdes Projektmodul."
+            )
+        geprueft.append((modul, befund["text"].strip(), befund["beleg"].strip()))
+    return geprueft
+
+
+def _fremde_befunde_erfassen(auftrag: Auftrag, befunde) -> list[dict]:
+    system = Akteur(None, None, "KI-PM", False)
+    erfasst = []
+    pro_modul = {}
+    for modul, text, beleg in befunde:
+        issue = pro_modul.get(modul.pk)
+        if issue is None:
+            issue = (
+                Auftrag.objects.filter(
+                    projekt=auftrag.projekt,
+                    modul=modul,
+                    typ=Auftrag.TYP_ISSUE,
+                    fremdbefund_sammelissue=True,
+                )
+                .exclude(zustand__in=Auftrag.ENDZUSTAENDE)
+                .order_by("pk")
+                .first()
+            )
+            if issue is None:
+                issue = wunsch_erfassen(
+                    system,
+                    auftrag.projekt,
+                    titel=f"Fremde Prüfbefunde für {modul.kennung}",
+                    beschreibung="Die Befunde und ihre Belege stehen in den Meldungen.",
+                    modul=modul,
+                    typ=Auftrag.TYP_ISSUE,
+                    erzwingen=True,
+                )
+                issue.fremdbefund_sammelissue = True
+                issue.save(update_fields=["fremdbefund_sammelissue"])
+            pro_modul[modul.pk] = issue
+        meldung = f"{text}\nBeleg: {beleg}"
+        if not issue.meldungen.filter(art=Meldung.FREMDBEFUND, text=meldung).exists():
+            issue.meldungen.create(
+                revision_nr=issue.revision_nr,
+                art=Meldung.FREMDBEFUND,
+                text=meldung,
+                akteur_name=system.name,
+            )
+            _ereignis(
+                system,
+                projekt=issue.projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=issue.nummer,
+                ereignis="Fremden Prüfbefund ergänzt",
+                anlass=f"Quelle: {auftrag.nummer}, Revision {auftrag.revision_nr}",
+                revision=str(issue.revision_nr),
+            )
+        daten = {"modul": modul.kennung, "text": text, "beleg": beleg, "issue": issue.nummer}
+        if daten not in erfasst:
+            erfasst.append(daten)
+    return erfasst
+
+
 @_ohne_aktive_werkbank("Abschließen")
 def ergebnis_einreichen(
     akteur: Akteur,
@@ -2567,6 +3076,7 @@ def ergebnis_einreichen(
     pruefungen: str = "",
     fehlgeschlagen: str = "",
     luecken: str = "",
+    fremde_befunde: list[dict] | None = None,
 ) -> Ergebnis:
     """Ergebnis einreichen; die technischen Prüfungen schließen ab, es gibt keine
     Nutzerabnahme. Alle bestanden → Erledigt; eine fehlgeschlagen → Blockiert mit dem Grund als
@@ -2582,10 +3092,15 @@ def ergebnis_einreichen(
             )
         if aktuell.zustand not in Auftrag.BEARBEITER_ZUSTAENDE:
             raise Konflikt(f"Einreichen ist aus „{aktuell.get_zustand_display()}“ nicht möglich.")
+        _nicht_festgefahren(aktuell)
         if not zusammenfassung.strip():
             raise DienstFehler("Die Zusammenfassung darf nicht leer sein.")
         if not zeilen(dateien):
             raise DienstFehler("Mindestens eine geänderte Datei mit Revision ist anzugeben.")
+        befunde = _fremde_befunde_pruefen(aktuell, fremde_befunde)
+        _ordnersperre_sichern(akteur, aktuell)
+        ordnersperren.freigeben(aktuell)
+        erfasst = _fremde_befunde_erfassen(aktuell, befunde)
         ergebnis = Ergebnis.objects.create(
             auftrag=aktuell,
             revision_nr=revision_nr,
@@ -2594,6 +3109,7 @@ def ergebnis_einreichen(
             pruefschritte="\n".join(zeilen(pruefungen)),
             fehlgeschlagen="\n".join(zeilen(fehlgeschlagen)),
             luecken=luecken.strip(),
+            fremde_befunde=erfasst,
             eingereicht_von_name=akteur.name,
             bindung=akteur.bindung,
             benutzer=akteur.benutzer,
@@ -2640,9 +3156,8 @@ STILL_STUNDEN = 4
 
 
 def sitzungsende_melden(akteur: Akteur, auftrag: Auftrag) -> bool:
-    """Vermerk des Hooks beim Schließen eines Chats, der den Auftrag noch hält. Er ist kein Stand:
-    Er ändert weder Zustand noch ``zuletzt_gemeldet_am``, sonst verdeckte er die letzte echte
-    Meldung. Falsch zurück, wenn nichts zu vermerken ist; das ist kein Fehler."""
+    """Vermerk beim Schließen des zuständigen Chats. Er erhält ``zuletzt_gemeldet_am``, und bucht Stillstand nach drei Sitzungsenden ohne Zuwachs.
+    Falsch zurück, wenn nichts zu vermerken ist; das ist kein Fehler."""
     with transaction.atomic():
         aktuell = Auftrag.objects.select_for_update().select_related("projekt").get(pk=auftrag.pk)
         _projekt_sichtbar(akteur, aktuell.projekt)
@@ -2651,7 +3166,10 @@ def sitzungsende_melden(akteur: Akteur, auftrag: Auftrag) -> bool:
             aktuell
         ):
             return False
-        neueste = aktuell.meldungen.filter(historisch=False).first()
+        if auftragsregeln.offene_festfahrfrage(aktuell):
+            return False
+        ordnersperren.freigeben(aktuell)
+        neueste = aktuell.meldungen.filter(historisch=False).exclude(art=Meldung.ANTWORT).first()
         if (
             neueste is not None
             and neueste.art == Meldung.SITZUNGSENDE
@@ -2665,6 +3183,7 @@ def sitzungsende_melden(akteur: Akteur, auftrag: Auftrag) -> bool:
             text="Chat beendet, Ergebnis fehlt.",
             akteur_name=akteur.name,
             bindung=akteur.bindung,
+            kriterien_erfuellt=auftragsregeln.kriterienstand(aktuell),
         )
         _ereignis(
             akteur,
@@ -2674,7 +3193,34 @@ def sitzungsende_melden(akteur: Akteur, auftrag: Auftrag) -> bool:
             ereignis="Chat beendet, Ergebnis fehlt",
             revision=str(aktuell.revision_nr),
         )
+        if auftragsregeln.sitzungsserie(aktuell) >= 3:
+            _festgefahren_melden(aktuell)
     return True
+
+
+def _festgefahren_melden(auftrag: Auftrag) -> None:
+    grund = "Festgefahren: drei Sitzungen ohne Zuwachs erfüllter Kriterien."
+    frage = "Fred, sollen wir diesen Auftrag neu schneiden oder abbrechen?"
+    akteur = Akteur(None, None, "KI-PM", False)
+    auftrag.zustand = Auftrag.BLOCKIERT
+    auftrag.save(update_fields=["zustand", "aktualisiert_am"])
+    Meldung.objects.create(
+        auftrag=auftrag,
+        revision_nr=auftrag.revision_nr,
+        art=Meldung.RUECKFRAGE,
+        text=f"{grund} {frage}",
+        akteur_name=akteur.name,
+        festgefahren=True,
+    )
+    _ereignis(
+        akteur,
+        projekt=auftrag.projekt,
+        objekt_typ="Auftrag",
+        objekt_kennung=auftrag.nummer,
+        ereignis="Auftrag blockiert: festgefahren",
+        anlass=grund,
+        revision=str(auftrag.revision_nr),
+    )
 
 
 def _nach_rang(auftraege) -> list[Auftrag]:
@@ -2698,8 +3244,9 @@ def _eintraege_im_modul(projekt: Projekt, modul: Modul | None):
 
 def weiter_reihenfolge(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Die einzige Stelle mit der Regel für „weiter“: freigegebene Aufträge und Issues ohne
-    Bearbeiter und ohne offenen Vorgänger, nach Priorität, dann die älteste Nummer."""
-    return _nach_rang(
+    Bearbeiter, mit freiem Arbeitsordner und ohne offenen Vorgänger, nach Priorität,
+    dann die älteste Nummer."""
+    vorschlaege = (
         _eintraege_im_modul(projekt, modul)
         .filter(
             zustand=Auftrag.FREIGEGEBEN,
@@ -2709,6 +3256,7 @@ def weiter_reihenfolge(projekt: Projekt, modul: Modul | None = None) -> list[Auf
         )
         .exclude(pk__in=_mit_offenem_vorgaenger(projekt).values("auftrag_id"))
     )
+    return _nach_rang(a for a in vorschlaege if ordnersperren.fremde_belegung(a) is None)
 
 
 def offene_eintraege(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
@@ -2796,4 +3344,14 @@ def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftra
         .order_by("id")
         if verstummt(a)
     ]
-    return faellige + blockiert + verstummte + entwuerfe
+    # Offener Aktionsvorschlag der Planung an einem sonst nicht wartenden Auftrag (etwa ein
+    # Neuschnitt in Arbeit): Er wartet auf Freds Bestätigung.
+    schon = {a.pk for a in faellige + blockiert + verstummte + entwuerfe}
+    vorgeschlagen = list(
+        eintraege.filter(aktionsvorschlaege__zustand=Aktionsvorschlag.OFFEN)
+        .exclude(pk__in=schon)
+        .select_related("projekt", "modul")
+        .distinct()
+        .order_by("id")
+    )
+    return faellige + blockiert + vorgeschlagen + verstummte + entwuerfe
