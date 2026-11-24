@@ -8,7 +8,7 @@ from django.core import serializers
 from django.test import Client
 from django.urls import get_resolver, reverse
 
-from steuerung import api, dienst, mcp
+from steuerung import api, dienst, lieferungen, mcp
 from steuerung.models import AnfrageKennung, Auftrag, ChatBindung, Ereignis, Modul
 from tests.conftest import arbeitspaket
 from tests.test_mcp import _werkzeug
@@ -52,6 +52,8 @@ ARBEIT = {
 FRAGE = {"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen"}
 # Befugnis allein aus Freds gespeicherter Vollmacht (tests/test_aktionsvollmacht.py).
 VOLLMACHT = {"kipm_aktion_ausfuehren"}
+# Befugnis allein aus Freds gespeicherter Stufenregel (tests/test_stufenregel.py).
+STUFENREGEL = {"kipm_planung_freigeben", "kipm_planung_lieferkante", "kipm_planung_entscheiden"}
 # Nur diese neuen W1-Routen prüfen gespeicherte, versionsgebundene Rechte statt Chattext.
 DELEGIERT = {"kipm_w1_auftrag_anlegen", "kipm_w1_auftrag_aktion"}
 AENDERND = {
@@ -68,6 +70,7 @@ AENDERND = {
     "kipm_planen",
     "kipm_antworten",
     "kipm_lieferbedarf_festlegen",
+    "kipm_lieferersatz_zulassen",
     "kipm_entscheidung_eintragen",
     "kipm_entscheidung_aendern",
     "kipm_meilenstein_anlegen",
@@ -105,6 +108,40 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
     dienst.auftrag_freigeben(akteur, technisch)
     dienst.auftrag_uebernehmen(chat, technisch, technisch.revision_nr)
     dienst.hindernis_melden(chat, technisch, technisch.revision_nr, "Technische Lieferung fehlt")
+    anbieter = {}
+    for name in ("altanbieter", "neuanbieter", "verbraucher"):
+        a = arbeitspaket(akteur, projekt, titel=name, umfang=f"{name}/**")
+        dienst.auftrag_freigeben(akteur, a)
+        a.refresh_from_db()
+        dienst.auftrag_uebernehmen(chat, a, a.revision_nr)
+        a.refresh_from_db()
+        anbieter[name] = a
+    altanbieter, neuanbieter, verbraucher = anbieter.values()
+    lieferblocker = lieferungen.warten(
+        chat,
+        verbraucher,
+        verbraucher.revision_nr,
+        text="Anschluss fehlt",
+        bedarf=[
+            {
+                "auftrag": altanbieter.nummer,
+                "revision": altanbieter.revision_nr,
+                "lieferkennung": "anschluss",
+            }
+        ],
+        nur_lieferungen=True,
+    )
+    ersatzlieferung = lieferungen.melden(
+        chat,
+        neuanbieter,
+        neuanbieter.revision_nr,
+        lieferkennung="anschluss",
+        zusammenfassung="Anschluss vom neuen Anbieter",
+        dateien=[f"anschluss.py@{'d' * 40}"],
+        pruefungen=["Anschluss grün"],
+    )
+    for a in (altanbieter, neuanbieter):  # nichts in Arbeit, sonst lässt sich nicht archivieren
+        dienst.hindernis_melden(chat, a, a.revision_nr, "Wartet")
     rufe("kipm_modul_anlegen", name="Vorhanden", kennung="vorhanden")
     modul = Modul.objects.get(projekt=projekt, kennung="vorhanden")
     ort = rufe("kipm_arbeitsort_vorschlagen", name="Neuer Ort")["arbeitsort"]
@@ -138,6 +175,18 @@ def bestand(client, akteur, projekt, bindung, pc_zugang):
                 }
             ],
             "nur_lieferungen": True,
+        },
+        "kipm_lieferersatz_zulassen": {
+            "auftrag": verbraucher.nummer,
+            "revision": verbraucher.revision_nr,
+            "meldung_id": lieferblocker.pk,
+            "lieferkennung": "anschluss",
+            "alt_auftrag": altanbieter.nummer,
+            "alt_revision": altanbieter.revision_nr,
+            "neu_auftrag": neuanbieter.nummer,
+            "neu_revision": neuanbieter.revision_nr,
+            "lieferung": ersatzlieferung.pk,
+            "inhalt_sha256": ersatzlieferung.inhalt_sha256,
         },
         "kipm_verschieben": {**verschieben, "pruefcode": pruefcode},
         "kipm_projekt_anlegen": {"name": "Ganz neu"},
@@ -194,8 +243,8 @@ def _abbild() -> dict:
 
 def test_jedes_werkzeug_ist_eingeordnet():
     katalog = {w["name"] for w in mcp.werkzeugliste()}
-    assert katalog == LESEN | ARBEIT | FRAGE | AENDERND | DELEGIERT | VOLLMACHT
-    gruppen = (LESEN, ARBEIT, FRAGE, AENDERND, DELEGIERT, VOLLMACHT)
+    assert katalog == LESEN | ARBEIT | FRAGE | AENDERND | DELEGIERT | VOLLMACHT | STUFENREGEL
+    gruppen = (LESEN, ARBEIT, FRAGE, AENDERND, DELEGIERT, VOLLMACHT, STUFENREGEL)
     assert sum(len(g) for g in gruppen) == len(katalog), "ein Werkzeug steht doppelt"
 
 
@@ -230,6 +279,9 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "entscheidung_fragen",
         "aktion_vorschlagen",
         "aktion_mit_vollmacht",
+        "planung_freigeben",
+        "planung_lieferkante",
+        "planung_entscheiden",
         "auf_lieferung_warten",
         "lieferung_melden",
         "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats
@@ -239,7 +291,13 @@ def test_jede_aendernde_route_ist_eingeordnet():
     assert getattr(routen["w1_auftrag_anlegen"], "w1_delegiert", False)
     assert getattr(routen["w1_auftrag_aktion"], "w1_delegiert", False)
     assert len(routen) == (
-        len(AENDERND) + len(ARBEIT) + len(FRAGE) + len(DELEGIERT) + len(VOLLMACHT) + 1
+        len(AENDERND)
+        + len(ARBEIT)
+        + len(FRAGE)
+        + len(DELEGIERT)
+        + len(VOLLMACHT)
+        + len(STUFENREGEL)
+        + 1
     )
 
 

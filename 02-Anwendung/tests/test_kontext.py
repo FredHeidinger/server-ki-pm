@@ -222,4 +222,13 @@ def test_mcp_werkzeugliste_enthaelt_neue_werkzeuge(client, bindung):
         "kipm_unterlage_lesen",
         "kipm_text_anlegen",
     } <= namen
-    assert not any("bestaetigen_github" in n or "freigeben" in n or "abnehmen" in n for n in namen)
+    # Freds eigene Handlungen gibt es nicht als Werkzeug. Einzige Ausnahme seit KIPM-31
+    # (Kriterium 6, Freds Auftrag vom 24.11.2026): die Freigabe über seine gespeicherte
+    # Stufenregel, die ohne Regel abgewiesen wird (tests/test_stufenregel.py).
+    from steuerung import mcp
+
+    assert "kipm_planung_freigeben" in mcp._STUFENREGEL
+    assert not any(
+        "bestaetigen_github" in n or "freigeben" in n or "abnehmen" in n
+        for n in namen - mcp._STUFENREGEL
+    )

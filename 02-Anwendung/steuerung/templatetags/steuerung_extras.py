@@ -30,6 +30,14 @@ def zustand(wert: str) -> str:
 
 
 @register.filter
+def blockade(auftrag: Auftrag) -> dict | None:
+    """Worauf ein blockierter Auftrag wartet (``lieferungen.blockade``), sonst None."""
+    from .. import lieferungen
+
+    return lieferungen.blockade(auftrag)
+
+
+@register.filter
 def faellig_marke(auftrag: Auftrag) -> str:
     """Termin als Wort, ab dem Tag hervorgehoben; ohne Termin und bei Abgeschlossenem nichts."""
     from django.utils.html import format_html

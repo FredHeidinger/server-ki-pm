@@ -203,7 +203,13 @@ def entscheidung_holen(akteur: Akteur, projekt: Projekt, nummer: int) -> Entsche
 
 
 def entscheidung_eintragen(
-    akteur: Akteur, projekt: Projekt, *, entscheidung: str, warum: str = ""
+    akteur: Akteur,
+    projekt: Projekt,
+    *,
+    entscheidung: str,
+    warum: str = "",
+    ereignis: str = "Entscheidung eingetragen",
+    anlass: str = "",
 ) -> Entscheidung:
     """Der Chat trägt eine Entscheidung nach Freds Ja ein (seine Worte prüft ``api``); Fred
     ebenso von Hand. Gilt ab jetzt und steht im Kontext jedes neuen Chats des Projekts."""
@@ -229,8 +235,8 @@ def entscheidung_eintragen(
             projekt=projekt,
             objekt_typ="Entscheidung",
             objekt_kennung=e.nummer,
-            ereignis="Entscheidung eingetragen",
-            anlass=e.titel,
+            ereignis=ereignis,
+            anlass="; ".join(t for t in (e.titel, anlass) if t),
             revision="Stand 1",
             version=version,
         )

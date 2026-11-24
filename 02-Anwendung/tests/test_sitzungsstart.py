@@ -39,6 +39,7 @@ EINTRAGSFELDER = {
     "faellig",
     "uebernehmbar",
     "bearbeiter",
+    "blockade",
 }
 WARTETFELDER = {"art", "nummer", "titel", "text", "faellig"}
 
@@ -179,6 +180,7 @@ def test_antwort_entspricht_dem_vertrag(akteur, projekt, bindung):
         "faellig": "2099-01-02",
         "uebernehmbar": True,
         "bearbeiter": None,
+        "blockade": None,
     }
     assert d["offen"] == [d["naechster"]] and d["weitere"] == 0 and d["wartet"] == []
 

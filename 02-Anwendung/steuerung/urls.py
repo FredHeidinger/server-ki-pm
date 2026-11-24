@@ -43,6 +43,21 @@ urlpatterns = [
         name="vorschlag_entscheiden",
     ),
     path(
+        "projekt/<slug:kennung>/stufenregeln/",
+        views_akte.stufenregel_erteilen,
+        name="stufenregel_erteilen",
+    ),
+    path(
+        "projekt/<slug:kennung>/stufenregeln/<int:nummer>/widerrufen/",
+        views_akte.stufenregel_widerrufen,
+        name="stufenregel_widerrufen",
+    ),
+    path(
+        "projekt/<slug:kennung>/wissen/planungsentscheid/<int:nummer>/widerrufen/",
+        views_akte.planungsentscheid_widerrufen,
+        name="planungsentscheid_widerrufen",
+    ),
+    path(
         "projekt/<slug:kennung>/vollmachten/",
         views_akte.vollmacht_erteilen,
         name="vollmacht_erteilen",
@@ -242,6 +257,9 @@ urlpatterns = [
         name="api_aktion_vollmacht",
     ),
     path("api/aktionen/", api.aktionen, name="api_aktionen"),
+    path("api/planung/freigeben/", api.planung_freigeben, name="api_planung_freigeben"),
+    path("api/planung/lieferkante/", api.planung_lieferkante, name="api_planung_lieferkante"),
+    path("api/planung/entscheiden/", api.planung_entscheiden, name="api_planung_entscheiden"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),
     path("api/w1/erlaubnisse/", api.erlaubnisse, name="api_w1_erlaubnisse"),
@@ -279,6 +297,11 @@ urlpatterns = [
         "api/auftraege/<int:auftrag_id>/lieferbedarf/",
         api.auf_lieferung_warten,
         name="api_auf_lieferung_warten",
+    ),
+    path(
+        "api/auftraege/<int:auftrag_id>/lieferersatz/",
+        api.lieferersatz_zulassen,
+        name="api_lieferersatz_zulassen",
     ),
     path(
         "api/auftraege/<int:auftrag_id>/lieferbedarf/festlegen/",

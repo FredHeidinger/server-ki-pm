@@ -4,11 +4,11 @@ import hashlib
 import json
 import re
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Max
 
 from . import auftragsregeln, dienst, ordnersperren
-from .models import Auftrag, Lieferbedarf, Lieferung, Meldung
+from .models import Auftrag, Lieferbedarf, Lieferersatz, Lieferung, Meldung
 
 
 def _aktuell(akteur, auftrag, revision, *, entwurf_erlaubt=False):
@@ -348,6 +348,11 @@ def warten(akteur, auftrag, revision, *, text, bedarf, nur_lieferungen):
                     "zuerst klären oder vom Manager einordnen."
                 )
         geprueft = _bedarf_pruefen(akteur, aktuell, bedarf)
+        zulassungen = (
+            _ersatz_zulassungen(aktuell, bestehend, geprueft)
+            if aktuell.zustand == Auftrag.BLOCKIERT
+            else []
+        )
         meldung = dienst._meldung(
             akteur,
             aktuell,
@@ -358,9 +363,189 @@ def warten(akteur, auftrag, revision, *, text, bedarf, nur_lieferungen):
             neuer_zustand=Auftrag.BLOCKIERT,
         )
         aktuell.refresh_from_db()
+        for z in zulassungen:
+            z.angewendet_meldung = meldung
+            z.save(update_fields=["angewendet_meldung"])
+            dienst._ereignis(
+                akteur,
+                projekt=aktuell.projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=aktuell.nummer,
+                ereignis=f"Lieferersatz angewendet ({z.nummer})",
+                anlass=_ersatz_satz(z),
+                revision=str(aktuell.revision_nr),
+            )
         _registrieren(akteur, aktuell, meldung, geprueft)
     auftrag.refresh_from_db()
     return meldung
+
+
+ERSATZ_FEHLT = (
+    "Anbieterwechsel {kennung}: {alt} → {neu} braucht einen von Fred zugelassenen "
+    "Lieferersatz für Meldung {meldung} (kipm_lieferersatz_zulassen); es wurde nichts geändert."
+)
+
+
+def _ersatz_satz(z):
+    return (
+        f"{z.lieferkennung}: {z.alt_auftrag.nummer}/{z.alt_revision} → "
+        f"{z.neu_auftrag.nummer}/{z.neu_revision}, L-{z.lieferung_id}"
+    )
+
+
+def _ersatz_zulassungen(auftrag, bestehend, geprueft):
+    """Einzige Stelle, die einen Anbieterwechsel erkennt: Der bisherige Lieferblocker wartet
+    auf eine Lieferkennung von Anbieter A, der neue Bedarf nennt dieselbe Kennung von einem
+    anderen Anbieter B. Dann muss je altem Bedarf eine unbenutzte Zulassung genau dieser
+    Verbraucherrevision, Meldung, Kennung und beider Anbieterrevisionen vorliegen. Nachführen
+    beim selben Anbieter braucht keine."""
+    zulassungen = []
+    for quelle, revision, kennung, _ in geprueft:
+        alte = bestehend.lieferbedarf.filter(
+            lieferkennung=kennung, erfuellt_durch__isnull=True
+        ).exclude(lieferauftrag=quelle)
+        for b in alte.select_related("lieferauftrag"):
+            z = (
+                Lieferersatz.objects.filter(
+                    verbraucher=auftrag,
+                    revision_nr=auftrag.revision_nr,
+                    meldung=bestehend,
+                    lieferkennung=kennung,
+                    alt_auftrag=b.lieferauftrag,
+                    alt_revision=b.lieferrevision,
+                    neu_auftrag=quelle,
+                    neu_revision=revision,
+                    angewendet_meldung__isnull=True,
+                )
+                .select_related("alt_auftrag", "neu_auftrag")
+                .first()
+            )
+            if z is None:
+                raise dienst.Konflikt(
+                    ERSATZ_FEHLT.format(
+                        kennung=kennung,
+                        alt=f"{b.lieferauftrag.nummer}/{b.lieferrevision}",
+                        neu=f"{quelle.nummer}/{revision}",
+                        meldung=bestehend.pk,
+                    )
+                )
+            zulassungen.append(z)
+    return zulassungen
+
+
+def ersatz_zulassen(
+    akteur,
+    verbraucher,
+    *,
+    revision,
+    meldung_id,
+    lieferkennung,
+    alt_auftrag,
+    alt_revision,
+    neu_auftrag,
+    neu_revision,
+    lieferung,
+    inhalt_sha256,
+):
+    """Fred lässt einen Anbieterwechsel zu (über die Schnittstelle nur mit ``fred_sagte``).
+    Alles wird gegen den aktuellen Stand geprüft: Verbraucherrevision, aktueller
+    Lieferblocker, offener Bedarf beim alten Anbieter, aktuelle Revision des neuen Anbieters,
+    seine Lieferung mit dieser Kennung und ihr Inhaltshash. Wirken kann sie nur einmal, beim
+    nächsten ``warten`` des Bearbeiters an genau diesem Blocker."""
+    dienst._planung_erforderlich(akteur, "Lieferersatz zulassen")
+    with transaction.atomic():
+        aktuell = _aktuell(akteur, verbraucher, revision)
+        blocker = _blocker(aktuell)
+        if (
+            aktuell.zustand != Auftrag.BLOCKIERT
+            or blocker is None
+            or blocker.pk != meldung_id
+            or blocker.art != Meldung.HINDERNIS
+        ):
+            raise dienst.Konflikt(
+                "Die Meldung ist nicht der aktuelle Lieferblocker des Verbrauchers; neu lesen."
+            )
+        kennung = _lieferkennung(lieferkennung)
+        alt = dienst.auftrag_holen(akteur, dienst.auftrag_id_aus_nummer(str(alt_auftrag)))
+        neu = dienst.auftrag_holen(akteur, dienst.auftrag_id_aus_nummer(str(neu_auftrag)))
+        if alt.pk == neu.pk:
+            raise dienst.DienstFehler("Alter und neuer Anbieter müssen verschieden sein.")
+        if alt.projekt_id != aktuell.projekt_id or neu.projekt_id != aktuell.projekt_id:
+            raise dienst.KeinZugriff("Lieferungen müssen zum selben Projekt gehören.")
+        if not blocker.lieferbedarf.filter(
+            lieferauftrag=alt,
+            lieferrevision=alt_revision,
+            lieferkennung=kennung,
+            erfuellt_durch__isnull=True,
+        ).exists():
+            raise dienst.Konflikt(
+                f"Der Lieferblocker wartet nicht auf {alt.nummer}/{alt_revision} „{kennung}“."
+            )
+        if type(neu_revision) is not int or neu_revision != neu.revision_nr:
+            raise dienst.Konflikt(f"{neu.nummer} hat Revision {neu.revision_nr}.")
+        if neu.ausfuehrungsweg != Auftrag.WEG_CHAT or neu.zustand == Auftrag.ABGEBROCHEN:
+            raise dienst.Konflikt(f"{neu.nummer} liefert über diesen Weg nicht.")
+        geliefert = (
+            Lieferung.objects.filter(
+                pk=lieferung, auftrag=neu, revision_nr=neu_revision, lieferkennung=kennung
+            ).first()
+            if type(lieferung) is int
+            else None
+        )
+        if geliefert is None:
+            raise dienst.Konflikt(
+                f"Lieferung {lieferung} gehört nicht zu {neu.nummer}/{neu_revision} „{kennung}“."
+            )
+        if inhalt_sha256 != geliefert.inhalt_sha256:
+            raise dienst.Konflikt(f"Der Inhaltshash passt nicht zu Lieferung {geliefert.pk}.")
+        try:
+            with transaction.atomic():
+                z = Lieferersatz.objects.create(
+                    verbraucher=aktuell,
+                    revision_nr=aktuell.revision_nr,
+                    meldung=blocker,
+                    lieferkennung=kennung,
+                    alt_auftrag=alt,
+                    alt_revision=alt_revision,
+                    neu_auftrag=neu,
+                    neu_revision=neu_revision,
+                    lieferung=geliefert,
+                    inhalt_sha256=geliefert.inhalt_sha256,
+                    angelegt_von_name=akteur.name,
+                )
+        except IntegrityError as fehler:
+            raise dienst.Konflikt(
+                "Für diese Meldung und Lieferkennung gibt es bereits einen Lieferersatz."
+            ) from fehler
+        dienst._ereignis(
+            akteur,
+            projekt=aktuell.projekt,
+            objekt_typ="Auftrag",
+            objekt_kennung=aktuell.nummer,
+            ereignis=f"Lieferersatz zugelassen ({z.nummer})",
+            anlass=_ersatz_satz(z),
+            revision=str(aktuell.revision_nr),
+        )
+    return z
+
+
+def ersatz_liste(auftrag):
+    """Zulassungen am Verbraucher, für den Einzelabruf (kipm_lesen)."""
+    return [
+        {
+            "nummer": z.nummer,
+            "verbraucher": auftrag.nummer,
+            "revision": z.revision_nr,
+            "meldung_id": z.meldung_id,
+            "lieferkennung": z.lieferkennung,
+            "alt": f"{z.alt_auftrag.nummer}/{z.alt_revision}",
+            "neu": f"{z.neu_auftrag.nummer}/{z.neu_revision}",
+            "lieferung": z.lieferung_id,
+            "inhalt_sha256": z.inhalt_sha256,
+            "angewendet_meldung_id": z.angewendet_meldung_id,
+        }
+        for z in auftrag.lieferersatz_zulassungen.select_related("alt_auftrag", "neu_auftrag")
+    ]
 
 
 @dienst._ohne_aktive_werkbank("Lieferbedarf festlegen")
@@ -660,6 +845,7 @@ def details(auftrag):
                     "aktiv": not inaktiv_grund,
                     "inaktiv_grund": inaktiv_grund,
                     "aktuelle_lieferrevision": b.lieferauftrag.revision_nr,
+                    "lieferzustand": b.lieferauftrag.get_zustand_display(),
                     "status": status,
                     "verwaist": status == VERWAIST,
                     "grund": grund,
@@ -721,3 +907,27 @@ def offener_bedarf(auftrag):
     if auftrag.zustand != Auftrag.BLOCKIERT or auftrag.ausfuehrungsweg != Auftrag.WEG_CHAT:
         return []
     return [b for b in details(auftrag)["lieferbedarf"] if b["aktiv"] and b["status"] != ERFUELLT]
+
+
+LIEFERUNG = "lieferung"
+ANTWORT = "antwort"
+
+
+def blockade(auftrag):
+    """Einzige Stelle für Übersicht, „Wartet auf dich“, kipm_auftraege und Sitzungsstart:
+    worauf ein blockierter Auftrag wartet. „lieferung“, wenn jeder aktive offene Lieferbedarf
+    noch kommt oder schon da ist; dann geht es ohne Fred weiter. Sonst „antwort“: Rückfrage,
+    Hindernis, Fehler oder ein verwaister oder unpassender Bedarf brauchen ihn."""
+    if auftrag.zustand != Auftrag.BLOCKIERT:
+        return None
+    bedarf = offener_bedarf(auftrag)
+    if bedarf and all(b["status"] in (WARTET, GELIEFERT) for b in bedarf):
+        von = []
+        for b in bedarf:
+            zustand = "geliefert" if b["status"] == GELIEFERT else b["lieferzustand"]
+            eintrag = {"auftrag": b["auftrag"], "zustand": zustand}
+            if eintrag not in von:
+                von.append(eintrag)
+        liste = ", ".join(f"{v['auftrag']} ({v['zustand']})" for v in von)
+        return {"art": LIEFERUNG, "text": f"wartet auf Lieferung von {liste}", "von": von}
+    return {"art": ANTWORT, "text": "braucht Antwort", "von": []}

@@ -2,6 +2,15 @@
 {% block titel %}{% if e %}{{ e.nummer }} bearbeiten{% else %}Neue Entscheidung{% endif %}{% endblock %}
 {% block projektinhalt %}
 <p class="oberzeile"><a href="{% url 'akte_wissen' kennung=projekt.kennung %}">Zurück zum Wissen</a></p>
+{% if e.planungsentscheid %}
+<section class="box">
+  <h2>von Planung entschieden</h2>
+  <p>Gebucht von {{ e.planungsentscheid.zugang.name }} mit Stufenregel {{ e.planungsentscheid.regel.nummer }} am {{ e.planungsentscheid.angelegt_am|date:"d.m.Y H:i" }}, ohne deine Worte.</p>
+  <p class="gedaempft">Fundstelle {{ e.planungsentscheid.fundstelle.quelle }}{% if e.planungsentscheid.fundstelle.stand %} Stand {{ e.planungsentscheid.fundstelle.stand }}{% endif %}{% if e.planungsentscheid.fundstelle.stelle %} {{ e.planungsentscheid.fundstelle.stelle }}{% endif %}: „{{ e.planungsentscheid.fundstelle.text }}“{% if not e.planungsentscheid.fundstelle.wortlaut_geprueft %} (geprüft: Bindung und Hash; den Wortlaut der MasterSpec kann KI-PM nicht lesen){% endif %}</p>
+  {% if e.planungsentscheid.widerrufen_am %}<p><span class="status bad">widerrufen</span> am {{ e.planungsentscheid.widerrufen_am|date:"d.m.Y H:i" }}</p>
+  {% else %}<form method="post" action="{% url 'planungsentscheid_widerrufen' kennung=projekt.kennung nummer=e.pk %}">{% csrf_token %}<p class="hilfe">Widerrufen zieht die Entscheidung zurück; im Verlauf bleibt alles sichtbar. Ein schon fortgesetzter Auftrag läuft weiter.</p><button type="submit" class="knopf zweit gefahr">Planungsentscheidung widerrufen</button></form>{% endif %}
+</section>
+{% endif %}
 <section class="box">
   <h2>{% if e %}Entscheidung {{ e.nummer }} bearbeiten{% else %}Neue Entscheidung{% endif %}</h2>
   <p class="gedaempft">{% if e %}Seit {% if e.entschieden_am %}{{ e.entschieden_am|date:"d.m.Y" }}{% else %}{{ e.vorgeschlagen_am|date:"d.m.Y" }} (bisher nur Vorschlag; Speichern macht sie verbindlich){% endif %} · eingetragen von {{ e.vorgeschlagen_von_name }}. {% endif %}Gilt ab dem Speichern für alle Chats dieses Projekts und steht im Verlauf.</p>

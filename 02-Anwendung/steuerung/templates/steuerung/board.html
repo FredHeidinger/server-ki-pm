@@ -10,7 +10,7 @@
       {% if a.typ == "issue" %}<span class="issue">Issue</span>{% endif %}
       {% if darf_verschieben %}<label class="auswahlfeld" title="{{ a.nummer }} zum Verschieben auswählen"><input type="checkbox" name="auftrag" value="{{ a.pk }}" form="verschiebe-auswahl" aria-label="{{ a.nummer }} auswählen"></label>{% endif %}
       <a class="kartentitel" href="{% url 'auftrag_detail' auftrag_id=a.pk %}"><span class="nr">{{ a.nummer }}</span> {{ a.titel }}</a>
-      {% if a.haupt.lieferbedarf and not a.haupt.verwaist %}<p class="lieferung">Wartet auf Lieferung von {% for b in a.haupt.lieferbedarf %}{{ b.auftrag }}{% if not forloop.last %}, {% endif %}{% endfor %}. Geht von selbst weiter.</p>{% endif %}
+      {% with b=a|blockade %}{% if b.art == "lieferung" %}<p class="lieferung">Wartet auf Lieferung von {% for v in b.von %}{{ v.auftrag }} ({{ v.zustand }}){% if not forloop.last %}, {% endif %}{% endfor %}. Geht von selbst weiter.</p>{% elif b.art == "antwort" %}<p class="antwortbedarf">Braucht deine Antwort.</p>{% endif %}{% endwith %}
       {% include "steuerung/hauptknopf.html" with h=a.haupt ort="karte" zurueck=request.get_full_path %}
       <div class="kartenfuss">
         {% if alle %}<span class="kartenort" title="Projekt">{{ a.projekt.name }}</span>{% endif %}

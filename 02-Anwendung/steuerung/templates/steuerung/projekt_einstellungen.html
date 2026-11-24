@@ -103,6 +103,34 @@
   <p>KI-Programme verbindest du unter <a href="{% url 'verbindungen' %}">Konto &amp; KI verbinden</a>.</p>
 </section>
 
+<section id="stufenregeln" class="box" aria-labelledby="h-stufenregeln">
+  <h2 id="h-stufenregeln">Stufenregel für die Planung <span class="stufe optional">optional</span></h2>
+  <p class="gedaempft">Mit einer Stufenregel darf der planende Zugang Routinefälle ohne deine Worte erledigen. Stufe A: fertig geplante Aufträge freigeben und fehlende Lieferkanten nachtragen. Stufe B: technische Entscheidungen buchen, nur mit einer wörtlichen Fundstelle, die KI-PM gegen Stand und Hash prüft. Ziel, Kosten, Rechte, Cloud/Microsoft, Sicherheit, Daten, Neuschnitt und Löschung bleiben immer bei dir. Jede so gebuchte Entscheidung steht im Wissen mit „von Planung entschieden“ und lässt sich dort widerrufen. Ohne Stufenregel ändert sich nichts.</p>
+  {% if stufenregeln %}
+  <table class="klein">
+    <thead><tr><th scope="col">Regel</th><th scope="col" class="nur-mittel">Gültig bis</th><th scope="col">Stand</th></tr></thead>
+    <tbody>
+    {% for r in stufenregeln %}
+      <tr>
+        <td class="umbruch">{{ r.nummer }} · {{ r.zugang.name }}<br><span class="gedaempft klein">Stufe {% if r.stufe_a %}A{% endif %}{% if r.stufe_a and r.stufe_b %} und {% endif %}{% if r.stufe_b %}B{% endif %}{% if r.masterspec_sha256 %} · MasterSpec {{ r.masterspec_bezeichnung }}{% endif %}</span></td>
+        <td class="nur-mittel">{{ r.gueltig_bis|date:"d.m.Y H:i" }}</td>
+        <td>{% if r.widerrufen_am %}<span class="status bad">widerrufen</span>{% elif r.gueltig_bis <= jetzt %}<span class="status warn">abgelaufen</span>{% else %}<span class="status gut">gültig</span>
+          <form method="post" action="{% url 'stufenregel_widerrufen' kennung=projekt.kennung nummer=r.pk %}" class="inline">{% csrf_token %}<button type="submit" class="knopf zweit klein gefahr">Widerrufen</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>Noch keine Stufenregel gespeichert.</p>{% endif %}
+  <details>
+    <summary class="knopf zweit">+ Stufenregel speichern</summary>
+    <form method="post" action="{% url 'stufenregel_erteilen' kennung=projekt.kennung %}">
+      {% csrf_token %}
+      {% include "steuerung/formular_felder.html" with form=stufenregel_form %}
+      <button type="submit" class="knopf">Stufenregel speichern</button>
+    </form>
+  </details>
+</section>
+
 <section id="vollmachten" class="box" aria-labelledby="h-vollmachten">
   <h2 id="h-vollmachten">Vollmachten für Auftragsaktionen <span class="stufe optional">optional</span></h2>
   <p class="gedaempft">Mit einer Vollmacht darf ein Zugang einen klar geregelten technischen Fall ohne erneute Rückfrage ausführen: einen blockierten Auftrag beim bisherigen Bearbeiter fortsetzen, sobald eine belegte Korrektur (Lieferung) vorliegt. KI-PM prüft dabei jedes Mal Revision, Blockade, Bearbeiter, Nachweis und Ordnersperre. Eine Entscheidung im Wissen allein genügt dafür nicht.</p>

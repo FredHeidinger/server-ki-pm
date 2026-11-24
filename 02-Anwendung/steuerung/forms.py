@@ -392,6 +392,50 @@ def listen_zusammenfuehren(post, *felder: str):
     return daten
 
 
+class StufenregelForm(forms.Form):
+    """Stufenregel für die Planung (KIPM-31); nur Fred speichert sie."""
+
+    zugang = NamensAuswahl(
+        label="Welcher Zugang plant",
+        queryset=ChatBindung.objects.none(),
+        help_text="PC-Zugang der Planung, z. B. ChatGPT Desktop (Codex).",
+    )
+    stufe_a = forms.BooleanField(
+        label="Stufe A: fertig geplante Aufträge freigeben und Lieferkanten nachtragen",
+        required=False,
+    )
+    stufe_b = forms.BooleanField(
+        label="Stufe B: technische Entscheidungen mit geprüfter Fundstelle buchen",
+        required=False,
+        help_text="Ziel, Kosten, Rechte, Cloud/Microsoft, Sicherheit, Daten, Neuschnitt und "
+        "Löschung bleiben immer bei dir.",
+    )
+    gueltig_bis = forms.DateField(
+        label="Gültig bis",
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+        help_text="Höchstens 90 Tage; der Tag zählt bis 23:59.",
+    )
+    masterspec_bezeichnung = forms.CharField(
+        label="Gebundene MasterSpec",
+        max_length=200,
+        required=False,
+        help_text="z. B. SOURCE-MASTER-SPEC-BASELINE-005; leer = keine",
+    )
+    masterspec_sha256 = forms.CharField(
+        label="SHA-256 der MasterSpec",
+        max_length=64,
+        required=False,
+        help_text="64 Hexzeichen, wie in der Quellenbindung des Projekts",
+    )
+
+    def __init__(self, *args, projekt=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["zugang"].queryset = ChatBindung.objects.filter(
+            widerrufen_am__isnull=True, art=ChatBindung.ART_PC
+        )
+        _stufen(self)
+
+
 class VollmachtForm(forms.Form):
     """Vollmacht für einen technischen Standardfall; nur Fred erteilt sie."""
 

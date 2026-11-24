@@ -10,7 +10,7 @@
   <div class="tabellenrahmen"><table>
     <thead><tr><th scope="col">Entscheidung</th><th scope="col" class="nur-mittel">Warum</th><th scope="col">Seit</th><th scope="col"><span class="unsichtbar">Aktion</span></th></tr></thead>
     <tbody>{% for e in entscheidungen %}<tr>
-      <th scope="row">{{ e.text|linebreaksbr }}{% if e.zustand != "ENTSCHIEDEN" %} <span class="status warn">nur Vorschlag</span>{% endif %}{% if e.warum %}<span class="nur-schmal gedaempft">Warum: {{ e.warum|linebreaksbr }}</span>{% endif %}</th>
+      <th scope="row">{{ e.text|linebreaksbr }}{% if e.zustand != "ENTSCHIEDEN" %} <span class="status warn">nur Vorschlag</span>{% endif %}{% if e.planungsentscheid %} <span class="status warn">von Planung entschieden</span>{% endif %}{% if e.warum %}<span class="nur-schmal gedaempft">Warum: {{ e.warum|linebreaksbr }}</span>{% endif %}</th>
       <td class="nur-mittel">{% if e.warum %}{{ e.warum|linebreaksbr }}{% else %}<span class="gedaempft">–</span>{% endif %}</td>
       <td>{% if e.entschieden_am %}{{ e.entschieden_am|date:"d.m.Y" }}{% else %}{{ e.vorgeschlagen_am|date:"d.m.Y" }}{% endif %}</td>
       <td>{% if e.zustand != "ENTSCHIEDEN" %}<a href="{% url 'projekt_detail' kennung=projekt.kennung %}#h-wartet">Antworten</a><br>{% endif %}<a href="{% url 'wissen_entscheidung' kennung=projekt.kennung nummer=e.pk %}">Bearbeiten</a></td>

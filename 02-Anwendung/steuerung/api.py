@@ -28,6 +28,7 @@ from . import (
     lieferungen,
     ordnersperren,
     regelpruefung,
+    stufenregeln,
     uebernahmevorschau,
     werkbank,
 )
@@ -137,6 +138,7 @@ def _sitzungseintrag(a: Auftrag, uebernehmbar: set[int]) -> dict:
         "faellig": a.faellig.isoformat() if a.faellig else None,
         "uebernehmbar": a.pk in uebernehmbar,
         "bearbeiter": a.bearbeiter_name or None,
+        "blockade": lieferungen.blockade(a),
     }
 
 
@@ -394,6 +396,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False, *, alle_halter=Fa
         "ordnersperre": ordnersperre,
         "kriterien_erfuellt": auftragsregeln.kriterienstand(auftrag),
         "blockadegrund": "festgefahren" if auftragsregeln.offene_festfahrfrage(auftrag) else None,
+        "blockade": lieferungen.blockade(auftrag),
         "nur_mensch": auftragsregeln.menschenschritt(auftrag, rev),
         "uebernehmbar": (
             auftrag.zustand == Auftrag.FREIGEGEBEN
@@ -460,6 +463,7 @@ def _auftrag_json(auftrag: Auftrag, mit_details: bool = False, *, alle_halter=Fa
         )
     if mit_details:
         daten.update(lieferungen.details(auftrag))
+        daten["lieferersatz"] = lieferungen.ersatz_liste(auftrag)
         daten["aktionsvorschlaege"] = [
             auftragsaktionen.vorschlag_json(v)
             for v in auftrag.aktionsvorschlaege.select_related("entscheidung")[:10]
@@ -1377,7 +1381,84 @@ def aktionen(request: HttpRequest) -> JsonResponse:
     letzten Aktionen des Projekts mit Folgemeldung des Bearbeiters
     (01-Planung/AKTIONSVOLLMACHT.md)."""
     projekt = _akte_projekt(request)
-    return JsonResponse({"ok": True, **auftragsaktionen.aktionen_lesen(request.akteur, projekt)})
+    return JsonResponse(
+        {
+            "ok": True,
+            **auftragsaktionen.aktionen_lesen(request.akteur, projekt),
+            "stufenregeln": stufenregeln.lesen(request.akteur, projekt),
+        }
+    )
+
+
+# --- Stufenregel der Planung (KIPM-31) -------------------------------------------------------
+# Die Befugnis kommt allein aus Freds gespeicherter Stufenregel, nie aus Chattext; darum ohne
+# ``fred_sagte``. Der Verlauf nennt die Regel statt Freds Worten.
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def planung_freigeben(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Stufe A: fertig geplanten Auftrag freigeben."""
+    a = stufenregeln.freigeben(
+        request.akteur,
+        _projekt_noetig(request),
+        auftrag=daten.get("auftrag"),
+        revision=daten.get("revision"),
+    )
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(a)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def planung_lieferkante(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Stufe A: fehlende technische Lieferkante nachtragen."""
+    a = stufenregeln.lieferkante(
+        request.akteur,
+        _projekt_noetig(request),
+        auftrag=daten.get("auftrag"),
+        revision=daten.get("revision"),
+        bedarf=daten.get("bedarf"),
+        nur_lieferungen=daten.get("nur_lieferungen"),
+        hindernis_id=daten.get("hindernis_id"),
+    )
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(a, mit_details=True)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
+def planung_entscheiden(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Stufe B: technische Entscheidung mit geprüfter Fundstelle buchen, abhängigen Auftrag
+    fortsetzen."""
+    pe, a = stufenregeln.entscheiden(
+        request.akteur,
+        _projekt_noetig(request),
+        entscheidung=daten.get("entscheidung"),
+        warum=daten.get("warum", ""),
+        bereich=daten.get("bereich"),
+        fundstelle=daten.get("fundstelle"),
+        auftrag=daten.get("auftrag"),
+        revision=daten.get("revision"),
+        meldung_id=daten.get("meldung_id"),
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "entscheidung": pe.entscheidung.nummer,
+            "stand": pe.entscheidung.stand,
+            "regel": pe.regel.nummer,
+            "fundstelle": pe.fundstelle,
+            "auftrag": _auftrag_json(a) if a is not None else None,
+        }
+    )
 
 
 @csrf_exempt
@@ -1682,6 +1763,32 @@ def auf_lieferung_warten(request, daten, auftrag_id):
         bedarf=daten.get("bedarf"),
         nur_lieferungen=daten.get("nur_lieferungen"),
     )
+    return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_fred_bestaetigt
+@_mit_wiederholungsschutz
+@_behandeln
+def lieferersatz_zulassen(request, daten, auftrag_id):
+    """Fred lässt einen Anbieterwechsel beim Lieferbedarf zu (KIPM-29)."""
+    auftrag = dienst.auftrag_holen(request.akteur, auftrag_id)
+    lieferungen.ersatz_zulassen(
+        request.akteur,
+        auftrag,
+        revision=_lieferrevision(daten),
+        meldung_id=daten.get("meldung_id"),
+        lieferkennung=daten.get("lieferkennung"),
+        alt_auftrag=daten.get("alt_auftrag", ""),
+        alt_revision=daten.get("alt_revision"),
+        neu_auftrag=daten.get("neu_auftrag", ""),
+        neu_revision=daten.get("neu_revision"),
+        lieferung=daten.get("lieferung"),
+        inhalt_sha256=daten.get("inhalt_sha256"),
+    )
+    auftrag.refresh_from_db()
     return JsonResponse({"ok": True, "auftrag": _auftrag_json(auftrag, mit_details=True)})
 
 

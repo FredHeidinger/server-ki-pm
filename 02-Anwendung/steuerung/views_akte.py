@@ -13,13 +13,14 @@ from django.urls import reverse
 from django.utils.timezone import now as timezone_now
 from django.views.decorators.http import require_POST
 
-from . import abgleich, ablage, akte, auftragsaktionen, dienst
+from . import abgleich, ablage, akte, auftragsaktionen, dienst, stufenregeln
 from .forms import (
     ArbeitsortForm,
     EntscheidungEintragForm,
     MeilensteinForm,
     ModulForm,
     ProfilForm,
+    StufenregelForm,
     UnterlageLinkForm,
     UnterlageTextForm,
     VollmachtForm,
@@ -32,6 +33,7 @@ from .models import (
     Lieferung,
     Meilenstein,
     Projekt,
+    Stufenregel,
     Unterlage,
 )
 from .views import wartet_eintraege
@@ -423,6 +425,8 @@ def einstellungen(request: HttpRequest, kennung: str) -> HttpResponse:
                 "ausfuehrende_bindung", "bearbeiter_bindung", "auftrag__projekt", "entscheidung"
             ),
             vollmacht_form=VollmachtForm(prefix=None, projekt=projekt),
+            stufenregeln=projekt.stufenregeln.select_related("zugang").order_by("-id"),
+            stufenregel_form=StufenregelForm(prefix=None, projekt=projekt),
             jetzt=timezone_now(),
         ),
     )
@@ -550,3 +554,64 @@ def vollmacht_widerrufen(request: HttpRequest, kennung: str, nummer: int) -> Htt
         vm,
     )
     return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#vollmachten")
+
+
+@login_required
+@require_POST
+def stufenregel_erteilen(request: HttpRequest, kennung: str) -> HttpResponse:
+    from datetime import datetime, time
+
+    from django.utils import timezone
+
+    projekt = _projekt(kennung)
+    form = StufenregelForm(request.POST, projekt=projekt)
+    if not form.is_valid():
+        messages.error(
+            request,
+            "Stufenregel nicht gespeichert: "
+            + "; ".join(f"{form.fields[f].label}: {' '.join(e)}" for f, e in form.errors.items()),
+        )
+    else:
+        d = form.cleaned_data
+        try:
+            regel = stufenregeln.erteilen(
+                _akteur(request),
+                projekt,
+                zugang=d["zugang"],
+                stufe_a=d["stufe_a"],
+                stufe_b=d["stufe_b"],
+                gueltig_bis=timezone.make_aware(datetime.combine(d["gueltig_bis"], time(23, 59))),
+                masterspec_bezeichnung=d["masterspec_bezeichnung"],
+                masterspec_sha256=d["masterspec_sha256"],
+            )
+            messages.success(request, f"{regel.nummer} gespeichert.")
+        except dienst.DienstFehler as fehler:
+            messages.error(request, f"Stufenregel nicht gespeichert: {fehler}")
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#stufenregeln")
+
+
+@login_required
+@require_POST
+def stufenregel_widerrufen(request: HttpRequest, kennung: str, nummer: int) -> HttpResponse:
+    projekt = _projekt(kennung)
+    regel = get_object_or_404(Stufenregel, pk=nummer, projekt=projekt)
+    _ausfuehren(
+        request, f"{regel.nummer} widerrufen.", stufenregeln.widerrufen, _akteur(request), regel
+    )
+    return redirect(reverse("projekt_einstellungen", kwargs={"kennung": kennung}) + "#stufenregeln")
+
+
+@login_required
+@require_POST
+def planungsentscheid_widerrufen(request: HttpRequest, kennung: str, nummer: int) -> HttpResponse:
+    projekt = _projekt(kennung)
+    e = get_object_or_404(Entscheidung, pk=nummer, betroffene_projekte=projekt)
+    _ausfuehren(
+        request,
+        f"{e.nummer} widerrufen; sie gilt nicht mehr.",
+        stufenregeln.planungsentscheid_widerrufen,
+        _akteur(request),
+        projekt,
+        e,
+    )
+    return redirect("wissen_entscheidung", kennung=kennung, nummer=e.pk)

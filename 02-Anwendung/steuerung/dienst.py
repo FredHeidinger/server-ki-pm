@@ -73,6 +73,8 @@ class Akteur:
     ist_assistent: bool = False
     # Freds Worte aus dem Chat, die eine Änderung tragen; jedes Ereignis der Anfrage nennt sie.
     fred_sagte: str = ""
+    # Stufenregel (SR-n), die eine Änderung der Planung ohne Freds Worte trägt (KIPM-31).
+    regel: str = ""
 
     @classmethod
     def aus_benutzer(cls, benutzer: AbstractBaseUser) -> "Akteur":
@@ -128,6 +130,8 @@ def _ereignis(
     Inhaltsrevision (Lesen, Besuchsmarken und unveränderte Abrufe schreiben keines)."""
     if akteur.fred_sagte:
         anlass = (anlass + " · " if anlass else "") + f"Fred sagte: „{akteur.fred_sagte}“"
+    if akteur.regel:
+        anlass = (anlass + " · " if anlass else "") + f"Stufenregel {akteur.regel}"
     if akteur.ordner:
         anlass = (anlass + " · " if anlass else "") + f"Ordner {akteur.ordner}"
     if projekt is not None:
@@ -882,6 +886,8 @@ BINDUNG_VERWEISE = (
     ("Aktionsvorschlag", "bindung"),
     ("Aktionsvollmacht", "ausfuehrende_bindung"),
     ("Aktionsvollmacht", "bearbeiter_bindung"),
+    ("Stufenregel", "zugang"),
+    ("Planungsentscheid", "zugang"),
 )
 
 
@@ -2476,6 +2482,8 @@ def auftrag_freigeben(akteur: Akteur, auftrag: Auftrag, *, w1_revision=None) -> 
             anlass=(
                 f"W1-Erlaubnis {auftrag.chat_delegation_id}, Fassung {auftrag.chat_delegation_revision}"
                 if auftrag.chat_delegation_id is not None
+                else f"freigegeben durch Stufenregel {akteur.regel}, ohne Freds Worte"
+                if akteur.regel
                 else IM_CHAT_FREIGEGEBEN
                 if akteur.bindung is not None
                 else ""
@@ -3314,7 +3322,8 @@ def verstummt(auftrag: Auftrag) -> dict | None:
 def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftrag]:
     """Was in diesem Projekt auf Fred wartet. Zuoberst jeder offene Eintrag ab seinem Termin, der
     älteste Termin zuerst, in jedem Zustand. Danach blockierte Aufträge (Rückfrage, Hindernis,
-    Fehler), verstummte Aufträge und Entwürfe, die er freigeben kann oder denen nur sein Arbeitsort
+    Fehler; nicht solche, die nur auf eine Lieferung warten), verstummte Aufträge und Entwürfe,
+    die er freigeben kann oder denen nur sein Arbeitsort
     fehlt. Entwürfe in Planung warten ohne Termin auf einen Chat, nicht auf ihn."""
     eintraege = _eintraege_im_modul(projekt, modul)
     faellige = list(
@@ -3328,10 +3337,14 @@ def wartet_auf_dich(projekt: Projekt, modul: Modul | None = None) -> list[Auftra
         .exclude(pk__in=[a.pk for a in faellige])
         .select_related("projekt", "modul")
     )
+    from . import lieferungen
+
     blockiert, entwuerfe = [], []
     for a in offen.order_by("-aktualisiert_am", "-id"):
         if a.zustand == Auftrag.BLOCKIERT:
-            blockiert.append(a)
+            # Wer nur auf eine technische Lieferung wartet, hängt nicht an Fred (KIPM-32).
+            if lieferungen.blockade(a)["art"] != lieferungen.LIEFERUNG:
+                blockiert.append(a)
         elif not a.aktuelle_revision.ist_wunsch:
             offene = [p for p in freigabepruefung(a) if not p.erfuellt]
             if all(p.arbeitsort_wahl for p in offene):

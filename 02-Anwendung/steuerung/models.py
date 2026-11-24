@@ -1649,6 +1649,98 @@ class Lieferbedarf(models.Model):
         ]
 
 
+class Lieferersatz(models.Model):
+    """Von Fred bestätigte Zulassung, dass ein Verbraucher einen Lieferbedarf vom alten auf einen
+    neuen Anbieter umstellt (KIPM-29). Gebunden an Verbraucherrevision, Meldung des
+    Lieferblockers, Lieferkennung, beide Anbieterrevisionen und die konkrete Lieferung des neuen
+    Anbieters mit Inhaltshash; Regeln in ``steuerung.lieferungen``."""
+
+    verbraucher = models.ForeignKey(
+        Auftrag, on_delete=models.PROTECT, related_name="lieferersatz_zulassungen"
+    )
+    revision_nr = models.PositiveIntegerField()
+    meldung = models.ForeignKey(Meldung, on_delete=models.PROTECT, related_name="+")
+    lieferkennung = models.CharField(max_length=80)
+    alt_auftrag = models.ForeignKey(Auftrag, on_delete=models.PROTECT, related_name="+")
+    alt_revision = models.PositiveIntegerField()
+    neu_auftrag = models.ForeignKey(Auftrag, on_delete=models.PROTECT, related_name="+")
+    neu_revision = models.PositiveIntegerField()
+    lieferung = models.ForeignKey(Lieferung, on_delete=models.PROTECT, related_name="+")
+    inhalt_sha256 = models.CharField(max_length=64)
+    angewendet_meldung = models.ForeignKey(
+        Meldung, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    angelegt_von_name = models.CharField(max_length=200)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meldung", "lieferkennung"], name="lieferersatz_je_blocker_und_kennung"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.nummer
+
+    @property
+    def nummer(self) -> str:
+        return f"LE-{self.pk}"
+
+
+class Stufenregel(models.Model):
+    """Von Fred gespeicherte, befristete und widerrufbare Regel je Projekt und PC-Zugang der
+    Planung (KIPM-31). Stufe A: fertig geplante Aufträge freigeben, Lieferkanten nachtragen.
+    Stufe B: technische Entscheidungen mit geprüfter Fundstelle buchen. Regeln in
+    ``steuerung.stufenregeln``."""
+
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="stufenregeln")
+    zugang = models.ForeignKey(ChatBindung, on_delete=models.PROTECT, related_name="+")
+    stufe_a = models.BooleanField(default=False)
+    stufe_b = models.BooleanField(default=False)
+    masterspec_bezeichnung = models.CharField(max_length=200, blank=True)
+    masterspec_sha256 = models.CharField(max_length=64, blank=True)
+    gueltig_bis = models.DateTimeField()
+    widerrufen_am = models.DateTimeField(null=True, blank=True)
+    erteilt_von = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    erteilt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return self.nummer
+
+    @property
+    def nummer(self) -> str:
+        return f"SR-{self.pk}"
+
+
+class Planungsentscheid(models.Model):
+    """Eine von der Planung mit Stufenregel gebuchte Entscheidung samt Fundstelle; je
+    Blockademeldung höchstens einmal."""
+
+    regel = models.ForeignKey(Stufenregel, on_delete=models.PROTECT, related_name="entscheide")
+    entscheidung = models.OneToOneField(
+        Entscheidung, on_delete=models.PROTECT, related_name="planungsentscheid"
+    )
+    zugang = models.ForeignKey(ChatBindung, on_delete=models.PROTECT, related_name="+")
+    bereich = models.CharField(max_length=20)
+    fundstelle = models.JSONField()
+    auftrag = models.ForeignKey(
+        Auftrag, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    meldung = models.OneToOneField(
+        Meldung, null=True, blank=True, on_delete=models.PROTECT, related_name="planungsentscheid"
+    )
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+    widerrufen_am = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
 class Aktionsvorschlag(models.Model):
     """Von der Planung vorbereitete konkrete Aktion an einem Auftrag, gebunden an Revision und
     maßgebliche Meldung; wirkt erst mit Freds Bestätigung in der Oberfläche (Regeln in

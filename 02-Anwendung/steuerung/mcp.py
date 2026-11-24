@@ -45,7 +45,12 @@ ANWEISUNGEN = (
     "kipm_aktion_vorschlagen eine Wiederaufnahme oder einen Neuschnitt vor; wirksam wird er erst "
     "mit Freds Bestätigung in der Oberfläche. Hat Fred dem Zugang eine Vollmacht gespeichert "
     "(kipm_aktionen), führt dieser den genannten technischen Standardfall mit "
-    "kipm_aktion_ausfuehren aus; Chattext ersetzt keine Vollmacht. "
+    "kipm_aktion_ausfuehren aus; Chattext ersetzt keine Vollmacht. Hat Fred dem Zugang eine "
+    "Stufenregel gespeichert (kipm_aktionen unter stufenregeln), gibt die Planung mit Stufe A "
+    "fertig geplante Aufträge mit kipm_planung_freigeben frei und trägt Lieferkanten mit "
+    "kipm_planung_lieferkante nach, mit Stufe B bucht sie technische Entscheidungen mit "
+    "geprüfter Fundstelle über kipm_planung_entscheiden, jeweils ohne fred_sagte; setze "
+    "dort nie ein gespeichertes Zitat als fred_sagte ein. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
     "Nachweis); nur Offenes, Größeres oder für einen anderen Chat schlägst du Fred für KI-PM vor. "
     "Ablauf eines Auftrags: Entwurf → Freigegeben → In Arbeit → Erledigt oder Blockiert "
@@ -499,6 +504,63 @@ WERKZEUGE = [
         [],
     ),
     (
+        "kipm_planung_freigeben",
+        "Stufe A der Stufenregel: einen fertig geplanten Auftrag ohne fred_sagte freigeben. Geht "
+        "nur, wenn Fred diesem Zugang im Projekt eine gültige Stufenregel mit Stufe A gespeichert "
+        "hat (kipm_aktionen unter stufenregeln); der Verlauf nennt die Regel statt Freds Worten. "
+        "Die Freigabeprüfung gilt unverändert.",
+        {"auftrag": _AUFTRAG, "revision": _REVISION},
+        ["projekt", "auftrag", "revision"],
+    ),
+    (
+        "kipm_planung_lieferkante",
+        "Stufe A der Stufenregel: eine fehlende technische Lieferkante nachtragen, mit denselben "
+        "Feldern und Regeln wie kipm_lieferbedarf_festlegen, aber ohne fred_sagte.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "bedarf": _LIEFERBEDARF | {"minItems": 0},
+            "nur_lieferungen": {"const": True},
+            "hindernis_id": {"type": "integer", "minimum": 1},
+        },
+        ["projekt", "auftrag", "revision", "bedarf", "nur_lieferungen"],
+    ),
+    (
+        "kipm_planung_entscheiden",
+        "Stufe B der Stufenregel: eine rein technische Entscheidung ohne fred_sagte buchen. "
+        "Pflicht: bereich=technik, die wörtliche fundstelle (KI-PM prüft Stand und Hash) und "
+        "eine eigene anfrage_kennung. Optional auftrag, revision und meldung_id der Rückfrage "
+        "oder des Hindernisses, das die Entscheidung beantwortet: Dann setzt KI-PM den Auftrag "
+        "beim bisherigen Bearbeiter fort, je Blockademeldung höchstens einmal. Ziel, Kosten, "
+        "Rechte, Cloud/Microsoft, Sicherheit, Daten, Neuschnitt, Bearbeiterwechsel und Löschung "
+        "(Stufe C) sowie alles ohne prüfbare Fundstelle lehnt KI-PM ab: dann Fred fragen. Fred "
+        "kann jede so gebuchte Entscheidung in der Oberfläche widerrufen.",
+        {
+            "entscheidung": _TEXT,
+            "warum": _TEXT,
+            "bereich": {"type": "string", "enum": ["technik"]},
+            "fundstelle": {
+                "type": "object",
+                "description": "Wörtliche Fundstelle: quelle (E-n, U-n oder masterspec), stand "
+                "(Stand der Entscheidung oder Fassung des Texts), sha256 (Hash der Quelle, bei "
+                "E-n über ihren Text), text (wörtlich, mindestens 20 Zeichen), bei masterspec "
+                "stelle (z. B. P12313)",
+                "properties": {
+                    "quelle": {"type": "string"},
+                    "stand": {"type": "integer"},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    "text": {"type": "string"},
+                    "stelle": {"type": "string"},
+                },
+                "required": ["quelle", "sha256", "text"],
+            },
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "meldung_id": {"type": "integer", "minimum": 1},
+        },
+        ["projekt", "entscheidung", "bereich", "fundstelle", "anfrage_kennung"],
+    ),
+    (
         "kipm_aktion_ausfuehren",
         "Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen, zurzeit nur "
         "aktion=wiederaufnahme beim bisherigen Bearbeiter. Pflicht: vollmacht (VM-n aus "
@@ -620,6 +682,39 @@ WERKZEUGE = [
             },
         },
         ["auftrag", "revision", "bedarf", "nur_lieferungen"],
+    ),
+    (
+        "kipm_lieferersatz_zulassen",
+        "Nur auf Freds Anweisung: einen Anbieterwechsel beim Lieferbedarf zulassen. Alle Werte "
+        "aus kipm_lesen: revision und meldung_id des aktuellen Lieferblockers des Verbrauchers, "
+        "lieferkennung, alter Anbieter mit Revision, neuer Anbieter mit aktueller Revision, "
+        "Nummer und inhalt_sha256 seiner Lieferung. Ohne passende Zulassung lehnt "
+        "kipm_warten_auf_lieferung einen Wechsel ab; Nachführen beim selben Anbieter braucht "
+        "keine. Die Zulassung steht im Einzelabruf unter lieferersatz.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "meldung_id": {"type": "integer", "minimum": 1},
+            "lieferkennung": _TEXT,
+            "alt_auftrag": _TEXT,
+            "alt_revision": {"type": "integer", "minimum": 1},
+            "neu_auftrag": _TEXT,
+            "neu_revision": {"type": "integer", "minimum": 1},
+            "lieferung": {"type": "integer", "minimum": 1},
+            "inhalt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        },
+        [
+            "auftrag",
+            "revision",
+            "meldung_id",
+            "lieferkennung",
+            "alt_auftrag",
+            "alt_revision",
+            "neu_auftrag",
+            "neu_revision",
+            "lieferung",
+            "inhalt_sha256",
+        ],
     ),
     (
         "kipm_lieferung_melden",
@@ -803,6 +898,19 @@ _AUFTRAGSWERKZEUGE = {
         "api_auf_lieferung_warten",
         ("text", "bedarf", "nur_lieferungen"),
     ),
+    "kipm_lieferersatz_zulassen": (
+        "api_lieferersatz_zulassen",
+        (
+            "meldung_id",
+            "lieferkennung",
+            "alt_auftrag",
+            "alt_revision",
+            "neu_auftrag",
+            "neu_revision",
+            "lieferung",
+            "inhalt_sha256",
+        ),
+    ),
     "kipm_lieferbedarf_festlegen": (
         "api_lieferbedarf_festlegen",
         ("bedarf", "nur_lieferungen", "hindernis_id"),
@@ -961,11 +1069,15 @@ _ARBEIT_AM_AUFTRAG = frozenset(
 _FRAGE_AN_FRED = frozenset({"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen"})
 # Befugnis allein aus der gespeicherten Vollmacht (auftragsaktionen.mit_vollmacht_ausfuehren).
 _VOLLMACHT = frozenset({"kipm_aktion_ausfuehren"})
+# Befugnis allein aus Freds gespeicherter Stufenregel (steuerung.stufenregeln, KIPM-31).
+_STUFENREGEL = frozenset(
+    {"kipm_planung_freigeben", "kipm_planung_lieferkante", "kipm_planung_entscheiden"}
+)
 
 
 def _werkzeug_eintrag(name: str, beschreibung: str, eigenschaften: dict, pflicht: list) -> dict:
     braucht_fred = name not in (
-        _NUR_LESEN | _ARBEIT_AM_AUFTRAG | _FRAGE_AN_FRED | _W1_DELEGIERT | _VOLLMACHT
+        _NUR_LESEN | _ARBEIT_AM_AUFTRAG | _FRAGE_AN_FRED | _W1_DELEGIERT | _VOLLMACHT | _STUFENREGEL
     )
     return {
         "name": name,
@@ -1043,6 +1155,34 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
     def rufe(pfad: str, daten=None) -> dict:
         return _intern(schluessel, request, a, pfad, daten)
 
+    if name in _STUFENREGEL:
+        if name == "kipm_planung_entscheiden" and (
+            not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip()
+        ):
+            raise _Ungueltig(
+                "Für kipm_planung_entscheiden ist eine eigene anfrage_kennung Pflicht; sie wird "
+                "nicht erfunden."
+            )
+        felder = {
+            "kipm_planung_freigeben": ("auftrag", "revision"),
+            "kipm_planung_lieferkante": (
+                "auftrag",
+                "revision",
+                "bedarf",
+                "nur_lieferungen",
+                "hindernis_id",
+            ),
+            "kipm_planung_entscheiden": (
+                "entscheidung",
+                "warum",
+                "bereich",
+                "fundstelle",
+                "auftrag",
+                "revision",
+                "meldung_id",
+            ),
+        }[name]
+        return rufe(reverse("api_" + name.removeprefix("kipm_")), _felder(a, felder))
     if name == "kipm_aktionen":
         return rufe(reverse("api_aktionen"))
     if name == "kipm_projekte":
@@ -1229,7 +1369,12 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         revision = (
             a.get("revision")
             if name
-            in {"kipm_warten_auf_lieferung", "kipm_lieferbedarf_festlegen", "kipm_lieferung_melden"}
+            in {
+                "kipm_warten_auf_lieferung",
+                "kipm_lieferbedarf_festlegen",
+                "kipm_lieferersatz_zulassen",
+                "kipm_lieferung_melden",
+            }
             else _revision(a)
         )
         daten = {"revision": revision} | _felder(a, felder)
