@@ -888,6 +888,9 @@ BINDUNG_VERWEISE = (
     ("Aktionsvollmacht", "bearbeiter_bindung"),
     ("Stufenregel", "zugang"),
     ("Planungsentscheid", "zugang"),
+    ("Projekt", "blockadenabgleich_zugang"),
+    ("Klaerungsregel", "zugang"),
+    ("Planungsfortsetzung", "zugang"),
 )
 
 

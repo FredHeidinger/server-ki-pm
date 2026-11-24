@@ -15,6 +15,12 @@ from django.db import models
 
 
 class Projekt(models.Model):
+    # Früher (Blockadenabgleich, nur auf CT100 eingespielt, Migration 0030): bleibt stehen,
+    # kein Code liest oder schreibt es (KIPM-33).
+    blockadenabgleich_zugang = models.ForeignKey(
+        "ChatBindung", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+
     kennung = models.SlugField(
         "Kennung",
         max_length=40,
@@ -602,6 +608,9 @@ class Entscheidung(models.Model):
         related_name="entscheidungen",
     )
     entschieden_am = models.DateTimeField(null=True, blank=True)
+    # Früher (Blockadenabgleich, Migration 0030): Pflichtspalte ohne Datenbank-Standardwert;
+    # das Modell setzt [] beim Speichern, sonst scheitert jede neue Entscheidung (KIPM-33).
+    klaerungsbelege = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-id"]
@@ -612,6 +621,25 @@ class Entscheidung(models.Model):
     @property
     def nummer(self) -> str:
         return f"E-{self.pk}"
+
+
+class Klaerungsregel(models.Model):
+    """Früher (Blockadenabgleich, nur auf CT100, Migration 0030): von der Stufenregel ersetzt;
+    Tabelle und Zeilen bleiben stehen, kein Code liest oder schreibt sie (KIPM-33)."""
+
+    projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="klaerungsregeln")
+    zugang = models.ForeignKey(ChatBindung, on_delete=models.PROTECT, related_name="+")
+    frage = models.TextField()
+    antwort = models.TextField()
+    restfrage = models.TextField(blank=True)
+    quelle = models.JSONField()
+    gueltig_bis = models.DateTimeField()
+    widerrufen_am = models.DateTimeField(null=True, blank=True)
+    erteilt_von = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    erteilt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
 
 
 class Uebernahmebestaetigung(models.Model):
@@ -1741,6 +1769,25 @@ class Planungsentscheid(models.Model):
         ordering = ["id"]
 
 
+class Planungsfortsetzung(models.Model):
+    """Die Planung setzt mit Stufenregel einen blockierten Auftrag nach Freds entschiedener E-n
+    fort, ohne eine zweite Entscheidung zu buchen (KIPM-33); je Blockademeldung höchstens
+    einmal."""
+
+    regel = models.ForeignKey(Stufenregel, on_delete=models.PROTECT, related_name="fortsetzungen")
+    zugang = models.ForeignKey(ChatBindung, on_delete=models.PROTECT, related_name="+")
+    auftrag = models.ForeignKey(Auftrag, on_delete=models.PROTECT, related_name="+")
+    meldung = models.OneToOneField(
+        Meldung, on_delete=models.PROTECT, related_name="planungsfortsetzung"
+    )
+    entscheidung = models.ForeignKey(Entscheidung, on_delete=models.PROTECT, related_name="+")
+    nachweis = models.JSONField(default=dict, blank=True)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
 class Aktionsvorschlag(models.Model):
     """Von der Planung vorbereitete konkrete Aktion an einem Auftrag, gebunden an Revision und
     maßgebliche Meldung; wirkt erst mit Freds Bestätigung in der Oberfläche (Regeln in
@@ -1843,6 +1890,10 @@ class Aktionsvollmacht(models.Model):
     )
     entscheidung = models.ForeignKey(
         Entscheidung, null=True, blank=True, on_delete=models.PROTECT, related_name="vollmachten"
+    )
+    # Früher (Blockadenabgleich, Migration 0030), von keinem Code gelesen.
+    automatik_meldung = models.ForeignKey(
+        Meldung, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     # Optional: nur genau diese gemeldete Lieferung gilt als Nachweis.
     lieferung = models.ForeignKey(

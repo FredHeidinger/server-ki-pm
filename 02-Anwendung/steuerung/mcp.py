@@ -49,7 +49,9 @@ ANWEISUNGEN = (
     "Stufenregel gespeichert (kipm_aktionen unter stufenregeln), gibt die Planung mit Stufe A "
     "fertig geplante Aufträge mit kipm_planung_freigeben frei und trägt Lieferkanten mit "
     "kipm_planung_lieferkante nach, mit Stufe B bucht sie technische Entscheidungen mit "
-    "geprüfter Fundstelle über kipm_planung_entscheiden, jeweils ohne fred_sagte; setze "
+    "geprüfter Fundstelle über kipm_planung_entscheiden; hat Fred über einen blockierten "
+    "Auftrag entschieden (E-n nennt ihn), setzt sie ihn mit kipm_planung_fortsetzen fort, "
+    "jeweils ohne fred_sagte; setze "
     "dort nie ein gespeichertes Zitat als fred_sagte ein. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
     "Nachweis); nur Offenes, Größeres oder für einen anderen Chat schlägst du Fred für KI-PM vor. "
@@ -559,6 +561,39 @@ WERKZEUGE = [
             "meldung_id": {"type": "integer", "minimum": 1},
         },
         ["projekt", "entscheidung", "bereich", "fundstelle", "anfrage_kennung"],
+    ),
+    (
+        "kipm_planung_fortsetzen",
+        "Stufe A der Stufenregel: einen blockierten Auftrag beim bisherigen Bearbeiter fortsetzen, "
+        "weil Fred mit einer entschiedenen E-n darüber entschieden hat, die den Auftrag nennt; "
+        "keine zweite Entscheidung buchen. Pflicht: auftrag, revision, meldung_id der aktuellen "
+        "Blockade (Rückfrage, Hindernis oder Fehler), entscheidung (E-n) mit stand, eigene "
+        "anfrage_kennung. Bei einem Fehler zusätzlich nachweis: {lieferung: L-n} oder {auftrag: "
+        "erledigter Korrekturauftrag}. Je Blockademeldung höchstens einmal; Lieferwarten bleiben "
+        "bei der Lieferautomatik, Neuschnitt und Bearbeiterwechsel bei Fred.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "meldung_id": {"type": "integer", "minimum": 1},
+            "entscheidung": {"type": "string", "description": "z. B. E-234"},
+            "stand": {"type": "integer", "minimum": 0},
+            "nachweis": {
+                "type": "object",
+                "properties": {
+                    "lieferung": {"type": "string", "description": "z. B. L-7"},
+                    "auftrag": {"type": "string", "description": "erledigter Korrekturauftrag"},
+                },
+            },
+        },
+        [
+            "projekt",
+            "auftrag",
+            "revision",
+            "meldung_id",
+            "entscheidung",
+            "stand",
+            "anfrage_kennung",
+        ],
     ),
     (
         "kipm_aktion_ausfuehren",
@@ -1071,7 +1106,12 @@ _FRAGE_AN_FRED = frozenset({"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen
 _VOLLMACHT = frozenset({"kipm_aktion_ausfuehren"})
 # Befugnis allein aus Freds gespeicherter Stufenregel (steuerung.stufenregeln, KIPM-31).
 _STUFENREGEL = frozenset(
-    {"kipm_planung_freigeben", "kipm_planung_lieferkante", "kipm_planung_entscheiden"}
+    {
+        "kipm_planung_freigeben",
+        "kipm_planung_lieferkante",
+        "kipm_planung_entscheiden",
+        "kipm_planung_fortsetzen",
+    }
 )
 
 
@@ -1156,7 +1196,7 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         return _intern(schluessel, request, a, pfad, daten)
 
     if name in _STUFENREGEL:
-        if name == "kipm_planung_entscheiden" and (
+        if name in {"kipm_planung_entscheiden", "kipm_planung_fortsetzen"} and (
             not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip()
         ):
             raise _Ungueltig(
@@ -1171,6 +1211,14 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
                 "bedarf",
                 "nur_lieferungen",
                 "hindernis_id",
+            ),
+            "kipm_planung_fortsetzen": (
+                "auftrag",
+                "revision",
+                "meldung_id",
+                "entscheidung",
+                "stand",
+                "nachweis",
             ),
             "kipm_planung_entscheiden": (
                 "entscheidung",

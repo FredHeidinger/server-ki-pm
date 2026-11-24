@@ -1466,6 +1466,34 @@ def planung_entscheiden(request: HttpRequest, daten: dict) -> JsonResponse:
 @bindung_erforderlich
 @_mit_wiederholungsschutz
 @_behandeln
+def planung_fortsetzen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Stufe A: blockierten Auftrag nach Freds entschiedener E-n fortsetzen (KIPM-33)."""
+    a, e, regel, beleg = stufenregeln.fortsetzen(
+        request.akteur,
+        _projekt_noetig(request),
+        auftrag=daten.get("auftrag"),
+        revision=daten.get("revision"),
+        meldung_id=daten.get("meldung_id"),
+        entscheidung=daten.get("entscheidung"),
+        stand=daten.get("stand"),
+        nachweis=daten.get("nachweis"),
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "auftrag": _auftrag_json(a),
+            "entscheidung": e.nummer,
+            "regel": regel.nummer,
+            "nachweis": beleg,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
 def aktion_mit_vollmacht(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     """Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen. Die Befugnis kommt
     allein aus der Vollmacht, nie aus Chattext; darum ohne ``fred_sagte``."""

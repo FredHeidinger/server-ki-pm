@@ -53,7 +53,12 @@ FRAGE = {"kipm_entscheidung_fragen", "kipm_aktion_vorschlagen"}
 # Befugnis allein aus Freds gespeicherter Vollmacht (tests/test_aktionsvollmacht.py).
 VOLLMACHT = {"kipm_aktion_ausfuehren"}
 # Befugnis allein aus Freds gespeicherter Stufenregel (tests/test_stufenregel.py).
-STUFENREGEL = {"kipm_planung_freigeben", "kipm_planung_lieferkante", "kipm_planung_entscheiden"}
+STUFENREGEL = {
+    "kipm_planung_freigeben",
+    "kipm_planung_lieferkante",
+    "kipm_planung_entscheiden",
+    "kipm_planung_fortsetzen",
+}
 # Nur diese neuen W1-Routen prüfen gespeicherte, versionsgebundene Rechte statt Chattext.
 DELEGIERT = {"kipm_w1_auftrag_anlegen", "kipm_w1_auftrag_aktion"}
 AENDERND = {
@@ -282,6 +287,7 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "planung_freigeben",
         "planung_lieferkante",
         "planung_entscheiden",
+        "planung_fortsetzen",
         "auf_lieferung_warten",
         "lieferung_melden",
         "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats

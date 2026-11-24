@@ -17,6 +17,7 @@ Die Regel ersetzt die nicht übernommene Klärungsregel des Blockadenabgleichs (
 import dataclasses
 import hashlib
 import re
+import unicodedata
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
@@ -28,8 +29,10 @@ from .models import (
     Auftrag,
     ChatBindung,
     Entscheidung,
+    Lieferung,
     Meldung,
     Planungsentscheid,
+    Planungsfortsetzung,
     Projekt,
     Stufenregel,
     Unterlage,
@@ -51,13 +54,43 @@ STUFE_C = (
 )
 # Wortprüfung über Entscheidung und Begründung: Ein Treffer schickt den Fall zu Fred. Sie ist
 # bewusst grob; ein Fehlalarm kostet nur eine Frage an Fred.
+# Breite Wortstämme, damit auch Zusammensetzungen („Zielsetzung“, „Datenbank“, „Kostenrahmen“,
+# „Rechtevergabe“, „Bearbeiter-Wechsel“) zu Fred gehen. Ein Fehlalarm kostet nur eine Frage an
+# Fred; ausgenommen sind nur die harmlosen Wörter in _STUFE_C_HARMLOS.
 _STUFE_C_WORTE = re.compile(
-    r"(ziel|daten|kosten|preis|lizenz|budget|rechnung|\brecht(e|en)?\b|berechtigung|"
-    r"zugriffsrecht|passwort|geheimnis|token|microsoft|azure|entra|sharepoint|onedrive|"
-    r"\bcloud|sicherheit|datenschutz|personenbezogen|dsgvo|lösch|loesch|neuschnitt|"
-    r"bearbeiter)",
+    "|".join(
+        (
+            r"ziel",  # Ziel, Zielsetzung, Hauptziel, Zielgruppe
+            r"daten",  # Daten, Datenbank, Kundendaten, Datenschutz
+            r"personenbezogen|dsgvo",
+            r"kost|\beur\b|euro|€|preis|lizenz|budget|rechnung|gebühr|\babo",
+            r"recht|berechtigung|zugriff|admin|\broot\b|\bsudo\b",
+            r"cloud|microsoft|\bms\s*365|\bo365|m365|office\s*365|teams|outlook|azure|"
+            r"\bentra\b|sharepoint|onedrive",
+            r"sicherheit|firewall|\bports?\b|verschl(ü|ue)ssel|zertifikat|\btls\b|\bvpn\b|"
+            r"\bssh\b|passwort|kennwort|geheimnis|token",
+            r"l(ö|oe)sch|entfern|\bdrop\b|truncate|purge|vernicht",
+            r"neu[\s-]*schn(itt|eid)",
+            r"bearbeiter[\s-]*(wechsel|tausch)|wechsel\s+des\s+bearbeiter|"
+            r"\b(ander|neu)(er|en|e)?\s+bearbeiter|bearbeiter\s+wird\s+(gewechselt|getauscht)",
+        )
+    ),
     re.IGNORECASE,
 )
+_STUFE_C_HARMLOS = re.compile(
+    r"\btestziel(e|en|s)?\b|\bmetadaten\b|\bzentral\w*|\bbisherige[nrms]?\s+bearbeiter\w*",
+    re.IGNORECASE,
+)
+
+
+def _normal_fuer_stufe_c(text: str) -> str:
+    """Schreibvarianten angleichen: NFC (ö statt o plus Trema), weiche Trennstriche und
+    Null-Breite-Zeichen weg, Leerraum zu einem Leerzeichen."""
+    text = unicodedata.normalize("NFKC", text or "")
+    text = re.sub("[\u00ad\u200b\u200c\u200d\u2060\ufeff]", "", text)
+    return " ".join(text.split())
+
+
 _SHA = re.compile(r"[0-9a-f]{64}")
 MINDESTLAENGE_FUNDSTELLE = 20
 KEINE_REGEL = (
@@ -291,7 +324,7 @@ def _stufe_c(bereich, texte) -> None:
             f"bereich muss „{TECHNIK}“ sein; Stufe C ({', '.join(STUFE_C)}) entscheidet Fred."
         )
     for text in texte:
-        treffer = _STUFE_C_WORTE.search(text or "")
+        treffer = _STUFE_C_WORTE.search(_STUFE_C_HARMLOS.sub(" ", _normal_fuer_stufe_c(text)))
         if treffer:
             raise dienst.KeinZugriff(
                 f"Stufe C: „{treffer.group(0)}“ betrifft Ziel, Kosten, Rechte, Cloud/Microsoft, "
@@ -377,26 +410,157 @@ def _fundstelle(akteur, projekt: Projekt, regel: Stufenregel, f) -> dict:
     }
 
 
-def _blocker_pruefen(akteur, projekt, auftrag, revision, meldung_id):
+def _blocker_pruefen(
+    akteur, projekt, auftrag, revision, meldung_id, arten=(Meldung.RUECKFRAGE, Meldung.HINDERNIS)
+):
     a = _auftrag(akteur, projekt, auftrag, revision)
     blocker = lieferungen._blocker(a)
     if a.zustand != Auftrag.BLOCKIERT or blocker is None or blocker.pk != meldung_id:
         raise dienst.Konflikt(
             f"{a.nummer} ist nicht mehr durch Meldung {meldung_id} blockiert; neu lesen."
         )
-    if blocker.art not in (Meldung.RUECKFRAGE, Meldung.HINDERNIS):
-        raise dienst.Konflikt("Nur eine Rückfrage oder ein Hindernis lässt sich so beantworten.")
+    if blocker.art not in arten:
+        raise dienst.Konflikt(
+            f"Eine Blockade der Art {blocker.get_art_display()} lässt sich so nicht aufheben."
+        )
     if blocker.lieferbedarf.exists():
         raise dienst.Konflikt(
             "Die Blockade ist ein technischer Lieferbedarf; sie läuft über die Lieferautomatik."
         )
     if not a.hat_bearbeiter:
         raise dienst.Konflikt(f"{a.nummer} hat keinen bisherigen Bearbeiter.")
-    if Planungsentscheid.objects.filter(meldung=blocker).exists():
+    if (
+        Planungsentscheid.objects.filter(meldung=blocker).exists()
+        or Planungsfortsetzung.objects.filter(meldung=blocker).exists()
+    ):
         raise dienst.Konflikt(
             f"Auf Meldung {blocker.pk} hat die Planung schon geantwortet; je Blockade nur einmal."
         )
     return a, blocker
+
+
+def _nennt(e: Entscheidung, a: Auftrag) -> bool:
+    text = f"{e.text}\n{e.warum}"
+    return any(
+        re.search(rf"(?<![A-Za-z0-9-]){re.escape(n)}(?![0-9])", text)
+        for n in {a.nummer, a.alte_nummer}
+        if n
+    )
+
+
+def _beleg(projekt: Projekt, a: Auftrag, nachweis) -> dict:
+    """Beleg für eine Fehler-Blockade: gebuchte Lieferung (L-n) oder erledigter
+    Korrekturauftrag desselben Projekts."""
+    if not isinstance(nachweis, dict) or not (nachweis.get("lieferung") or nachweis.get("auftrag")):
+        raise dienst.DienstFehler(
+            "Eine Fehler-Blockade braucht einen Beleg: nachweis mit lieferung (L-n) oder einem "
+            "erledigten Korrekturauftrag (auftrag). Nichts fortgesetzt."
+        )
+    if nachweis.get("lieferung"):
+        nr = str(nachweis["lieferung"]).strip().upper().removeprefix("L-")
+        lieferung = (
+            Lieferung.objects.select_related("auftrag")
+            .filter(pk=int(nr), auftrag__projekt=projekt)
+            .first()
+            if nr.isdigit()
+            else None
+        )
+        if lieferung is None or lieferung.revision_nr != lieferung.auftrag.revision_nr:
+            raise dienst.Konflikt(
+                f"Lieferung {nachweis['lieferung']} ist in diesem Projekt nicht als gültige "
+                "Lieferung der aktuellen Anbieterrevision gebucht."
+            )
+        return {"lieferung": f"L-{lieferung.pk}", "auftrag": lieferung.auftrag.nummer}
+    k = Auftrag.objects.filter(
+        pk=dienst.auftrag_id_aus_nummer(str(nachweis["auftrag"])), projekt=projekt
+    ).first()
+    if k is None or k.pk == a.pk:
+        raise dienst.KeinZugriff("Nicht gefunden.")
+    if k.zustand != Auftrag.ERLEDIGT:
+        raise dienst.Konflikt(f"Der Korrekturauftrag {k.nummer} ist nicht erledigt.")
+    return {"auftrag": k.nummer}
+
+
+def fortsetzen(
+    akteur,
+    projekt: Projekt,
+    *,
+    auftrag,
+    revision,
+    meldung_id,
+    entscheidung,
+    stand,
+    nachweis=None,
+):
+    """Stufe A: einen blockierten Auftrag beim bisherigen Bearbeiter fortsetzen, weil Fred mit
+    einer entschiedenen E-n darüber entschieden hat, die den Auftrag nennt. Es wird keine zweite
+    Entscheidung gebucht. Eine Fehler-Blockade braucht zusätzlich einen Beleg. Je
+    Blockademeldung höchstens einmal; alles oder nichts."""
+    nr = str(entscheidung or "").strip().upper().removeprefix("E-")
+    if not nr.isdigit() or type(stand) is not int:
+        raise dienst.DienstFehler("entscheidung (E-n) und stand aus kipm_entscheidungen angeben.")
+    try:
+        with transaction.atomic():
+            regel = _regel(akteur, projekt, "A")
+            a, blocker = _blocker_pruefen(
+                akteur,
+                projekt,
+                auftrag,
+                revision,
+                meldung_id,
+                arten=(Meldung.RUECKFRAGE, Meldung.HINDERNIS, Meldung.FEHLER),
+            )
+            e = akte.entscheidung_holen(akteur, projekt, int(nr))
+            if e.zustand != Entscheidung.ENTSCHIEDEN or e.stand != stand:
+                raise dienst.Konflikt(f"{e.nummer} ist nicht entschieden in Stand {stand}.")
+            if Planungsentscheid.objects.filter(entscheidung=e).exists():
+                raise dienst.Konflikt(
+                    f"{e.nummer} hat die Planung selbst gebucht; fortsetzen trägt nur eine "
+                    "Entscheidung von Fred."
+                )
+            if e.klaerungsbelege:
+                raise dienst.Konflikt(
+                    f"{e.nummer} hat der frühere Blockadenabgleich per Klärungsregel gebucht; "
+                    "fortsetzen trägt nur eine Entscheidung von Fred."
+                )
+            if not _nennt(e, a):
+                raise dienst.Konflikt(f"{e.nummer} nennt {a.nummer} nicht.")
+            if e.entschieden_am is None or e.entschieden_am < blocker.zeitpunkt:
+                raise dienst.Konflikt(
+                    f"{e.nummer} ist vor der Blockademeldung {blocker.pk} entschieden worden."
+                )
+            beleg = _beleg(projekt, a, nachweis) if blocker.art == Meldung.FEHLER else {}
+            Planungsfortsetzung.objects.create(
+                regel=regel,
+                zugang=akteur.bindung,
+                auftrag=a,
+                meldung=blocker,
+                entscheidung=e,
+                nachweis=beleg,
+            )
+            planung = _mit_regel(akteur, regel)
+            belegtext = ", Beleg " + "/".join(beleg.values()) if beleg else ""
+            dienst._ereignis(
+                planung,
+                projekt=projekt,
+                objekt_typ="Auftrag",
+                objekt_kennung=a.nummer,
+                ereignis=f"Von Planung fortgesetzt ({regel.nummer})",
+                anlass=f"Zugang {akteur.bindung.name} · nach {e.nummer} Stand {e.stand}{belegtext}",
+                revision=str(a.revision_nr),
+            )
+            dienst.rueckfrage_beantworten(
+                planung,
+                a,
+                f"Fortgesetzt nach Freds Entscheidung {e.nummer} (Stufenregel {regel.nummer}"
+                f"{belegtext}): {e.text[:300]}",
+            )
+            a.refresh_from_db()
+    except IntegrityError as fehler:
+        raise dienst.Konflikt(
+            "Diese Blockademeldung hat die Planung schon fortgesetzt; je Blockade nur einmal."
+        ) from fehler
+    return a, e, regel, beleg
 
 
 def entscheiden(

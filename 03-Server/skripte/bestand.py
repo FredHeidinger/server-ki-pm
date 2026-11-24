@@ -31,6 +31,8 @@ TABELLEN = (
     "aktionsvollmacht",
     "stufenregel",
     "planungsentscheid",
+    "klaerungsregel",
+    "planungsfortsetzung",
     "ergebnis",
     "pruefung",
     "kriteriumsbewertung",

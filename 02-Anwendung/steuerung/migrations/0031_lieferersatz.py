@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('steuerung', '0029_chat_delegation'),
+        ('steuerung', '0030_blockadenabgleich'),
     ]
 
     operations = [
