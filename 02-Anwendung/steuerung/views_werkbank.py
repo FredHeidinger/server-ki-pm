@@ -102,6 +102,7 @@ def verwaltung(request: HttpRequest) -> dict:
             b.ort = orte.filter(bestaetigt=True).order_by("id").first()
             b.ort_unbestaetigt = None if b.ort else orte.order_by("id").first()
             b.code = werkbank.kopplungscode(i, None, _adresse(request), bindung=b)
+            b.vollmacht = werkbank._teilmodule()[0].vollmacht(b)
         instanzen.append(i)
     return {
         "werkbaenke": instanzen,
@@ -261,7 +262,8 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         a.name_text = AKTION_NAME.get(a.art, a.art)
         a.zustand_text = AKTION_TEXT.get(a.zustand, a.zustand)
         a.unbeantwortet = werkbank_aktionen.unbeantwortet(a, instanz)
-    abschluss = next((n for n in reversed(ausf.nachweise) if n.get("typ") == "abschluss"), None)
+    teil_abschluss = werkbank._teilmodule()[0]
+    abschluss = teil_abschluss.abschlussbericht(ausf)
     haelt = ausf.halt_zweck != ""
     abgeschlossen = ausf.zustand in ("abschluss_gemeldet", "abgeschlossen")
     grund_halt = ""
@@ -282,6 +284,7 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "unbeantwortet": [a for a in aktionen if a.unbeantwortet],
         "letzter_kontakt": instanz.letzter_kontakt,
         "abschluss": abschluss,
+        "kriterien_nachweis": teil_abschluss.kriterien_nachweis(ausf),
         "halt_grund": grund_halt,
         "halt_moeglich": not grund_halt,
         "kann_weiterbauen": any(b.get("typ") in ("fehler", "unklar") for b in bedarf),

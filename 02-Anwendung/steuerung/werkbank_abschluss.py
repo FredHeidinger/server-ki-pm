@@ -13,7 +13,7 @@ import re
 from django.utils import timezone
 
 from . import dienst, werkbank, werkbank_lauf
-from .models import WerkbankAusfuehrung
+from .models import WerkbankAusfuehrung, WerkbankEreignis
 
 ENDGUELTIG = ("erledigt", "ersetzt", "zerlegt", "verworfen")
 OFFENER_BEDARF = ("frage", "freigabe", "fehler", "unklar")
@@ -179,6 +179,115 @@ def unbekannte_ausfuehrungen(instanz, bekannt: str | None) -> list[dict]:
         for k in kennungen
         if k not in vorhanden
     ]
+
+
+# --- Anzeige (KIPM-28, Paket KIPM-04) ---------------------------------------------------------
+
+BEHANDLUNG_TEXT = {
+    "erfuellt": ("erfüllt", "ok"),
+    "bereits_erfuellt": ("bereits erfüllt", "ok"),
+    "entfaellt": ("entfällt", "aus"),
+    "nicht_erfuellt": ("nicht erfüllt", "bad"),
+}
+
+
+def abschlussbericht(ausf: WerkbankAusfuehrung) -> dict | None:
+    """Die Daten des angenommenen Abschlussberichts dieser Ausführung, sonst None. Ein abgewiesener
+    Bericht wird nie gespeichert (die Transaktion fällt zurück); ein historisch quittierter zählt
+    nicht."""
+    e = (
+        WerkbankEreignis.objects.filter(
+            ausfuehrung=ausf, art="abschluss_bericht", verarbeitung="angewendet"
+        )
+        .order_by("-sequenz")
+        .first()
+    )
+    if e is None:
+        return None
+    return (e.rueckmeldung.get("ereignis") or {}).get("daten") or None
+
+
+def kriterien_nachweis(ausf: WerkbankAusfuehrung) -> list[dict] | None:
+    """„Kriterium · Test · Ergebnis“ für jedes Kriterium des Snapshots, aus dem angenommenen
+    Abschlussbericht. Der Test ist der Nachweistext der Werkbank (`kipm-werkbank/1`,
+    `kriterien[].nachweis`); KI-PM prüft ihn nicht nach. Ohne Bericht None."""
+    daten = abschlussbericht(ausf)
+    if daten is None:
+        return None
+    gemeldet = {k.get("kriterium_id"): k for k in daten.get("kriterien") or []}
+    zeilen = []
+    for k in ausf.snapshot.get("abnahmekriterien") or []:
+        g = gemeldet.get(k["id"])
+        nachweis = ((g or {}).get("nachweis") or "").strip()
+        text, art = (
+            BEHANDLUNG_TEXT.get(g.get("behandlung"), (g.get("behandlung") or "", "aus"))
+            if g
+            else ("nicht gemeldet", "bad")
+        )
+        zeilen.append(
+            {
+                "id": k["id"],
+                "text": k.get("text", ""),
+                "test": nachweis,
+                "zuordnung": bool(nachweis),
+                "ergebnis": text,
+                "art": art,
+                "commit": (g or {}).get("commit") or "",
+            }
+        )
+    return zeilen
+
+
+def _beobachtung(ausf: WerkbankAusfuehrung | None, gefragt: bool) -> dict:
+    if ausf is None:
+        return {"stand": "unbekannt", "auftrag": None, "am": None}
+    return {
+        "stand": "fragt" if gefragt else "selbst",
+        "auftrag": ausf.auftrag.nummer,
+        "am": ausf.abschluss_bestaetigt_am or ausf.angelegt_am,
+    }
+
+
+def vollmacht(bindung) -> dict:
+    """Was die Werkbank an dieser Projektbindung ohne Freds Klick tut, beobachtet am jüngsten Lauf,
+    der die Stelle erreicht hat. `kipm-werkbank/1` meldet die Einstellung der Werkbank nicht;
+    darum nur Beobachtung, nie eine Zusage.
+
+    Start: beobachtet, sobald ein Schritt an einem geplanten Paket (nicht `root`, also nach der
+    Vorplanung) autorisiert wurde oder die Werkbank eine Startfreigabe erbeten hat.
+    Übernahme: beobachtet mit einem gespeicherten Abschluss oder einer erbetenen
+    Übernahmefreigabe."""
+    start = uebernahme = None
+    start_gefragt = uebernahme_gefragt = False
+    for ausf in (
+        WerkbankAusfuehrung.objects.select_related("auftrag")
+        .filter(projektbindung=bindung)
+        .order_by("-id")
+    ):
+        arten = {b.get("art") for b in ausf.bedarf if b.get("typ") == "freigabe"}
+        if start is None and (
+            "start" in arten
+            or ausf.operationen.filter(art="schritt").exclude(paket__in=("", "root")).exists()
+        ):
+            start, start_gefragt = ausf, "start" in arten
+        if uebernahme is None and (
+            "uebernahme" in arten or ausf.zustand in ("abschluss_gemeldet", "abgeschlossen")
+        ):
+            uebernahme, uebernahme_gefragt = ausf, "uebernahme" in arten
+        if start is not None and uebernahme is not None:
+            break
+    s = _beobachtung(start, start_gefragt)
+    u = _beobachtung(uebernahme, uebernahme_gefragt)
+    teile = {
+        "unbekannt": ("Start noch nicht beobachtet", "Übernahme noch nicht beobachtet"),
+        "fragt": ("Start fragt hier", "Übernahme fragt hier"),
+        "selbst": ("startet ohne Frage", "übernimmt ohne Frage"),
+    }
+    if s["stand"] == u["stand"] == "unbekannt":
+        satz = "Ohne deinen Klick: noch nicht beobachtet (kein Lauf in diesem Projekt)."
+    else:
+        satz = f"Ohne deinen Klick: {teile[s['stand']][0]}; {teile[u['stand']][1]}."
+    return {"start": s, "uebernahme": u, "satz": satz}
 
 
 werkbank_lauf.EFFEKTE["abschluss_bericht"] = _abschluss

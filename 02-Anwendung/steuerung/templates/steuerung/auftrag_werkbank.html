@@ -70,6 +70,15 @@
   <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="weiterbauen"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf">Weiterbauen</button> <span class="gedaempft klein">Du bestätigst damit, dass es nach dem Fehler oder unklaren Ausgang weitergehen soll.</span></form>
   {% endif %}
 
+  {% if w.kriterien_nachweis %}
+  <h4>Nachweis je Kriterium</h4>
+  <div class="tabellenrahmen"><table class="klein umbruch">
+    <thead><tr><th scope="col">Kriterium</th><th scope="col">Test</th><th scope="col">Ergebnis</th></tr></thead>
+    <tbody>{% for k in w.kriterien_nachweis %}<tr><td><strong>{{ k.id }}</strong> {{ k.text }}</td><td style="word-break: break-all">{% if k.zuordnung %}{{ k.test }}{% if k.commit %} <span class="gedaempft">@ <code>{{ k.commit }}</code></span>{% endif %}{% else %}<span class="status warn" style="white-space: normal">Zuordnung fehlt</span>{% endif %}</td><td><span class="status {{ k.art }}" style="white-space: normal">{{ k.ergebnis }}</span></td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="gedaempft klein">Test und Ergebnis meldet die Werkbank im Abschlussbericht. KI-PM prüft, dass jedes Kriterium behandelt ist, führt die Tests aber nicht selbst aus.</p>
+  {% endif %}
+
   <details class="mehr">
     <summary>Bauplan ({{ w.pakete|length }} Paket{{ w.pakete|length|pluralize:",e" }})</summary>
     {% if w.pakete %}
