@@ -12,7 +12,7 @@ import re
 
 from django.utils import timezone
 
-from . import dienst, werkbank, werkbank_lauf
+from . import dienst, werkbank, werkbank_lauf, werkbank_vertrag
 from .models import WerkbankAusfuehrung, WerkbankEreignis
 
 ENDGUELTIG = ("erledigt", "ersetzt", "zerlegt", "verworfen")
@@ -88,6 +88,8 @@ def _maengel(ausf: WerkbankAusfuehrung, d: dict) -> list[str]:
                 maengel.append(f"Für das erledigte Paket {name} fehlt die Integration.")
             if name not in bestanden:
                 maengel.append(f"Für das erledigte Paket {name} fehlt eine bestandene Prüfung.")
+    if ausf.vertrag == werkbank_vertrag.VERTRAG_2:
+        maengel += _repo_maengel(ausf, d, plan)
     gesamt = d["gesamtpruefung"]
     if gesamt is not None and gesamt["ergebnis"] != "bestanden":
         maengel.append("Die Gesamtprüfung ist fehlgeschlagen.")
@@ -103,6 +105,33 @@ def _maengel(ausf: WerkbankAusfuehrung, d: dict) -> list[str]:
         maengel.append(
             "Es wartet noch eine Rückfrage, Freigabe, ein Fehler oder ein unklarer Ausgang."
         )
+    return maengel
+
+
+def _repo_maengel(ausf: WerkbankAusfuehrung, d: dict, plan: dict) -> list[str]:
+    """Fassung 2: jedes erledigte Paket hat ein Repository aus dem bestätigten Plan
+    (``plan_bestaetigt``), jede Integration gehört zu diesem Repository und zum Zielverbund.
+    Ein Paket, das erst im Bericht auftaucht, meldet die Werkbank vorher mit einem neuen Plan."""
+    from . import werkbank_verbund
+
+    bekannt = werkbank_verbund.repo_ids(ausf)
+    paket_repo = {p["paket"]: p.get("repo_id") for p in ausf.pakete if p.get("repo_id")}
+    maengel = [
+        f"Das Paket {name} hat kein Repository aus dem bestätigten Plan."
+        for name, p in plan.items()
+        if p["zustand"] == "erledigt" and name not in paket_repo
+    ]
+    for i in d["integrationen"]:
+        if i["repo_id"] not in bekannt:
+            maengel.append(f"Die Integration von {i['paket']} nennt ein fremdes Repo.")
+        elif i["paket"] not in paket_repo:
+            if i["paket"] not in plan:
+                maengel.append(f"Die Integration von {i['paket']} hat kein Paket im Plan.")
+        elif paket_repo[i["paket"]] != i["repo_id"]:
+            maengel.append(
+                f"Die Integration von {i['paket']} liegt in {i['repo_id']}, das Paket gehört "
+                f"zu Repo {paket_repo[i['paket']]}."
+            )
     return maengel
 
 
@@ -129,9 +158,10 @@ def _abschluss(instanz, ausf, d, op):
         )
     ausf.zustand = "abschluss_gemeldet"
     ausf.abschluss_bestaetigt_am = timezone.now()
-    dateien = [f"{i['paket']}@{i['commit']}" for i in d["integrationen"]] or [
-        f"{k['kriterium_id']}@{k['commit']}" for k in d["kriterien"] if k.get("commit")
-    ]
+    dateien = [
+        f"{i['paket']}{' (' + i['repo_id'] + ')' if i.get('repo_id') else ''}@{i['commit']}"
+        for i in d["integrationen"]
+    ] or [f"{k['kriterium_id']}@{k['commit']}" for k in d["kriterien"] if k.get("commit")]
     pruefungen = [
         f"{p['paket']} {p['art']}: {p['beschreibung'][:200]}"
         for p in d["pruefungen"]
@@ -169,6 +199,16 @@ def unbekannte_ausfuehrungen(instanz, bekannt: str | None) -> list[dict]:
             ausfuehrung_id__in=kennungen, projektbindung__instanz=instanz
         ).values_list("ausfuehrung_id", flat=True)
     }
+    from .models import WerkbankKonflikt
+
+    for k in kennungen:
+        if k not in vorhanden:
+            # Festhalten (KIPM-35, B15): bis Fred klärt, übernimmt diese Werkbank nichts.
+            konflikt, neu = WerkbankKonflikt.objects.get_or_create(
+                instanz=instanz, ausfuehrung_id=k
+            )
+            if not neu:
+                konflikt.save(update_fields=["zuletzt_am"])
     return [
         {
             "ausfuehrung_id": k,

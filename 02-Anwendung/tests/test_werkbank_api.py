@@ -98,7 +98,7 @@ def kopf(instanz, **mehr):
     ("angebot", "status"),
     [
         (["kipm-werkbank/2", "kipm-werkbank/1"], 200),
-        (["kipm-werkbank/2"], 426),
+        (["kipm-werkbank/3"], 426),
         ([], 400),
         (["kipm-werkbank/1", "kipm-werkbank/1"], 400),
         (["kipm-werkbank/1", ""], 400),
@@ -116,7 +116,8 @@ def test_vertragsangebot_liefert_nur_die_gemeinsamen_fassungen(client, instanz, 
     )
     assert antwort.status_code == status
     if status == 200:
-        assert antwort.json() == {"schema_version": 1, "gemeinsam": ["kipm-werkbank/1"]}
+        gemeinsam = [v for v in ("kipm-werkbank/1", "kipm-werkbank/2") if v in angebot]
+        assert antwort.json() == {"schema_version": 1, "gemeinsam": gemeinsam}
     else:
         code = "VERTRAG_INKOMPATIBEL" if status == 426 else "UNGUELTIGE_NACHRICHT"
         assert antwort.json()["fehler"]["code"] == code
@@ -144,7 +145,7 @@ def test_vertragsangebot_startet_keine_operation_und_waehlt_keinen_ersatz(client
         BASIS + "uebernehmen/",
         {},
         content_type="application/json",
-        **kopf(instanz, HTTP_X_KIPM_VERTRAG="kipm-werkbank/2"),
+        **kopf(instanz, HTTP_X_KIPM_VERTRAG="kipm-werkbank/3"),
     )
     assert abgewiesen.status_code == 426
     instanz.refresh_from_db()
@@ -321,7 +322,7 @@ def test_werkbank_schluessel_hinterlaesst_keinen_chat_besuchsvermerk(client, ins
 # --- Vertragskopf, Methode ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("wert", [None, "kipm-werkbank/2", "", "x" * 500])
+@pytest.mark.parametrize("wert", [None, "kipm-werkbank/3", "", "x" * 500])
 def test_falscher_vertragskopf_426(client, instanz, wert):
     k = {"HTTP_AUTHORIZATION": f"Bearer {instanz.klartext}"}
     if wert is not None:

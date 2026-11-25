@@ -66,6 +66,8 @@ TABELLEN = (
     "werkbankereignis",
     "werkbankchatdelegation",
     "werkbankchatdelegationsfassung",
+    "werkbankverbundmitglied",
+    "werkbankkonflikt",
 )
 NUR_ANHAENGEND = {"ereignis", "meldung"}
 

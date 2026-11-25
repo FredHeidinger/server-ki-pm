@@ -261,6 +261,7 @@ urlpatterns = [
     path("api/planung/lieferkante/", api.planung_lieferkante, name="api_planung_lieferkante"),
     path("api/planung/entscheiden/", api.planung_entscheiden, name="api_planung_entscheiden"),
     path("api/planung/fortsetzen/", api.planung_fortsetzen, name="api_planung_fortsetzen"),
+    path("api/planung/schliessen/", api.planung_schliessen, name="api_planung_schliessen"),
     path("api/auftraege/", api.meine_auftraege, name="api_auftraege"),
     path("api/auftraege/anlegen/", api.auftrag_anlegen, name="api_auftrag_anlegen"),
     path("api/w1/erlaubnisse/", api.erlaubnisse, name="api_w1_erlaubnisse"),

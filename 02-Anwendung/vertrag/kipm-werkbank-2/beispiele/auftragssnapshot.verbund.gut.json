@@ -1,0 +1,117 @@
+{
+  "snapshot_version": 2,
+  "auftrag_id": 25,
+  "nummer": "KIPM-25",
+  "titel": "Beispielauftrag",
+  "revision": 4,
+  "beschreibung": "Beispielbeschreibung.",
+  "ziel": "Beispielziel.",
+  "nicht_ziele": [
+    "Keine Veröffentlichung."
+  ],
+  "schreibumfang": [
+    "02-Anwendung/steuerung/"
+  ],
+  "arbeitsort": {
+    "id": 7,
+    "name": "Anwendung",
+    "beschreibung": "Ordner 02-Anwendung"
+  },
+  "abnahmekriterien": [
+    {
+      "id": "AK-1",
+      "text": "Tests grün."
+    },
+    {
+      "id": "AK-2",
+      "text": "Lint sauber."
+    }
+  ],
+  "quellenhinweise": [
+    "PLAYBOOK.md"
+  ],
+  "profil": {
+    "fassung": 3,
+    "text": "Projektprofil."
+  },
+  "entscheidungen": [
+    {
+      "id": 11,
+      "version": 1,
+      "titel": "Ablauf",
+      "entscheidung": "Ohne Abnahme.",
+      "warum": "Schlank."
+    }
+  ],
+  "texte": [
+    {
+      "id": 5,
+      "version": 2,
+      "titel": "Notiz",
+      "inhalt": "Text."
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "version": 1,
+      "titel": "Doku",
+      "url": "https://example.invalid/doku"
+    }
+  ],
+  "zustaendigkeit": {
+    "weg": "W1",
+    "fuehrendes_projekt": "alpha",
+    "erlaubnis": {
+      "id": 7,
+      "revision": 2,
+      "aktionen": [
+        "freigeben",
+        "integrieren",
+        "starten"
+      ]
+    }
+  },
+  "zielverbund": [
+    {
+      "repo_id": "repo-11",
+      "fuehrend": true,
+      "projekt": "alpha",
+      "projektbindung_id": 11,
+      "projektbindung_version": 3,
+      "arbeitsort": {
+        "id": 3,
+        "name": "Repository Alpha",
+        "beschreibung": "C:/repos/alpha"
+      },
+      "basiscommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "repo_id": "repo-12",
+      "fuehrend": false,
+      "projekt": "beta",
+      "projektbindung_id": 12,
+      "projektbindung_version": 1,
+      "arbeitsort": {
+        "id": 4,
+        "name": "Repository Beta",
+        "beschreibung": "C:/repos/beta"
+      },
+      "basiscommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "integrationseinheiten": [
+    {
+      "einheit": "repo-11",
+      "repos": [
+        "repo-11"
+      ]
+    },
+    {
+      "einheit": "repo-12",
+      "repos": [
+        "repo-12"
+      ]
+    }
+  ]
+}

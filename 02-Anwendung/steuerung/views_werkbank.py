@@ -94,6 +94,7 @@ def verwaltung(request: HttpRequest) -> dict:
         # Abgelaufen oder widerrufen erklärt die Stille; die 90-s-Marke entfällt dann.
         i.keine_antwort = i.zugang["art"] in ("gueltig", "bald") and werkbank.nicht_erreichbar(i)
         i.erlaubt_ids = {p.pk for p in i.erlaubte_projekte.all()}
+        i.offene_konflikte = list(i.konflikte.filter(geklaert_am__isnull=True).order_by("pk"))
         i.bindungen = list(i.projekte.select_related("projekt").order_by("projekt__name"))
         for b in i.bindungen:
             # Der Arbeitsort steht beim Anlegen nur vorläufig an der Bindung; gezeigt wird immer der
@@ -176,6 +177,15 @@ def werkbank_pflegen(request: HttpRequest, instanz_id: int, wahl: str) -> HttpRe
                 "code": werkbank.kopplungscode(instanz, schluessel, _adresse(request)),
                 "erneuert": True,
             }
+        elif wahl == "konflikte":
+            if request.POST.get("bestaetigt") != "1":
+                raise dienst.DienstFehler(
+                    "Bitte bestätigen, dass du den Stand der unbekannten Ausführungen geprüft hast."
+                )
+            anzahl = werkbank.konflikte_klaeren(akteur, instanz)
+            messages.success(
+                request, f"{anzahl} unbekannte Ausführung(en) von „{instanz.name}“ geklärt."
+            )
         elif wahl == "widerrufen":
             werkbank.instanz_widerrufen(akteur, instanz, request.POST.get("grund", ""))
             messages.success(request, f"Der Zugang von „{instanz.name}“ ist widerrufen.")
@@ -233,8 +243,20 @@ def auftrag_daten(auftrag: Auftrag) -> dict | None:
         "aktiv": aktiv,
     }
     if zuweisung is not None:
+        from . import werkbank_verbund
+
         daten["keine_antwort"] = werkbank.nicht_erreichbar(zuweisung.instanz)
         daten["bereit"] = zuweisung.projektbindung
+        mitglieder = werkbank_verbund.mitglieder(zuweisung)
+        daten["verbund"] = mitglieder
+        daten["verbund_ids"] = [m.pk for m in mitglieder]
+        daten["fassung_2"] = werkbank_verbund.braucht_fassung_2(auftrag)
+        daten["verbund_kandidaten"] = list(
+            WerkbankProjektbindung.objects.select_related("projekt", "arbeitsort")
+            .filter(instanz=zuweisung.instanz, arbeitsort__isnull=False, projekt__aktiv=True)
+            .exclude(pk=zuweisung.projektbindung_id)
+            .order_by("projekt__name")
+        )
     if ausf is not None:
         daten.update(_ausfuehrung_daten(ausf))
     return daten
@@ -264,6 +286,18 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         a.unbeantwortet = werkbank_aktionen.unbeantwortet(a, instanz)
     teil_abschluss = werkbank._teilmodule()[0]
     abschluss = teil_abschluss.abschlussbericht(ausf)
+    repo_namen = {
+        m["repo_id"]: m["arbeitsort"]["name"] for m in ausf.snapshot.get("zielverbund", [])
+    }
+    integriert = [
+        {
+            "paket": p["paket"],
+            "repo": repo_namen.get(p["integration"]["repo_id"], p["integration"]["repo_id"]),
+            "commit": p["integration"]["commit"],
+        }
+        for p in ausf.pakete
+        if p.get("integration")
+    ]
     haelt = ausf.halt_zweck != ""
     abgeschlossen = ausf.zustand in ("abschluss_gemeldet", "abgeschlossen")
     grund_halt = ""
@@ -284,6 +318,8 @@ def _ausfuehrung_daten(ausf: WerkbankAusfuehrung) -> dict:
         "unbeantwortet": [a for a in aktionen if a.unbeantwortet],
         "letzter_kontakt": instanz.letzter_kontakt,
         "abschluss": abschluss,
+        "integriert": integriert,
+        "repo_namen": repo_namen,
         "kriterien_nachweis": teil_abschluss.kriterien_nachweis(ausf),
         "halt_grund": grund_halt,
         "halt_moeglich": not grund_halt,
@@ -310,6 +346,20 @@ def auftrag_zuweisen(request: HttpRequest, auftrag_id: int) -> HttpResponse:
         try:
             werkbank.zuweisung_aufheben(akteur, auftrag)
             messages.success(request, f"{auftrag.nummer} gehört wieder keinem Werkbank-Ziel.")
+        except dienst.DienstFehler as fehler:
+            _fehler(request, fehler)
+    elif request.POST.get("wahl") == "verbund":
+        ids = [int(i) for i in request.POST.getlist("mitglied") if str(i).isdigit()]
+        gefunden = {b.pk: b for b in WerkbankProjektbindung.objects.filter(pk__in=ids)}
+        try:
+            if len(gefunden) != len(set(ids)):
+                raise dienst.DienstFehler("Ein gewähltes Repository gibt es nicht mehr.")
+            werkbank.verbund_setzen(akteur, auftrag, [gefunden[i] for i in ids])
+            messages.success(
+                request,
+                f"Zielverbund von {auftrag.nummer} gespeichert"
+                + (f": {len(ids)} weitere(s) Repository." if ids else ": nur das Ziel."),
+            )
         except dienst.DienstFehler as fehler:
             _fehler(request, fehler)
     elif ziel is None:

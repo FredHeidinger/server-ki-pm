@@ -2,9 +2,10 @@
   <ul class="eingang">
   {% for w in wartet %}
     {% if w.werkbank %}
-    <li class="eintrag {% if w.werkbank.art == 'abgelaufen' %}eintrag-blockade{% else %}eintrag-faellig{% endif %}">
-      <div class="eintragkopf"><span class="eintragart">Werkbank-Zugang</span><span class="eintragzeit">{{ w.werkbank.am|date:"d.m. H:i" }}</span></div>
-      <p class="eintragtitel"><a href="{% url 'verbindungen' %}#werkbank">Zugang der Werkbank {{ w.werkbank.name }} {% if w.werkbank.art == 'abgelaufen' %}ist am {{ w.werkbank.am|date:"d.m.Y" }} abgelaufen{% else %}läuft am {{ w.werkbank.am|date:"d.m.Y" }} ab{% endif %} – erneuern</a></p>
+    <li class="eintrag {% if w.werkbank.art == 'abgelaufen' or w.werkbank.art == 'konflikt' %}eintrag-blockade{% else %}eintrag-faellig{% endif %}">
+      <div class="eintragkopf"><span class="eintragart">{% if w.werkbank.art == 'konflikt' %}Werkbank-Konflikt{% else %}Werkbank-Zugang{% endif %}</span><span class="eintragzeit">{{ w.werkbank.am|date:"d.m. H:i" }}</span></div>
+      {% if w.werkbank.art == 'konflikt' %}<p class="eintragtitel"><a href="{% url 'verbindungen' %}#werkbank">Werkbank {{ w.werkbank.name }} meldet {{ w.werkbank.anzahl }} unbekannte Ausführung{{ w.werkbank.anzahl|pluralize:",en" }} (Wiederherstellung?) – prüfen und klären</a></p>
+      {% else %}<p class="eintragtitel"><a href="{% url 'verbindungen' %}#werkbank">Zugang der Werkbank {{ w.werkbank.name }} {% if w.werkbank.art == 'abgelaufen' %}ist am {{ w.werkbank.am|date:"d.m.Y" }} abgelaufen{% else %}läuft am {{ w.werkbank.am|date:"d.m.Y" }} ab{% endif %} – erneuern</a></p>{% endif %}
     </li>
     {% elif w.e %}
     <li class="eintrag eintrag-frage">

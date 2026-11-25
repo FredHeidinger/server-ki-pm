@@ -24,6 +24,18 @@
   </form>
   {% elif w.ziele and not z %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Werkbank zuweisen – nicht möglich</span> In diesem Zustand ({{ auftrag.get_zustand_display }}) ändert sich das Ziel nicht.</p>{% endif %}
   {% if z %}
+  <h3>Zielverbund</h3>
+  <p class="klein">Repositories dieses Auftrags: <strong>{{ z.projektbindung.arbeitsort.name|default:z.projektbindung.projekt.name }}</strong> (Ziel){% for m in w.verbund %}, <strong>{{ m.arbeitsort.name }}</strong> ({{ m.projekt.name }}){% endfor %}.
+    {% if w.fassung_2 %}<span class="status warn">braucht eine Werkbank mit Vertrag 2</span>{% endif %}</p>
+  {% if w.darf_zuweisen and w.verbund_kandidaten %}
+  <form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="aktion">{% csrf_token %}<input type="hidden" name="wahl" value="verbund">
+    <fieldset><legend>Weitere Repositories (optional)</legend>
+    {% for k in w.verbund_kandidaten %}<label class="klein"><input type="checkbox" name="mitglied" value="{{ k.pk }}"{% if k.pk in w.verbund_ids %} checked{% endif %}> {{ k.arbeitsort.name }} · {{ k.projekt.name }}{% if not k.arbeitsort.bestaetigt %} (Arbeitsort nicht bestätigt){% endif %}</label><br>{% endfor %}
+    </fieldset>
+    <button type="submit" class="knopf zweit">Zielverbund speichern</button>
+    <p class="gedaempft klein">Jedes Paket baut in genau einem Repository; integriert wird je Repository, nie alle auf einmal. Eine Änderung hebt die Freigabe auf.</p>
+  </form>
+  {% elif w.verbund_kandidaten %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Zielverbund ändern – nicht möglich</span> In diesem Zustand ({{ auftrag.get_zustand_display }}) ändert er sich nicht.</p>{% endif %}
     {% if w.darf_aufheben %}<form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="wahl" value="aufheben"><button type="submit" class="knopf zweit klein">Zuweisung aufheben</button></form>
     {% else %}<p class="gedaempft klein"><span class="knopf zweit klein" aria-disabled="true">Zuweisung aufheben – nicht möglich</span> Es gab schon eine Ausführung; sie bleibt für den Verlauf. Über „Bearbeitung ändern“ geht der Auftrag zurück in den Entwurf.</p>{% endif %}
   {% endif %}
@@ -70,6 +82,12 @@
   <form method="post" action="{% url 'ausfuehrung_aktion' ausfuehrung_id=ausf.pk %}" class="inline">{% csrf_token %}<input type="hidden" name="art" value="weiterbauen"><input type="hidden" name="erwartet" value="{{ ausf.zustand }}"><button type="submit" class="knopf">Weiterbauen</button> <span class="gedaempft klein">Du bestätigst damit, dass es nach dem Fehler oder unklaren Ausgang weitergehen soll.</span></form>
   {% endif %}
 
+  {% if w.integriert %}
+  <h4>Integriert je Repository</h4>
+  <ul class="klein">{% for i in w.integriert %}<li><strong>{{ i.repo }}</strong>: Paket {{ i.paket }} @ <code>{{ i.commit|slice:":12" }}</code></li>{% endfor %}</ul>
+  <p class="gedaempft klein">Angabe der Werkbank. Ein Teilstand ist nie „Erledigt“: Fehlt ein Repository, bleibt der Auftrag offen.</p>
+  {% endif %}
+
   {% if w.kriterien_nachweis %}
   <h4>Nachweis je Kriterium</h4>
   <div class="tabellenrahmen"><table class="klein umbruch">
@@ -92,7 +110,7 @@
     {% if w.abschluss %}
     <h4>Abschluss</h4>
     <ul class="klein">
-      {% for i in w.abschluss.integrationen %}<li>Integriert: {{ i.paket }} @ <code>{{ i.commit }}</code>{% if i.kandidat %} (Kandidat {{ i.kandidat }}){% endif %}</li>{% endfor %}
+      {% for i in w.abschluss.integrationen %}<li>Integriert: {{ i.paket }}{% if i.repo_id %} in {{ i.repo_id }}{% endif %} @ <code>{{ i.commit }}</code>{% if i.kandidat %} (Kandidat {{ i.kandidat }}){% endif %}</li>{% endfor %}
       {% for pr in w.abschluss.pruefungen %}<li>{{ pr.paket }} · {{ pr.art }}: <span class="status {% if pr.ergebnis == 'bestanden' %}ok{% else %}bad{% endif %}">{{ pr.ergebnis }}</span> {{ pr.beschreibung }}</li>{% endfor %}
       {% if w.abschluss.gesamtpruefung %}<li>Gesamtprüfung: <span class="status ok">{{ w.abschluss.gesamtpruefung.ergebnis }}</span> {{ w.abschluss.gesamtpruefung.beschreibung }}</li>{% endif %}
       {% if w.abschluss.kosten %}<li>Kosten ({{ w.abschluss.kosten.bezugsrahmen }}): {{ w.abschluss.kosten.text }}</li>{% endif %}

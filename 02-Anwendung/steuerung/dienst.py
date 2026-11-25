@@ -2531,21 +2531,28 @@ def auftrag_abbrechen(akteur: Akteur, auftrag: Auftrag, grund: str) -> None:
     if not grund.strip():
         raise DienstFehler("Ein Abbruch braucht eine Begründung.")
     with transaction.atomic():
-        auftrag = Auftrag.objects.select_for_update().get(pk=auftrag.pk)
-        if auftrag.ist_endzustand:
-            raise Konflikt("Der Auftrag ist bereits abgeschlossen.")
-        _bearbeiter_abloesen(auftrag)
-        auftrag.zustand = Auftrag.ABGEBROCHEN
-        auftrag.save()
-        _ereignis(
-            akteur,
-            projekt=auftrag.projekt,
-            objekt_typ="Auftrag",
-            objekt_kennung=auftrag.nummer,
-            ereignis="Abgebrochen",
-            anlass=grund.strip(),
-            revision=str(auftrag.revision_nr),
+        abbruch_buchen(
+            akteur, Auftrag.objects.select_for_update().get(pk=auftrag.pk), grund.strip()
         )
+
+
+def abbruch_buchen(akteur: Akteur, auftrag: Auftrag, anlass: str) -> None:
+    """Einziger Abbruchweg; der Aufrufer prüft die Befugnis und hält die Transaktion
+    (``auftrag_abbrechen`` für Fred, ``stufenregeln.schliessen`` für die Planung)."""
+    if auftrag.ist_endzustand:
+        raise Konflikt("Der Auftrag ist bereits abgeschlossen.")
+    _bearbeiter_abloesen(auftrag)
+    auftrag.zustand = Auftrag.ABGEBROCHEN
+    auftrag.save()
+    _ereignis(
+        akteur,
+        projekt=auftrag.projekt,
+        objekt_typ="Auftrag",
+        objekt_kennung=auftrag.nummer,
+        ereignis="Abgebrochen",
+        anlass=anlass,
+        revision=str(auftrag.revision_nr),
+    )
 
 
 @_ohne_aktive_werkbank("Entkoppeln")

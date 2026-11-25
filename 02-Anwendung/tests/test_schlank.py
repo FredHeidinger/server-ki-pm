@@ -128,6 +128,7 @@ def test_mcp_kennt_nur_die_schlanken_werkzeuge():
         "kipm_planung_lieferkante",
         "kipm_planung_entscheiden",
         "kipm_planung_fortsetzen",
+        "kipm_planung_schliessen",
         "kipm_aktionen",
         "kipm_meilensteine",
         "kipm_meilenstein_anlegen",

@@ -332,7 +332,6 @@ def freigaben_pruefen(akteur, projekt, *, delegation_id=None):
         auftraege = Auftrag.objects.select_for_update().filter(
             projekt=projekt, chat_delegation__isnull=False
         )
-        quellenhash = None
         if delegation_id is not None:
             auftraege = auftraege.filter(chat_delegation_id=delegation_id)
         for a in auftraege.select_related("projekt"):
@@ -353,9 +352,10 @@ def freigaben_pruefen(akteur, projekt, *, delegation_id=None):
                 if ziel.arbeitsort_id != a.aktuelle_revision.arbeitsort_id:
                     raise dienst.Konflikt("Der geplante Arbeitsort passt nicht zum Werkbankziel.")
                 if a.zustand == Auftrag.FREIGEGEBEN:
-                    if quellenhash is None:
-                        quellenhash = werkbank.delegierter_quellenhash(projekt.pk)
-                    if z.kontext_sha256 != quellenhash:
+                    from . import werkbank_verbund
+
+                    # Projektquellen und, falls vorhanden, der Zielverbund (KIPM-36).
+                    if z.kontext_sha256 != werkbank_verbund.freigabebasis(a):
                         raise dienst.Konflikt(
                             "Die gebundenen Projektquellen haben sich geändert. "
                             "Den aktuellen Stand neu freigeben."
@@ -381,6 +381,34 @@ def freigaben_pruefen(akteur, projekt, *, delegation_id=None):
                         revision=str(a.revision_nr),
                         anlass=grund,
                     )
+
+
+def ausfuehrung_stand(auftrag):
+    """Für die Werkbank (Fassung 2): die gespeicherte Erlaubnisfassung des Auftrags, wenn sie
+    jetzt gilt, sonst ``(None, Grund)``. Gelesen wird der Datenbankstand, nie Chattext."""
+    d = (
+        WerkbankChatDelegation.objects.select_related("projekt", "bindung", "aussteller")
+        .filter(pk=auftrag.chat_delegation_id)
+        .first()
+    )
+    if d is None:
+        return None, "Die W1-Erlaubnis des Auftrags fehlt."
+    try:
+        return _stand_pruefen(d, auftrag.chat_delegation_revision), ""
+    except dienst.DienstFehler as fehler:
+        return None, str(fehler)
+
+
+def ausfuehrung_pruefen(auftrag):
+    stand, grund = ausfuehrung_stand(auftrag)
+    if stand is None:
+        raise werkbank.WerkbankFehler(
+            409,
+            "ERLAUBNIS_UNGUELTIG",
+            grund,
+            "Nichts übernehmen; Fred erneuert die W1-Erlaubnis oder gibt den Auftrag selbst frei.",
+        )
+    return stand
 
 
 def zugang_geaendert(akteur, bindung):

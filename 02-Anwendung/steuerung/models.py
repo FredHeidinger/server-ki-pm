@@ -1424,6 +1424,50 @@ class WerkbankZuweisung(models.Model):
     )
 
 
+class WerkbankKonflikt(models.Model):
+    """Eine Ausführung, die die Werkbank meldet, die KI-PM aber nicht kennt, etwa nach einer
+    Wiederherstellung des Servers aus einer älteren Sicherung (B15, KIPM-35). Solange einer offen
+    ist, übernimmt diese Werkbank nichts; Fred klärt ihn in „KI verbinden“."""
+
+    instanz = models.ForeignKey(WerkbankInstanz, on_delete=models.CASCADE, related_name="konflikte")
+    ausfuehrung_id = models.UUIDField()
+    code = models.CharField(max_length=64, default="AUSFUEHRUNG_UNBEKANNT")
+    erstmals_am = models.DateTimeField(auto_now_add=True)
+    zuletzt_am = models.DateTimeField(auto_now=True)
+    geklaert_am = models.DateTimeField(null=True, blank=True)
+    geklaert_von = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instanz", "ausfuehrung_id"], name="werkbankkonflikt_einmal"
+            )
+        ]
+
+
+class WerkbankVerbundmitglied(models.Model):
+    """Weiteres Repository eines Auftrags (Zielverbund, kipm-werkbank/2, KIPM-36): eine
+    Projektbindung derselben Werkbank neben dem Ziel der Zuweisung. Fred legt es fest; jede
+    Änderung erhöht die Zuweisungsfassung und hebt die Freigabe auf."""
+
+    zuweisung = models.ForeignKey(
+        WerkbankZuweisung, on_delete=models.CASCADE, related_name="verbund"
+    )
+    projektbindung = models.ForeignKey(
+        WerkbankProjektbindung, on_delete=models.PROTECT, related_name="verbund_mitgliedschaften"
+    )
+    reihenfolge = models.PositiveIntegerField(default=1)
+    angelegt_am = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["reihenfolge", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["zuweisung", "projektbindung"], name="verbundmitglied_einmal"
+            )
+        ]
+
+
 #: Technische Zustände einer Ausführung, in denen sie als aktiv gilt (Vertrag, Technischer Zustand).
 AUSFUEHRUNG_AKTIV = (
     "plant",
@@ -1477,6 +1521,10 @@ class WerkbankAusfuehrung(models.Model):
     halt_bestaetigt_am = models.DateTimeField(null=True, blank=True)
     abschluss_bestaetigt_am = models.DateTimeField(null=True, blank=True)
     angelegt_am = models.DateTimeField(auto_now_add=True)
+    # Vertragsfassung der Übernahme; die Ausführung bleibt dabei (kipm-werkbank/2, KIPM-36).
+    vertrag = models.CharField(
+        max_length=32, default="kipm-werkbank/1", db_default="kipm-werkbank/1"
+    )
 
     class Meta:
         constraints = [

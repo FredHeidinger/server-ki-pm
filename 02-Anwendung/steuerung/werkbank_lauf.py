@@ -255,7 +255,7 @@ def _abgelehnt(n: dict, ausf: WerkbankAusfuehrung, code: str, text: str, handlun
     return werkbank.Ausgang(
         200,
         {
-            "vertrag": werkbank_vertrag.VERTRAG,
+            "vertrag": n["vertrag"],
             "operation_id": n["operation_id"],
             "erlaubt": False,
             "grund_code": code,
@@ -329,6 +329,9 @@ def schritt_vorab(instanz, n: dict, q: werkbank.QuellePruefung):
             n, ausf, "UNKLAR", "Der Ausgang eines früheren Schritts ist unklar.",
             "Nichts Neues starten; Fred klärt den Ausgang in KI-PM.",
         )  # fmt: skip
+    ablehnung = _fassung_2_pruefen(n, ausf)
+    if ablehnung is not None:
+        return ablehnung
     if s["planfassung"] != ausf.planfassung:
         return _abgelehnt(
             n, ausf, "PLANFASSUNG_UNBEKANNT",
@@ -384,12 +387,74 @@ def schritt_vorab(instanz, n: dict, q: werkbank.QuellePruefung):
                 "schon verwendet.",
                 "Im Abgleich die aktuelle Aktion lesen; eine Aktion wirkt höchstens einmal.",
             )  # fmt: skip
-    elif noetig:
+    elif noetig and not _durch_erlaubnis(ausf, noetig):
         return _abgelehnt(
             n, ausf, "FREIGABE_AUSSTEHEND", "Die erforderliche Freigabe von Fred fehlt noch.",
             "Auf die Aktion von Fred im Abgleich warten und sie als owner_aktion_id mitschicken.",
         )  # fmt: skip
     return None
+
+
+#: Welche Aktion einer W1-Erlaubnis welche Freigabeart ersetzt (kipm-werkbank/2).
+ERLAUBNIS_FUER = {"start": "starten", "uebernahme": "integrieren"}
+
+
+def _fassung_2_pruefen(n: dict, ausf: WerkbankAusfuehrung):
+    """Fassung 2: Erlaubnis noch gültig, Mitglieder des Zielverbunds unverändert."""
+    if ausf.vertrag != werkbank_vertrag.VERTRAG_2:
+        return None
+    from . import werkbank_verbund
+
+    if ausf.auftrag.chat_delegation_id is not None:
+        _, grund = werkbank._teilmodule()[3].ausfuehrung_stand(ausf.auftrag)
+        if grund:
+            return _abgelehnt(
+                n, ausf, "ERLAUBNIS_UNGUELTIG", grund,
+                "Nichts Neues starten; Fred erneuert die W1-Erlaubnis oder entscheidet in KI-PM.",
+            )  # fmt: skip
+    name = werkbank_verbund.mitglied_geaendert(ausf)
+    if name:
+        return _abgelehnt(
+            n, ausf, "MITGLIED_GEAENDERT",
+            f"Das Repository „{name}“ des Zielverbunds wurde nach dem Start geändert.",
+            "Andere Repositories nicht blind neu bauen; Fred gibt den Auftrag in KI-PM neu frei.",
+        )  # fmt: skip
+    return None
+
+
+def _durch_erlaubnis(ausf: WerkbankAusfuehrung, noetig: list[dict]) -> bool:
+    """Deckt die gültige W1-Erlaubnis (Fassung 2) alle offenen Freigaben dieses Schritts?"""
+    if ausf.vertrag != werkbank_vertrag.VERTRAG_2 or ausf.auftrag.chat_delegation_id is None:
+        return False
+    stand, _ = werkbank._teilmodule()[3].ausfuehrung_stand(ausf.auftrag)
+    return stand is not None and all(
+        ERLAUBNIS_FUER.get(b.get("art")) in stand.aktionen for b in noetig
+    )
+
+
+def _erlaubnis_anwenden(instanz, ausf: WerkbankAusfuehrung, paket: str) -> str:
+    """Die von der W1-Erlaubnis gedeckten Freigaben als erteilt vermerken; Text für die Antwort."""
+    noetig = _noetige_freigaben(ausf, paket)
+    if not noetig or not _durch_erlaubnis(ausf, noetig):
+        return ""
+    ids = {b["freigabe_id"] for b in noetig}
+    kennung = f"W1-{ausf.auftrag.chat_delegation_id}"
+    for b in ausf.bedarf:
+        if b.get("typ") == "freigabe" and b.get("freigabe_id") in ids:
+            b["offen"] = False
+            b["erteilt_durch"] = f"W1-Erlaubnis {kennung}"
+    arten = ", ".join(sorted({b["art"] for b in noetig}))
+    dienst._ereignis(
+        dienst.Akteur.aus_bindung(instanz.bindung),
+        projekt=ausf.auftrag.projekt,
+        objekt_typ="Auftrag",
+        objekt_kennung=ausf.auftrag.nummer,
+        ereignis="Freigabe aus W1-Erlaubnis",
+        anlass=f"{arten} für Paket {paket} durch W1-Erlaubnis {kennung}, Fassung "
+        f"{ausf.auftrag.chat_delegation_revision}",
+        revision=str(ausf.revision),
+    )
+    return f" (W1-Erlaubnis {kennung})"
 
 
 def schritt(instanz, n: dict, q: werkbank.QuellePruefung, op: WerkbankOperation):
@@ -403,6 +468,7 @@ def schritt(instanz, n: dict, q: werkbank.QuellePruefung, op: WerkbankOperation)
         aktion.zustand = "angenommen"
         aktion.save(update_fields=["operation", "zustand"])
     paket = nl["schritt"]["paket"]
+    durch_erlaubnis = "" if nl["owner_aktion_id"] else _erlaubnis_anwenden(instanz, ausf, paket)
     for b in ausf.bedarf:  # ein neuer Versuch erledigt nur den bekannten Fehler dieses Pakets
         if b.get("typ") == "fehler" and b.get("paket") == paket:
             b["offen"] = False
@@ -417,11 +483,11 @@ def schritt(instanz, n: dict, q: werkbank.QuellePruefung, op: WerkbankOperation)
     return werkbank.Ausgang(
         200,
         {
-            "vertrag": werkbank_vertrag.VERTRAG,
+            "vertrag": n["vertrag"],
             "operation_id": n["operation_id"],
             "erlaubt": True,
             "grund_code": None,
-            "text": "Schritt freigegeben.",
+            "text": f"Schritt freigegeben{durch_erlaubnis}.",
             "naechste_handlung": "Schritt ausführen und Ereignis melden.",
             "autorisierung_id": str(uuid.uuid4()),
             "statusversion": ausf.statusversion,
@@ -433,6 +499,15 @@ def schritt(instanz, n: dict, q: werkbank.QuellePruefung, op: WerkbankOperation)
 
 
 def _plan_bestaetigt(instanz, ausf, daten, op) -> None:
+    if ausf.vertrag == werkbank_vertrag.VERTRAG_2:
+        from . import werkbank_verbund
+
+        bekannt = werkbank_verbund.repo_ids(ausf)
+        fremd = sorted({p["repo_id"] for p in daten["pakete"]} - bekannt)
+        if fremd:
+            raise werkbank._ungueltig(
+                "Ein Paket nennt ein Repository außerhalb des Zielverbunds: " + ", ".join(fremd)
+            )
     ausf.planfassung = daten["planfassung"]
     alt = {p["paket"]: p for p in ausf.pakete}
     # ``im_plan`` trennt Planpakete von Versuchen, die die Werkbank unter eigenem Namen meldet.
@@ -440,7 +515,16 @@ def _plan_bestaetigt(instanz, ausf, daten, op) -> None:
 
 
 def _paket_status(instanz, ausf, daten, op) -> None:
-    felder = {k: daten[k] for k in ("zustand", "versuche", "handlungsbedarf", "text") if k in daten}
+    felder = {
+        k: daten[k]
+        for k in ("zustand", "versuche", "handlungsbedarf", "text", "integration")
+        if k in daten
+    }
+    if "integration" in daten:
+        from . import werkbank_verbund
+
+        if daten["integration"]["repo_id"] not in werkbank_verbund.repo_ids(ausf):
+            raise werkbank._ungueltig("Die Integration nennt ein Repo außerhalb des Verbunds.")
     felder.setdefault("handlungsbedarf", False)
     _paket(ausf, daten["paket"], **felder)
     if daten["zustand"] in ABGESCHLOSSEN:
@@ -655,7 +739,7 @@ def ereignis_verarbeiten(art: str, instanz, n: dict, q: werkbank.QuellePruefung,
     return werkbank.Ausgang(
         200,
         {
-            "vertrag": werkbank_vertrag.VERTRAG,
+            "vertrag": n["vertrag"],
             "operation_id": n["operation_id"],
             "ereignis_id": nutzlast["ereignis_id"],
             "ergebnis": ergebnis,

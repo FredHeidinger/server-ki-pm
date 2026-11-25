@@ -50,7 +50,9 @@ ANWEISUNGEN = (
     "fertig geplante Aufträge mit kipm_planung_freigeben frei und trägt Lieferkanten mit "
     "kipm_planung_lieferkante nach, mit Stufe B bucht sie technische Entscheidungen mit "
     "geprüfter Fundstelle über kipm_planung_entscheiden; hat Fred über einen blockierten "
-    "Auftrag entschieden (E-n nennt ihn), setzt sie ihn mit kipm_planung_fortsetzen fort, "
+    "Auftrag entschieden (E-n nennt ihn), setzt sie ihn mit kipm_planung_fortsetzen fort; einen "
+    "überholten oder aufgegangenen Entwurf, an dem nichts hängt, schließt sie mit Stufe A über "
+    "kipm_planung_schliessen mit Grund und Verweis (aufnehmender Auftrag oder E-n), "
     "jeweils ohne fred_sagte; setze "
     "dort nie ein gespeichertes Zitat als fred_sagte ein. "
     "Faustregel: Was in diesem Chat heute fertig wird, machst du einfach (der Commit ist der "
@@ -596,6 +598,23 @@ WERKZEUGE = [
         ],
     ),
     (
+        "kipm_planung_schliessen",
+        "Stufe A der Stufenregel: einen überholten oder in einem anderen Auftrag aufgegangenen "
+        "Entwurf (Auftrag oder Issue) ohne fred_sagte schließen; er wird Abgebrochen, der Verlauf "
+        "nennt Stufenregel, Grund und Verweis. Pflicht: auftrag, aktuelle revision, grund, "
+        "verweis (aufnehmender Auftrag desselben Projekts oder entschiedene E-n) und eine eigene "
+        "anfrage_kennung. Nur Entwürfe, an denen nichts hängt: kein Vorgänger oder Lieferant "
+        "eines offenen Auftrags, kein gebuchtes Ergebnis, keine gebuchte Lieferung, nicht nur "
+        "für Menschen, kein W1-Auftrag. Alles andere schließt nur Fred in der Oberfläche.",
+        {
+            "auftrag": _AUFTRAG,
+            "revision": _REVISION,
+            "grund": _TEXT,
+            "verweis": {"type": "string", "description": "z. B. NEX-259 oder E-234"},
+        },
+        ["projekt", "auftrag", "revision", "grund", "verweis", "anfrage_kennung"],
+    ),
+    (
         "kipm_aktion_ausfuehren",
         "Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen, zurzeit nur "
         "aktion=wiederaufnahme beim bisherigen Bearbeiter. Pflicht: vollmacht (VM-n aus "
@@ -1111,6 +1130,7 @@ _STUFENREGEL = frozenset(
         "kipm_planung_lieferkante",
         "kipm_planung_entscheiden",
         "kipm_planung_fortsetzen",
+        "kipm_planung_schliessen",
     }
 )
 
@@ -1196,12 +1216,13 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
         return _intern(schluessel, request, a, pfad, daten)
 
     if name in _STUFENREGEL:
-        if name in {"kipm_planung_entscheiden", "kipm_planung_fortsetzen"} and (
-            not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip()
-        ):
+        if name in {
+            "kipm_planung_entscheiden",
+            "kipm_planung_fortsetzen",
+            "kipm_planung_schliessen",
+        } and (not isinstance(a.get("anfrage_kennung"), str) or not a["anfrage_kennung"].strip()):
             raise _Ungueltig(
-                "Für kipm_planung_entscheiden ist eine eigene anfrage_kennung Pflicht; sie wird "
-                "nicht erfunden."
+                f"Für {name} ist eine eigene anfrage_kennung Pflicht; sie wird nicht erfunden."
             )
         felder = {
             "kipm_planung_freigeben": ("auftrag", "revision"),
@@ -1220,6 +1241,7 @@ def werkzeug_ausfuehren(schluessel: str, request: HttpRequest, name: str, a: dic
                 "stand",
                 "nachweis",
             ),
+            "kipm_planung_schliessen": ("auftrag", "revision", "grund", "verweis"),
             "kipm_planung_entscheiden": (
                 "entscheidung",
                 "warum",

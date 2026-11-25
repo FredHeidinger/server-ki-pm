@@ -53,15 +53,18 @@ def _anmelden(request: HttpRequest):
 
 
 def _vertrag_pruefen(request: HttpRequest) -> None:
+    """Der Kopf wählt die Fassung dieser Anfrage (``request.kipm_vertrag``)."""
     erhalten = request.headers.get("X-KIPM-Vertrag", "")
-    if erhalten != werkbank_vertrag.VERTRAG:
+    if erhalten not in werkbank_vertrag.VERTRAEGE:
+        bekannt = " oder ".join(werkbank_vertrag.VERTRAEGE)
         raise werkbank.WerkbankFehler(
             426,
             "VERTRAG_INKOMPATIBEL",
-            f"Der Server spricht {werkbank_vertrag.VERTRAG}.",
-            f"Die Werkbank auf {werkbank_vertrag.VERTRAG} aktualisieren; bis dahin startet nichts.",
+            f"Der Server spricht {bekannt}.",
+            f"Die Werkbank auf {bekannt} aktualisieren; bis dahin startet nichts.",
             {"erwartet": werkbank_vertrag.VERTRAG, "erhalten": erhalten[:64]},
         )
+    request.kipm_vertrag = erhalten
 
 
 def _roh(request: HttpRequest) -> bytes:
@@ -138,7 +141,12 @@ def faehigkeiten(request: HttpRequest, instanz) -> JsonResponse:
 @werkbank_ansicht("GET")
 def abgleich(request: HttpRequest, instanz) -> JsonResponse:
     return _antwort(
-        werkbank.abgleich_seite(instanz, request.GET.get("seite"), request.GET.get("ausfuehrungen"))
+        werkbank.abgleich_seite(
+            instanz,
+            request.GET.get("seite"),
+            request.GET.get("ausfuehrungen"),
+            vertrag=request.kipm_vertrag,
+        )
     )
 
 
@@ -151,11 +159,11 @@ def operationen(request: HttpRequest, instanz, operation_id: str) -> JsonRespons
             "Die operation_id ist keine kleingeschriebene UUID.",
             "Die operation_id der gesendeten Nachricht verwenden.",
         )
-    return _antwort(werkbank.operation_abfragen(instanz, operation_id))
+    return _antwort(werkbank.operation_abfragen(instanz, operation_id, request.kipm_vertrag))
 
 
 def _aendern(art: str, request: HttpRequest, instanz) -> JsonResponse:
-    nachricht = werkbank.nachricht_pruefen(art, _roh(request))
+    nachricht = werkbank.nachricht_pruefen(art, _roh(request), request.kipm_vertrag)
     ausgang = werkbank.operation_ausfuehren(instanz, art, nachricht)
     return _antwort(ausgang.body, ausgang.status)
 

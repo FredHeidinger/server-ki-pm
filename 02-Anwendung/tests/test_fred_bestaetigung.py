@@ -58,6 +58,7 @@ STUFENREGEL = {
     "kipm_planung_lieferkante",
     "kipm_planung_entscheiden",
     "kipm_planung_fortsetzen",
+    "kipm_planung_schliessen",
 }
 # Nur diese neuen W1-Routen prüfen gespeicherte, versionsgebundene Rechte statt Chattext.
 DELEGIERT = {"kipm_w1_auftrag_anlegen", "kipm_w1_auftrag_aktion"}
@@ -288,6 +289,7 @@ def test_jede_aendernde_route_ist_eingeordnet():
         "planung_lieferkante",
         "planung_entscheiden",
         "planung_fortsetzen",
+        "planung_schliessen",
         "auf_lieferung_warten",
         "lieferung_melden",
         "sitzung_beendet",  # kein Werkzeug: nur der Hook beim Schließen eines Chats

@@ -4,7 +4,8 @@ Fred speichert je Projekt und PC-Zugang eine befristete, widerrufbare Regel. Sie
 der Planung ohne ``fred_sagte``; der Verlauf nennt dann die Regel statt Freds Worten, niemand
 spricht in seinem Namen.
 
-- Stufe A: einen fertig geplanten Auftrag freigeben, eine fehlende Lieferkante nachtragen.
+- Stufe A: einen fertig geplanten Auftrag freigeben, eine fehlende Lieferkante nachtragen, einen
+  überholten Entwurf, an dem nichts hängt, mit Grund und Verweis schließen (KIPM-34).
 - Stufe B: eine technische Entscheidung buchen, nur mit wörtlicher Fundstelle, die KI-PM gegen
   Stand und Hash prüft; den davon abhängigen blockierten Auftrag beim bisherigen Bearbeiter
   fortsetzen, je Blockademeldung höchstens einmal.
@@ -21,6 +22,7 @@ import unicodedata
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from . import akte, dienst, lieferungen
@@ -29,6 +31,7 @@ from .models import (
     Auftrag,
     ChatBindung,
     Entscheidung,
+    Lieferbedarf,
     Lieferung,
     Meldung,
     Planungsentscheid,
@@ -310,6 +313,96 @@ def lieferkante(
         )
     a.refresh_from_db()
     return a
+
+
+def _verweis(akteur, projekt: Projekt, a: Auftrag, verweis: str) -> str:
+    """Aufnehmender Auftrag oder entschiedene E-n desselben Projekts; sonst Ablehnung."""
+    nr = verweis.upper().removeprefix("E-")
+    if verweis.upper().startswith("E-") and nr.isdigit():
+        e = Entscheidung.objects.filter(pk=int(nr), betroffene_projekte=projekt).first()
+        if e is None or e.zustand != Entscheidung.ENTSCHIEDEN:
+            raise dienst.DienstFehler(
+                f"Verweis {verweis} ist in {projekt.kennung} keine entschiedene Entscheidung. "
+                "Es wurde nichts geändert."
+            )
+        return e.nummer
+    try:
+        ziel = Auftrag.objects.filter(
+            pk=dienst.auftrag_id_aus_nummer(verweis), projekt=projekt
+        ).first()
+    except dienst.DienstFehler:
+        ziel = None
+    if ziel is None or ziel.pk == a.pk or ziel.zustand == Auftrag.ABGEBROCHEN:
+        raise dienst.DienstFehler(
+            f"Verweis {verweis} nennt keinen anderen, nicht abgebrochenen Auftrag in "
+            f"{projekt.kennung} und keine entschiedene E-n. Es wurde nichts geändert."
+        )
+    return ziel.nummer
+
+
+def _haengt_daran(a: Auftrag) -> str:
+    """Grund, warum die Planung diesen Entwurf nicht schließen darf, sonst leer."""
+    offen = ~Q(zustand__in=Auftrag.ENDZUSTAENDE)
+    if a.zustand != Auftrag.ENTWURF:
+        return (
+            f"{a.nummer} ist nicht im Entwurf ({a.get_zustand_display()}); freigegebene, "
+            "laufende oder blockierte Aufträge schließt nur Fred."
+        )
+    if a.nur_mensch:
+        return f"{a.nummer} ist nur für Menschen markiert; schließen darf ihn nur Fred."
+    if a.ergebnisse.exists():
+        return f"{a.nummer} hat ein gebuchtes Ergebnis; schließen darf ihn nur Fred."
+    if a.lieferungen.exists():
+        return f"{a.nummer} hat eine gebuchte Lieferung; schließen darf ihn nur Fred."
+    if a.chat_delegation_id is not None or dienst._werkbank_aktiv(a):
+        return f"{a.nummer} gehört zu einer Werkbank (W1); schließen darf ihn nur Fred."
+    nachfolger = sorted(
+        x.nummer for x in Auftrag.objects.filter(offen, abhaengigkeiten__vorgaenger=a).distinct()
+    )
+    if nachfolger:
+        return f"{', '.join(nachfolger)} nennt {a.nummer} als Vorgänger; erst dort lösen."
+    verbraucher = sorted(
+        {
+            b.meldung.auftrag.nummer
+            for b in Lieferbedarf.objects.filter(lieferauftrag=a)
+            .exclude(meldung__auftrag=a)
+            .exclude(meldung__auftrag__zustand__in=Auftrag.ENDZUSTAENDE)
+            .select_related("meldung__auftrag")
+        }
+    )
+    if verbraucher:
+        return (
+            f"{', '.join(verbraucher)} erwartet von {a.nummer} eine Lieferung (Lieferant); "
+            "erst dort lösen."
+        )
+    return ""
+
+
+def schliessen(akteur, projekt: Projekt, *, auftrag, revision, grund, verweis):
+    """Stufe A (KIPM-34): einen Entwurf, an dem nichts hängt, mit Grund und Verweis abbrechen.
+    Enger als Freds Abbrechen in der Oberfläche; derselbe Abbruchweg (``dienst.abbruch_buchen``),
+    der Verlauf nennt Stufenregel, Grund und Verweis."""
+    grund = str(grund or "").strip()
+    verweis = str(verweis or "").strip()
+    with transaction.atomic():
+        regel = _regel(akteur, projekt, "A")
+        a = _auftrag(akteur, projekt, auftrag, revision)
+        if not grund:
+            raise dienst.DienstFehler(
+                "grund fehlt: Warum ist der Entwurf überholt? Es wurde nichts geändert."
+            )
+        if not verweis:
+            raise dienst.DienstFehler(
+                "verweis fehlt: aufnehmender Auftrag (z. B. NEX-259) oder Entscheidung E-n. "
+                "Nichts geändert."
+            )
+        ziel = _verweis(akteur, projekt, a, verweis)
+        hindernis = _haengt_daran(a)
+        if hindernis:
+            raise dienst.Konflikt(hindernis + " Es wurde nichts geändert.")
+        dienst.abbruch_buchen(_mit_regel(akteur, regel), a, f"{grund} · Verweis {ziel}")
+    a.refresh_from_db()
+    return a, regel, ziel
 
 
 # --- Stufe B ----------------------------------------------------------------------------------

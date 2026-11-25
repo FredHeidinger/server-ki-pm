@@ -1,0 +1,33 @@
+{
+  "vertrag": "kipm-werkbank/2",
+  "operation_id": "3e0d8f6b-9054-4b8c-8237-0d4f8b1a5e13",
+  "art": "ereignisse",
+  "quelle": {
+    "server_id": "5e2f0a52-8d3c-4c6e-9a41-0b7d2f6c1a01",
+    "werkbank_id": "a4c1e7d2-3b58-4f0e-8d19-6c2b7e9f4a02",
+    "projektbindung_id": 3,
+    "projektbindung_version": 2,
+    "auftrag_id": 25,
+    "revision": 4,
+    "zuweisung_version": 1,
+    "ausfuehrung_id": "c7d9b1f0-2e64-4a83-b5d7-1f3e8a6c9b03",
+    "snapshot_sha256": "ed6b6ad02d4643e016119724c0a7cab671af93d6238adfb0139f191c18b3228f"
+  },
+  "nutzlast": {
+    "ereignis_id": "f4a6b8c0-3d5e-4f70-8a92-1c3d4e5f6020",
+    "sequenz": 20,
+    "statusversion": 15,
+    "ereignis": {
+      "art": "paket_status",
+      "daten": {
+        "paket": "pa",
+        "zustand": "erledigt",
+        "integration": {
+          "repo_id": "repo-11",
+          "commit": "cccccccccccccccccccccccccccccccccccccccc"
+        }
+      }
+    }
+  },
+  "inhaltshash": "6959927de340cc8684d40bf358a938e0061d7eef5aa347a5bf833d3d8f342621"
+}

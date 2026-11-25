@@ -1494,6 +1494,26 @@ def planung_fortsetzen(request: HttpRequest, daten: dict) -> JsonResponse:
 @bindung_erforderlich
 @_mit_wiederholungsschutz
 @_behandeln
+def planung_schliessen(request: HttpRequest, daten: dict) -> JsonResponse:
+    """Stufe A: überholten Entwurf mit Grund und Verweis schließen (KIPM-34)."""
+    a, regel, verweis = stufenregeln.schliessen(
+        request.akteur,
+        _projekt_noetig(request),
+        auftrag=daten.get("auftrag"),
+        revision=daten.get("revision"),
+        grund=daten.get("grund"),
+        verweis=daten.get("verweis"),
+    )
+    return JsonResponse(
+        {"ok": True, "auftrag": _auftrag_json(a), "regel": regel.nummer, "verweis": verweis}
+    )
+
+
+@csrf_exempt
+@require_POST
+@bindung_erforderlich
+@_mit_wiederholungsschutz
+@_behandeln
 def aktion_mit_vollmacht(request: HttpRequest, daten: dict, auftrag_id: int) -> JsonResponse:
     """Technischen Standardfall mit Freds gespeicherter Vollmacht ausführen. Die Befugnis kommt
     allein aus der Vollmacht, nie aus Chattext; darum ohne ``fred_sagte``."""

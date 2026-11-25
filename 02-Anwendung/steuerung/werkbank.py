@@ -291,7 +291,32 @@ def zugang_hinweise(projekt: Projekt, jetzt: datetime | None = None) -> list[dic
         stand = zugang_stand(instanz, jetzt)
         if stand["art"] in ("bald", "abgelaufen"):
             hinweise.append({"name": instanz.name, **stand})
+        offen = instanz.konflikte.filter(geklaert_am__isnull=True).count()
+        if offen:
+            hinweise.append({"name": instanz.name, "art": "konflikt", "anzahl": offen})
     return hinweise
+
+
+def konflikte_klaeren(akteur: dienst.Akteur, instanz: WerkbankInstanz) -> int:
+    """Fred bestätigt, dass er die unbekannten Ausführungen geprüft hat (B15, KIPM-35); danach
+    darf die Werkbank wieder übernehmen. Gibt die Zahl der geklärten Konflikte zurück."""
+    dienst._owner_erforderlich(akteur, "Konflikte einer Werkbank klären")
+    with transaction.atomic():
+        offen = instanz.konflikte.filter(geklaert_am__isnull=True)
+        kennungen = [str(k) for k in offen.values_list("ausfuehrung_id", flat=True)]
+        if not kennungen:
+            return 0
+        offen.update(geklaert_am=timezone.now(), geklaert_von=akteur.name[:120])
+        for projekt in instanz.erlaubte_projekte.all():
+            dienst._ereignis(
+                akteur,
+                projekt=projekt,
+                objekt_typ="Werkbank",
+                objekt_kennung=instanz.name[:80],
+                ereignis="Unbekannte Ausführungen geklärt",
+                anlass=", ".join(k[:8] for k in kennungen[:20]),
+            )
+    return len(kennungen)
 
 
 def instanz_erneuern(akteur: dienst.Akteur, instanz: WerkbankInstanz, *, gueltig_tage: int) -> str:
@@ -577,10 +602,10 @@ def kontext_binden(auftrag: Auftrag) -> None:
     ruft das im selben Commit)."""
     zuweisung = WerkbankZuweisung.objects.filter(auftrag=auftrag).first()
     if zuweisung is not None:
-        if auftrag.chat_delegation_id is not None:
-            zuweisung.kontext_sha256 = delegierter_quellenhash(auftrag.projekt_id)
-        else:
-            zuweisung.kontext_sha256 = kontext_hash(snapshot_bauen(auftrag))
+        from . import werkbank_verbund
+
+        # Ohne Zielverbund genau die bisherige Basis (Projektquellen bzw. Kontext).
+        zuweisung.kontext_sha256 = werkbank_verbund.freigabebasis(auftrag)
         zuweisung.save(update_fields=["kontext_sha256", "geaendert_am"])
 
 
@@ -792,14 +817,15 @@ def vertragsangebot(angebot: list[str]) -> dict:
             "Das Angebot enthält eine fehlende, ungültige oder doppelte Fassung.",
             "Eine bis 100 unterschiedliche Vertragsfassungen als vertrag angeben.",
         )
-    if werkbank_vertrag.VERTRAG not in angebot:
+    gemeinsam = [v for v in werkbank_vertrag.VERTRAEGE if v in angebot]
+    if not gemeinsam:
         raise WerkbankFehler(
             426,
             "VERTRAG_INKOMPATIBEL",
             "Für dieses Angebot gibt es keine gemeinsame Vertragsfassung.",
             "Die benötigte Fassung auf beiden Seiten bereitstellen.",
         )
-    return {"schema_version": 1, "gemeinsam": [werkbank_vertrag.VERTRAG]}
+    return {"schema_version": 1, "gemeinsam": gemeinsam}
 
 
 class Ausgang(NamedTuple):
@@ -875,7 +901,7 @@ def _ungueltig(text: str, verstoesse: list[str] | None = None) -> WerkbankFehler
     )
 
 
-def nachricht_pruefen(art: str, roh: bytes) -> dict:
+def nachricht_pruefen(art: str, roh: bytes, vertrag: str = werkbank_vertrag.VERTRAG) -> dict:
     """Größe, JSON, Schema und Inhaltshash einer ändernden Nachricht prüfen."""
     if len(roh) > MAX_NACHRICHT_BYTES:
         raise WerkbankFehler(
@@ -890,7 +916,7 @@ def nachricht_pruefen(art: str, roh: bytes) -> dict:
         raise _ungueltig("Die Nachricht ist kein gültiges JSON.") from fehler
     if not isinstance(daten, dict):
         raise _ungueltig("Die Nachricht muss ein JSON-Objekt sein.")
-    verstoesse = werkbank_vertrag.schema_fehler(ANFRAGE_SCHEMA[art], daten)
+    verstoesse = werkbank_vertrag.schema_fehler(ANFRAGE_SCHEMA[art], daten, vertrag)
     if verstoesse:
         raise _ungueltig("Die Nachricht entspricht nicht dem Vertrag.", verstoesse)
     try:
@@ -977,6 +1003,18 @@ def quelle_pruefen(instanz: WerkbankInstanz, quelle: dict) -> QuellePruefung:
     return ergebnis
 
 
+def _fassung_pruefen(q: QuellePruefung, n: dict) -> None:
+    """Eine Ausführung bleibt bei der Vertragsfassung ihrer Übernahme (B16)."""
+    if q.ausfuehrung is not None and q.ausfuehrung.vertrag != n["vertrag"]:
+        raise WerkbankFehler(
+            409,
+            "VERTRAG_INKOMPATIBEL",
+            f"Diese Ausführung läuft mit {q.ausfuehrung.vertrag}.",
+            f"Nachrichten zu dieser Ausführung mit {q.ausfuehrung.vertrag} senden; kein Wechsel.",
+            {"erwartet": q.ausfuehrung.vertrag, "erhalten": n["vertrag"]},
+        )
+
+
 def _quelle_aktuell(q: QuellePruefung) -> None:
     """Befehle (``uebernehmen``, ``schritt``) brauchen eine aktuelle Quelle und eine laufende,
     nicht angehaltene Ausführung; sonst 409."""
@@ -1025,14 +1063,26 @@ def _uebernehmen(instanz, n, q: QuellePruefung, op: WerkbankOperation) -> Ausgan
     """Atomare Übernahme (Auftrag 6): prüft alles gegen den gesperrten Stand und erzeugt genau
     eine Ausführung samt Snapshot, setzt den Bearbeiter und IN_ARBEIT. Läuft in der Transaktion
     von ``operation_ausfuehren`` zusammen mit dem Wiederholungsnachweis."""
+    from . import werkbank_verbund
+
     pb = q.projektbindung
     a = Auftrag.objects.select_for_update().select_related("projekt").get(pk=q.auftrag.pk)
-    if a.chat_delegation_id is not None:
+    vertrag = n["vertrag"]
+    if vertrag == werkbank_vertrag.VERTRAG and werkbank_verbund.braucht_fassung_2(a):
         raise _konflikt(
-            "Dieser W1-Auftrag braucht den delegationsgebundenen Vertrag v2.",
-            "Kein Rückfall auf v1; die v2-Anbindung muss zuerst verfügbar sein.",
+            f"{a.nummer} ist delegiert oder hat einen Zielverbund und braucht den Vertrag v2 "
+            "(kipm-werkbank/2).",
+            "Kein Rückfall auf v1; mit kipm-werkbank/2 übernehmen.",
+            "VERTRAG_INKOMPATIBEL",
         )
     zuweisung = q.zuweisung
+    if instanz.konflikte.filter(geklaert_am__isnull=True).exists():
+        raise _konflikt(
+            "Diese Werkbank meldet Ausführungen, die KI-PM nicht kennt (Wiederherstellung?). "
+            "Bis Fred das geklärt hat, wird nichts übernommen.",
+            "Nichts neu starten; Fred klärt den Stand in KI-PM unter „KI verbinden“.",
+            "WIEDERHERSTELLUNG_UNGEKLAERT",
+        )
     abgleich = "Abgleich abrufen und den aktuellen Stand abwarten."
     if not a.projekt.aktiv:
         raise _konflikt(f"{a.nummer} gehört zu einem archivierten Projekt.", abgleich)
@@ -1042,16 +1092,27 @@ def _uebernehmen(instanz, n, q: QuellePruefung, op: WerkbankOperation) -> Ausgan
         )
     if a.hat_bearbeiter or _aktive_ausfuehrung(a):
         raise _konflikt(f"{a.nummer} hat schon einen Bearbeiter oder eine Ausführung.", abgleich)
-    snapshot = snapshot_bauen(a)
-    if not zuweisung.kontext_sha256 or zuweisung.kontext_sha256 != kontext_hash(snapshot):
+    basis = werkbank_verbund.freigabebasis(a)
+    if not zuweisung.kontext_sha256 or zuweisung.kontext_sha256 != basis:
         raise _konflikt(
             "Der fachliche Kontext hat sich seit der Freigabe geändert.",
             "Der Owner gibt den Auftrag in KI-PM neu frei; danach neu übernehmen.",
             "KONTEXT_VERALTET",
         )
+    if a.chat_delegation_id is not None:
+        _teilmodule()[3].ausfuehrung_pruefen(a)
     offen = [p.text for p in dienst.freigabepruefung(a) if not p.erfuellt]
     if offen:
         raise _konflikt("Übernahme nicht möglich: " + "; ".join(offen), abgleich)
+    if vertrag == werkbank_vertrag.VERTRAG:
+        snapshot = snapshot_bauen(a)
+    else:
+        snapshot = werkbank_verbund.snapshot_v2(a, zuweisung)
+        repos = n["nutzlast"]["repos"]
+        werkbank_verbund.repos_pruefen(snapshot, repos)
+        gemeldet = {r["repo_id"]: r["basiscommit"] for r in repos}
+        for m in snapshot["zielverbund"]:
+            m["basiscommit"] = gemeldet[m["repo_id"]]
     sha = werkbank_vertrag.sha256_hex(snapshot)
     ausfuehrung = WerkbankAusfuehrung.objects.create(
         auftrag=a,
@@ -1064,6 +1125,7 @@ def _uebernehmen(instanz, n, q: QuellePruefung, op: WerkbankOperation) -> Ausgan
         snapshot_sha256=sha,
         zustand="plant",
         statusversion=1,
+        vertrag=vertrag,
     )
     jetzt = timezone.now()
     geaendert = Auftrag.objects.filter(
@@ -1097,7 +1159,7 @@ def _uebernehmen(instanz, n, q: QuellePruefung, op: WerkbankOperation) -> Ausgan
     return Ausgang(
         200,
         {
-            "vertrag": werkbank_vertrag.VERTRAG,
+            "vertrag": vertrag,
             "operation_id": n["operation_id"],
             "ergebnis": "uebernommen",
             "quelle": _quelle_der_ausfuehrung(ausfuehrung, instanz),
@@ -1171,6 +1233,7 @@ def _operation_einmal(instanz: WerkbankInstanz, art: str, n: dict) -> Ausgang:
         if bekannt is not None:
             return _wiederholung(instanz, art, n, bekannt)
         q = quelle_pruefen(instanz, n["quelle"])
+        _fassung_pruefen(q, n)
         if art in ("uebernehmen", "schritt"):
             _quelle_aktuell(q)
         handler = _handler(art, n)
@@ -1212,20 +1275,22 @@ def operation_ausfuehren(instanz: WerkbankInstanz, art: str, n: dict) -> Ausgang
     )
 
 
-def operation_abfragen(instanz: WerkbankInstanz, operation_id: str) -> dict:
+def operation_abfragen(
+    instanz: WerkbankInstanz, operation_id: str, vertrag: str = werkbank_vertrag.VERTRAG
+) -> dict:
     """Nur lesend: der gespeicherte Ausgang einer Operation dieser Werkbank. Fremde Operationen
     und unbekannte Kennungen sind gleichermaßen „unbekannt“."""
     op = WerkbankOperation.objects.filter(instanz=instanz, operation_id=operation_id).first()
     if op is None or op.ausgang_status is None:
         return {
-            "vertrag": werkbank_vertrag.VERTRAG,
+            "vertrag": vertrag,
             "operation_id": operation_id,
             "status": "unbekannt",
             "inhaltshash": None,
             "ausgang": None,
         }
     return {
-        "vertrag": werkbank_vertrag.VERTRAG,
+        "vertrag": vertrag,
         "operation_id": operation_id,
         "status": "gespeichert",
         "inhaltshash": op.nutzlast_sha256,
@@ -1269,7 +1334,10 @@ def _quelle_der_ausfuehrung(ausfuehrung: WerkbankAusfuehrung, instanz: WerkbankI
 
 
 def abgleich_seite(
-    instanz: WerkbankInstanz, cursor: str | None = None, bekannt: str | None = None
+    instanz: WerkbankInstanz,
+    cursor: str | None = None,
+    bekannt: str | None = None,
+    vertrag: str = werkbank_vertrag.VERTRAG,
 ) -> dict:
     """Eine Seite des Abgleichs (``abgleich_antwort``): bis zu ``SEITE_MAX`` Einträge je Liste.
     ``seite.groesse`` ist die größte Listenlänge der Seite. Aktionen und Konflikte füllen WP6/WP7;
@@ -1279,16 +1347,18 @@ def abgleich_seite(
     offen = ~Q(auftrag__zustand__in=Auftrag.ENDZUSTAENDE) | Q(
         auftrag__ausfuehrungen__zustand__in=AUSFUEHRUNG_AKTIV
     )
+    auswahl = WerkbankZuweisung.objects.filter(
+        offen,
+        instanz=instanz,
+        projektbindung__projekt__in=erlaubt,
+        auftrag__revision_nr__gte=1,
+        pk__gt=pos["z"],
+    )
+    if vertrag == werkbank_vertrag.VERTRAG:
+        # Fassung 1 sieht nur, was sie vollständig darstellen kann (keine Delegation, kein Verbund).
+        auswahl = auswahl.filter(auftrag__chat_delegation__isnull=True, verbund__isnull=True)
     zuweisungen = list(
-        WerkbankZuweisung.objects.filter(
-            offen,
-            instanz=instanz,
-            projektbindung__projekt__in=erlaubt,
-            auftrag__revision_nr__gte=1,
-            auftrag__chat_delegation__isnull=True,
-            pk__gt=pos["z"],
-        )
-        .select_related("auftrag", "projektbindung")
+        auswahl.select_related("auftrag", "projektbindung")
         .distinct()
         .order_by("pk")[: SEITE_MAX + 1]
     )
@@ -1314,7 +1384,7 @@ def abgleich_seite(
     z_pos = zuweisungen[-1].pk if zuweisungen else pos["z"]
     h_pos = halte[-1].pk if halte else pos["h"]
     return {
-        "vertrag": werkbank_vertrag.VERTRAG,
+        "vertrag": vertrag,
         "server_id": str(server_id()),
         "server_zeit": _zeit(timezone.now()),
         "abruf_intervall_s": ABRUF_S,
@@ -1363,6 +1433,12 @@ def _teilmodule():
     from . import werkbank_abschluss, werkbank_aktionen, werkbank_delegation, werkbank_lauf
 
     return werkbank_abschluss, werkbank_aktionen, werkbank_lauf, werkbank_delegation
+
+
+def verbund_setzen(*args, **kwargs):
+    from . import werkbank_verbund
+
+    return werkbank_verbund.verbund_setzen(*args, **kwargs)
 
 
 def delegation_erteilen(*args, **kwargs):

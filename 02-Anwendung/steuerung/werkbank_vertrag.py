@@ -1,6 +1,7 @@
-"""Vertrag kipm-werkbank/1: kanonische Darstellung, Hashes und Schemaprüfung.
+"""Verträge kipm-werkbank/1 und /2: kanonische Darstellung, Hashes und Schemaprüfung.
 
-Die Beschreibung steht in `vertrag/kipm-werkbank-1/VERTRAG.md`. Dieses Modul hat keine
+Die Beschreibung steht in `vertrag/kipm-werkbank-1/VERTRAG.md` und (Fassung 2 = Fassung 1 plus
+W1-Delegation und Zielverbund) `vertrag/kipm-werkbank-2/VERTRAG.md`. Dieses Modul hat keine
 Regeln des Dienstes, es rechnet nur. Die Werkbank hält eine feste Kopie der Vertragsdateien
 und muss dieselben Hashes erzeugen (`beispiele/hash-vektoren.json`).
 """
@@ -14,8 +15,17 @@ from pathlib import Path
 from typing import Any
 
 VERTRAG = "kipm-werkbank/1"
+VERTRAG_2 = "kipm-werkbank/2"
+#: Alle Fassungen, die dieser Server spricht, in Angebotsreihenfolge.
+VERTRAEGE = (VERTRAG, VERTRAG_2)
 VERTRAG_ORDNER = Path(__file__).resolve().parent.parent / "vertrag" / "kipm-werkbank-1"
 SCHEMA_ORDNER = VERTRAG_ORDNER / "schemas"
+SCHEMA_ORDNER_2 = VERTRAG_ORDNER.parent / "kipm-werkbank-2" / "schemas"
+
+
+def _ordner(vertrag: str) -> Path:
+    return SCHEMA_ORDNER_2 if vertrag == VERTRAG_2 else SCHEMA_ORDNER
+
 
 #: Größte Ganzzahl, die beide Seiten ohne Verlust austauschen (JavaScript-sicher).
 MAX_GANZZAHL = 2**53 - 1
@@ -66,33 +76,33 @@ def inhaltshash(nachricht: dict) -> str:
     return sha256_hex(ohne)
 
 
-@lru_cache(maxsize=1)
-def _register():
+@lru_cache(maxsize=2)
+def _register(vertrag: str = VERTRAG):
     from referencing import Registry, Resource
     from referencing.jsonschema import DRAFT202012
 
     ressourcen = []
-    for pfad in sorted(SCHEMA_ORDNER.glob("*.schema.json")):
+    for pfad in sorted(_ordner(vertrag).glob("*.schema.json")):
         inhalt = json.loads(pfad.read_text("utf-8"))
         ressourcen.append((inhalt["$id"], Resource.from_contents(inhalt, DRAFT202012)))
     return Registry().with_resources(ressourcen)
 
 
-def _schema(name: str) -> dict:
-    return json.loads((SCHEMA_ORDNER / f"{name}.schema.json").read_text("utf-8"))
+def _schema(name: str, vertrag: str = VERTRAG) -> dict:
+    return json.loads((_ordner(vertrag) / f"{name}.schema.json").read_text("utf-8"))
 
 
-def schema_selbst_pruefen(name: str) -> None:
+def schema_selbst_pruefen(name: str, vertrag: str = VERTRAG) -> None:
     from jsonschema import Draft202012Validator
 
-    Draft202012Validator.check_schema(_schema(name))
+    Draft202012Validator.check_schema(_schema(name, vertrag))
 
 
-def schema_fehler(name: str, daten: Any) -> list[str]:
-    """Verstöße von `daten` gegen das Schema `name`; leer = gültig."""
+def schema_fehler(name: str, daten: Any, vertrag: str = VERTRAG) -> list[str]:
+    """Verstöße von `daten` gegen das Schema `name` der Fassung `vertrag`; leer = gültig."""
     from jsonschema import Draft202012Validator
 
-    pruefer = Draft202012Validator(_schema(name), registry=_register())
+    pruefer = Draft202012Validator(_schema(name, vertrag), registry=_register(vertrag))
     return [
         f"{'/'.join(str(p) for p in f.absolute_path) or '/'}: {f.message}"
         for f in sorted(pruefer.iter_errors(daten), key=lambda f: list(f.absolute_path))
