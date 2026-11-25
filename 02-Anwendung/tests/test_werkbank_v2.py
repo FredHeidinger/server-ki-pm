@@ -578,3 +578,84 @@ def test_paket_ohne_bestaetigtes_repo_macht_den_abschluss_unvollstaendig(
     assert any("pb" in m for m in fehler.json()["fehler"]["details"]["maengel"])
     a.refresh_from_db()
     assert a.zustand != Auftrag.ERLEDIGT
+
+
+# --- Antworten an die Werkbank (Rückfragen zu Fassung 2, 26.11.2026) ----------------------------
+# Diese Fälle halten vorhandenes Serververhalten fest, auf das sich die Werkbank-Gegenseite stützt;
+# sie sind darum von Anfang an grün.
+
+
+def operation(client, inst, operation_id, vertrag=V2):
+    return client.get(
+        h.BASIS + f"operationen/{operation_id}/",
+        HTTP_AUTHORIZATION=f"Bearer {inst.klartext}",
+        HTTP_X_KIPM_VERTRAG=vertrag,
+    )
+
+
+def test_verbundmitglieder_stehen_in_der_ablehnung_und_nichts_wird_gespeichert(
+    client, akteur, inst, projekt, pb_a, pb_b
+):
+    """Frage 1: Die Werkbank erfährt die Mitglieder aus details.erwartet (führendes zuerst); die
+    abgelehnte Übernahme ist nicht gespeichert, ein neuer Versuch mit allen Repositories gelingt."""
+    a = freigegeben(akteur, projekt, pb_a, verbund=[pb_b])
+    erster = uebernahme(inst, pb_a, a, repo_liste=repos((pb_a, COMMIT_A)))
+    fehler = post(client, inst, "uebernehmen/", erster)
+    assert fehler.status_code == 409
+    koerper = fehler.json()
+    assert not werkbank_vertrag.schema_fehler("fehler", koerper, vertrag=V2)
+    assert koerper["fehler"]["code"] == "ZUSTANDSKONFLIKT"
+    assert koerper["fehler"]["details"]["erwartet"] == [f"repo-{pb_a.pk}", f"repo-{pb_b.pk}"]
+    assert operation(client, inst, erster["operation_id"]).json()["status"] == "unbekannt"
+    zweiter = uebernahme(inst, pb_a, a, repo_liste=repos((pb_a, COMMIT_A), (pb_b, COMMIT_B)))
+    assert post(client, inst, "uebernehmen/", zweiter).status_code == 200
+
+
+def test_nach_freds_klaerung_gelingt_dieselbe_uebernahme_ohne_neue_zuweisungsfassung(
+    client, akteur, inst, projekt, pb_a
+):
+    """Frage 4: WIEDERHERSTELLUNG_UNGEKLAERT erhöht keine Fassung und wird nicht gespeichert;
+    nach der Klärung wirkt dieselbe Nachricht (gleiche operation_id)."""
+    a = freigegeben(akteur, projekt, pb_a)
+    fremd = str(uuid.uuid4())
+    client.get(
+        h.BASIS + "abgleich/",
+        {"ausfuehrungen": fremd},
+        HTTP_AUTHORIZATION=f"Bearer {inst.klartext}",
+        HTTP_X_KIPM_VERTRAG=V2,
+    )
+    version = a.zuweisung.version
+    n = uebernahme(inst, pb_a, a)
+    fehler = post(client, inst, "uebernehmen/", n)
+    assert fehler.json()["fehler"]["code"] == "WIEDERHERSTELLUNG_UNGEKLAERT"
+    assert operation(client, inst, n["operation_id"]).json()["status"] == "unbekannt"
+    werkbank.konflikte_klaeren(akteur, inst)
+    a.zuweisung.refresh_from_db()
+    assert a.zuweisung.version == version
+    assert post(client, inst, "uebernehmen/", n).status_code == 200
+
+
+def test_widerruf_der_erlaubnis_erhoeht_die_zuweisungsfassung(akteur, delegiert):
+    """Frage 4: Nach ERLAUBNIS_UNGUELTIG kommt ein neues Angebot nur mit neuer Zuweisungsfassung
+    (Widerruf setzt den Auftrag in den Entwurf zurück)."""
+    d, a = delegiert()
+    version = a.zuweisung.version
+    werkbank.delegation_widerrufen(akteur, d, erwartet_revision=d.revision)
+    a.refresh_from_db()
+    a.zuweisung.refresh_from_db()
+    assert a.zustand == Auftrag.ENTWURF
+    assert a.zuweisung.version > version
+
+
+def test_operationsabfrage_antwortet_in_beiden_fassungen(client, akteur, inst, projekt, pb_a):
+    """Frage 5: GET operationen/<id>/ liest in jeder gesprochenen Fassung; die gespeicherte
+    Antwort behält ihre eigene Fassung."""
+    a = freigegeben(akteur, projekt, pb_a)
+    n = uebernahme(inst, pb_a, a)
+    assert post(client, inst, "uebernehmen/", n).status_code == 200
+    for kopf in (V1, V2):
+        antwort = operation(client, inst, n["operation_id"], vertrag=kopf)
+        assert antwort.status_code == 200
+        daten = antwort.json()
+        assert daten["vertrag"] == kopf and daten["status"] == "gespeichert"
+        assert daten["ausgang"]["antwort"]["vertrag"] == V2
