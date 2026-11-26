@@ -1,0 +1,16 @@
+{
+  "vertrag": "kipm-werkbank/2",
+  "art": "projektdaten",
+  "schema_version": 1,
+  "projektbindung_id": 9,
+  "stand": {"inhalt_revision": 12, "ereignis_bis": 4300, "erzeugt": "2026-11-26T10:00:00+00:00"},
+  "projekt": null,
+  "teile": {
+    "auftraege": [
+      {"id": 562, "nummer": "TA-2", "titel": "K-04 Export für Excel", "art": "auftrag", "zustand": "BLOCKIERT", "revision": 2,
+       "abnahmekriterien": [], "meldungen": [{"art": "hindernis", "text": "Regeln geändert (CLAUDE.md)"}]}
+    ],
+    "verlauf": [{"id": 4300, "zeit": "2026-11-26T10:00:00+00:00", "art": "auftrag_blockiert", "text": "TA-2 blockiert"}]
+  },
+  "seite": {"naechste": null}
+}

@@ -1,0 +1,26 @@
+{
+  "vertrag": "kipm-werkbank/2",
+  "art": "projektdaten",
+  "schema_version": 1,
+  "projektbindung_id": 9,
+  "stand": {"inhalt_revision": 12, "ereignis_bis": 4300, "erzeugt": "2026-11-26T10:00:00+00:00"},
+  "projekt": {"kennung": "testalpha", "name": "TestAlpha", "beschreibung": "Probeprojekt Kassenbuch für den Werkbank-Durchlauf",
+              "zweck": "Barkasse einer Werkstatt", "phase": "Aufbau"},
+  "teile": {
+    "module": [],
+    "arbeitsorte": [{"id": 47, "kennung": "testalpha-auf-diesem-pc", "pfad": "W:\\Werkbanktest\\testalpha", "bestaetigt": true}],
+    "auftraege": [
+      {"id": 561, "nummer": "TA-1", "titel": "K-03 Monatsübersicht im Kassenbuch", "art": "auftrag", "zustand": "IN_ARBEIT",
+       "revision": 1, "abnahmekriterien": ["Kassenbuch.monatsuebersicht(jahr, monat) …"], "meldungen": []}
+    ],
+    "entscheidungen": [{"id": 3, "nummer": "E-3", "titel": "Nur Standardbibliothek", "zustand": "ENTSCHIEDEN"}],
+    "meilensteine": [],
+    "texte": [{"id": 12, "titel": "Auftragsregeln", "version": 4, "ki_lesbar": true,
+               "inhalt": "Beträge immer in Cent. Zugang: [Schlüssel entfernt]"}],
+    "links": [],
+    "verlauf": [{"id": 4299, "zeit": "2026-11-26T09:59:00+00:00", "art": "auftrag_freigegeben", "text": "TA-1 freigegeben"}],
+    "erlaubnisse": [{"id": 1, "revision": 1, "aktionen": ["auftrag_anlegen", "freigeben"], "budget": {"waehrung": "USD", "geld_mikro": 10000000},
+                     "gueltig_bis": "2026-12-04T01:05:00+00:00", "widerrufen": false}]
+  },
+  "seite": {"naechste": "c2"}
+}

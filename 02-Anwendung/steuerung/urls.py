@@ -220,6 +220,11 @@ urlpatterns = [
     path("api/werkbank/v1/uebernehmen/", werkbank_api.uebernehmen, name="werkbank_uebernehmen"),
     path("api/werkbank/v1/schritt/", werkbank_api.schritt, name="werkbank_schritt"),
     path("api/werkbank/v1/ereignisse/", werkbank_api.ereignisse, name="werkbank_ereignisse"),
+    path(
+        "api/werkbank/v1/projektdaten/",
+        werkbank_api.projektdaten,
+        name="werkbank_projektdaten",
+    ),
     path("api/projekt/", api.projekt_lesen, name="api_projekt"),
     path("api/projekt/regelpruefung/", api.projekt_regelpruefung, name="api_regelpruefung"),
     path("api/projekte/", api.projekte, name="api_projekte"),

@@ -14,7 +14,7 @@ from django.core.exceptions import SuspiciousOperation
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import dienst, werkbank, werkbank_vertrag
+from . import dienst, werkbank, werkbank_projektdaten, werkbank_vertrag
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +181,25 @@ def schritt(request: HttpRequest, instanz) -> JsonResponse:
 @werkbank_ansicht("POST")
 def ereignisse(request: HttpRequest, instanz) -> JsonResponse:
     return _aendern("ereignisse", request, instanz)
+
+
+@werkbank_ansicht("GET", kontakt=False)
+def projektdaten(request: HttpRequest, instanz) -> JsonResponse:
+    """Lesezugang „Projektdaten“ (``vertrag/kipm-werkbank-projektdaten-1``), nur unter Fassung 2.
+    Ohne Kontaktvermerk: der Abruf ist kein Lebenszeichen und ändert nichts."""
+    if request.kipm_vertrag != werkbank_vertrag.VERTRAG_2:
+        raise werkbank.WerkbankFehler(
+            426,
+            "VERTRAG_INKOMPATIBEL",
+            f"Die Projektdaten gibt es nur unter {werkbank_vertrag.VERTRAG_2}.",
+            f"Mit {werkbank_vertrag.VERTRAG_2} abrufen.",
+            {"erwartet": werkbank_vertrag.VERTRAG_2, "erhalten": request.kipm_vertrag},
+        )
+    return _antwort(
+        werkbank_projektdaten.seite(
+            instanz,
+            request.GET.get("projektbindung_id"),
+            request.GET.get("seite"),
+            vertrag=request.kipm_vertrag,
+        )
+    )
