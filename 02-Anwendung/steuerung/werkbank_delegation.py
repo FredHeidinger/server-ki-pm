@@ -348,7 +348,8 @@ def freigaben_pruefen(akteur, projekt, *, delegation_id=None):
                 z = WerkbankZuweisung.objects.filter(auftrag=a).first()
                 if z is None:
                     raise dienst.Konflikt("Das zugewiesene Ziel fehlt.")
-                ziel = ziel_pruefen(stand, z.projektbindung_id, bereit=True)
+                # Bereitschaft ist Voraussetzung der Freigabe, nicht ihres Fortbestehens.
+                ziel = ziel_pruefen(stand, z.projektbindung_id)
                 if ziel.arbeitsort_id != a.aktuelle_revision.arbeitsort_id:
                     raise dienst.Konflikt("Der geplante Arbeitsort passt nicht zum Werkbankziel.")
                 if a.zustand == Auftrag.FREIGEGEBEN:
@@ -447,8 +448,7 @@ def ziel_pruefen(stand, ziel_id=None, *, bereit=False):
         or not werkbank.projekt_erlaubt(pb.instanz, pb.projekt)
     ):
         raise dienst.KeinZugriff("Das Werkbankziel ist nicht mehr zugelassen.")
-    jetzt = _zielstand(pb)
-    if jetzt != erwartet:
+    if _zielvergleich(_zielstand(pb)) != _zielvergleich(erwartet):
         raise dienst.Konflikt(
             "Die Zielbindung hat sich seit der W1-Erlaubnis geändert. Erlaubnis neu bestätigen."
         )
@@ -460,11 +460,27 @@ def ziel_pruefen(stand, ziel_id=None, *, bereit=False):
         or pb.instanz.bindung.art != ChatBindung.ART_WERKBANK
     ):
         raise dienst.KeinZugriff("Der Zugang der Zielwerkbank ist nicht mehr aktiv.")
-    if bereit and (not pb.bereit or not pb.repo_fingerabdruck):
+    if bereit and not _bereit(pb):
         raise dienst.Konflikt(
-            "Die Werkbank hat noch keine belastbare Bereitschaft für dieses Ziel gemeldet."
+            "Die Werkbank hat für dieses Ziel noch keine Bereitschaft gemeldet und fragt gerade "
+            "nicht ab. Den Werkbank-Dienst starten und es danach erneut versuchen."
         )
     return pb
+
+
+def _zielvergleich(zielstand):
+    """Der Repository-Fingerabdruck ist der aktuelle Commit der Werkbank (``git:<HEAD>``); ein
+    neuer Commit ist kein Zielwechsel (E1-Befund). Gespeichert bleibt er zur Nachvollziehbarkeit."""
+    return {k: v for k, v in zielstand.items() if k != "repo_fingerabdruck"}
+
+
+def _bereit(pb):
+    """Belastbar bereit: die Werkbank hat für dieses Ziel schon übernommen, oder sie fragt gerade ab
+    (Kontakt innerhalb der Warnfrist). Ein frisches Ziel einer laufenden Werkbank ist damit
+    freigebbar; ihre Bereitschaft meldet sie mit der ersten Übernahme (E1-Befund)."""
+    if pb.bereit and pb.repo_fingerabdruck:
+        return True
+    return pb.instanz.letzter_kontakt is not None and not werkbank.nicht_erreichbar(pb.instanz)
 
 
 def auftrag_pruefen(akteur, auftrag, aktion, *, revision=None, arbeitsort=None):

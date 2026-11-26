@@ -135,7 +135,10 @@ def test_archiviertes_projekt_gibt_keine_neue_befugnis(umfeld):
         pruefen(umfeld, d)
 
 
-@pytest.mark.parametrize("feld,wert", [("version", 2), ("repo_fingerabdruck", "anderes-repo")])
+# Nicht mehr hier: repo_fingerabdruck. Er ist der aktuelle Commit der Werkbank (git:<HEAD>), ein
+# neuer Commit ist kein Zielwechsel (E1-Befund, tests/test_w1_bereitschaft.py). Einen echten
+# Zielwechsel zeigen Bindungsversion, Arbeitsortpfad, Instanz und Zugang (Tests unten).
+@pytest.mark.parametrize("feld,wert", [("version", 2)])
 def test_geaenderte_zielbindung_braucht_eine_neue_erlaubnis(umfeld, feld, wert):
     d = erteilen(umfeld)
     _, stand = pruefen(umfeld, d)

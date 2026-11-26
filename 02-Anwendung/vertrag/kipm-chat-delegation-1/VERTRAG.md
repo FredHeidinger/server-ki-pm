@@ -49,7 +49,10 @@ konkreten Rahmens und kein Beleg für tatsächlich verbrauchte Kosten.
 
 Mehrere Ziele ohne Standard erzeugen einen sichtbaren Konflikt. Eine eindeutige Auswahl
 oder das gespeicherte erlaubte Standardziel ist nötig. Freigabe erfordert eine belastbare
-Bereitschaft und denselben Arbeitsort in Fachrevision und Zielzuweisung.
+Bereitschaft und denselben Arbeitsort in Fachrevision und Zielzuweisung. Belastbar bereit ist ein
+Ziel, für das die Werkbank schon übernommen hat, oder dessen Werkbank gerade abfragt (Kontakt
+innerhalb von 90 s). Der Repository-Fingerabdruck ist der aktuelle Commit der Werkbank; ein neuer
+Commit ändert die Zielbindung nicht.
 
 ## HTTP- und MCP-Wege
 
