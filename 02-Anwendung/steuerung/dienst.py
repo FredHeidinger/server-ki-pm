@@ -642,6 +642,10 @@ def arbeitsort_anlegen(
                 ereignis="Arbeitsort angelegt" if ort.bestaetigt else "Arbeitsort vorgeschlagen",
                 anlass=f"{ort.rechner} {ort.pfad}".strip(),
             )
+            if ort.bestaetigt:
+                from . import werkbank
+
+                werkbank.bindungen_nachziehen(projekt)  # WB06: je Arbeitsort eine Bindung
     except IntegrityError as fehler:
         raise DienstFehler(f"Arbeitsortkennung „{kennung}“ gibt es schon.") from fehler
     return ort
@@ -763,6 +767,10 @@ def arbeitsort_aendern(
         )
         if "bestätigt" in geaendert:
             _abgedeckte_anfragen_erledigen()
+        if ort.bestaetigt and ort.aktiv and {"bestätigt", "aktiv"} & set(geaendert):
+            from . import werkbank
+
+            werkbank.bindungen_nachziehen(ort.projekt)  # WB06: je Arbeitsort eine Bindung
         from . import werkbank_aktionen
 
         werkbank_aktionen.kontext_geaendert(akteur, ort.projekt)

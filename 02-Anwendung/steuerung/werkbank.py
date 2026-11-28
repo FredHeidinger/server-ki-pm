@@ -53,14 +53,46 @@ def _projekte_pruefen(projekte: list[Projekt]) -> list[Projekt]:
 
 
 def _bindungen_sichern(instanz: WerkbankInstanz, projekte: list[Projekt]) -> None:
-    """Jedes erlaubte Projekt bekommt seine Projektbindung (Ziel einer Zuweisung), mit dem ersten
-    aktiven, bestätigten Arbeitsort des Projekts, falls es einen gibt. Bestehende Bindungen
-    bleiben (Fassung und gemeldete Bereitschaft gehen nicht verloren)."""
+    """Jedes erlaubte Projekt bekommt je aktivem, bestätigtem Arbeitsort eine Projektbindung (Ziel
+    einer Zuweisung, Mitglied eines Verbunds; WB06), ohne Arbeitsort genau eine Bindung ohne Ort.
+    Bestehende Bindungen bleiben (Fassung und gemeldete Bereitschaft gehen nicht verloren); eine
+    alte Bindung ohne Ort steht für den ersten bestätigten Arbeitsort, der dafür keine zweite
+    bekommt."""
     for projekt in projekte:
-        ort = projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True).order_by("id").first()
-        WerkbankProjektbindung.objects.get_or_create(
-            instanz=instanz, projekt=projekt, defaults={"arbeitsort": ort}
-        )
+        orte = list(projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True).order_by("id"))
+        vorhanden = list(WerkbankProjektbindung.objects.filter(instanz=instanz, projekt=projekt))
+        if not orte:
+            if not vorhanden:
+                WerkbankProjektbindung.objects.create(instanz=instanz, projekt=projekt)
+            continue
+        belegt = {b.arbeitsort_id for b in vorhanden if b.arbeitsort_id is not None}
+        for alt in (b for b in vorhanden if b.arbeitsort_id is None):
+            # Gegenprüfung WB06 (F2): „erster bestätigter Ort“ verschiebt sich (späte Bestätigung,
+            # Archiv); die alte Bindung bekommt den Ort, für den sie gerade steht, fest eingetragen
+            if orte[0].pk not in belegt:
+                alt.arbeitsort = orte[0]
+                alt.save(update_fields=["arbeitsort"])
+                belegt.add(orte[0].pk)
+        for ort in orte:
+            if ort.pk not in belegt:
+                WerkbankProjektbindung.objects.create(
+                    instanz=instanz, projekt=projekt, arbeitsort=ort
+                )
+
+
+def bindungen_nachziehen(projekt: Projekt) -> None:
+    """Nach dem Bestätigen eines Arbeitsorts (WB06): jede Werkbank, die das Projekt erreichen darf,
+    bekommt die Bindung für den neuen Ort. Ändert keine bestehende Bindung."""
+    for instanz in WerkbankInstanz.objects.filter(erlaubte_projekte=projekt):
+        _bindungen_sichern(instanz, [projekt])
+
+
+def bindungsort(bindung: WerkbankProjektbindung):
+    """Der Arbeitsort einer Bindung: ihr eigener, bei einer alten Bindung ohne Ort der erste
+    aktive, bestätigte Arbeitsort des Projekts (oder None)."""
+    if bindung.arbeitsort_id is not None:
+        return bindung.arbeitsort
+    return bindung.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True).order_by("id").first()
 
 
 KOPPLUNGSCODE_KOPF = "kipm-kopplung/1:"
@@ -91,12 +123,17 @@ def kopplungscode(
     )
     projekte = []
     for b in bindungen:
+        # WB06: je Bindung ihr eigener Arbeitsort; eine alte Bindung ohne Ort wie bisher
         ort = (
-            b.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True)
+            b.arbeitsort
+            if b.arbeitsort_id is not None
+            else b.projekt.arbeitsorte.filter(aktiv=True, bestaetigt=True)
             .exclude(pfad="")
             .order_by("id")
             .first()
         )
+        if ort is not None and (not ort.pfad or not ort.aktiv or not ort.bestaetigt):
+            ort = None
         projekte.append(
             {
                 "projektbindung_id": b.pk,
@@ -989,6 +1026,13 @@ def quelle_pruefen(instanz: WerkbankInstanz, quelle: dict) -> QuellePruefung:
         ).first()
         if ausfuehrung is None:
             raise _nicht_gefunden()
+    # Gegenprüfung WB06 (F1): mit einer Bindung je Arbeitsort ist eine andere Bindung desselben
+    # Projekts nicht die Quelle dieser Zuweisung (eine Ausführung behält die ihrer Übernahme).
+    erwartet = (
+        ausfuehrung.projektbindung_id if ausfuehrung is not None else zuweisung.projektbindung_id
+    )
+    if bindung.pk != erwartet:
+        raise _nicht_gefunden()
     ergebnis = QuellePruefung(bindung, auftrag, zuweisung, ausfuehrung)
     veraltet = ergebnis.veraltet
     if quelle["projektbindung_version"] != bindung.version:

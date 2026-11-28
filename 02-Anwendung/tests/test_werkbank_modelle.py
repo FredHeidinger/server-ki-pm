@@ -75,8 +75,11 @@ def test_projektbindung_standard_und_eindeutig(pbindung, instanz, projekt):
     assert pbindung.version == 1
     assert pbindung.bereit is False
     assert pbindung.bereit_gruende == [] and pbindung.konfig_fingerabdruecke == {}
+    # WB06: eindeutig je Arbeitsort (vorher je Projekt) -- dieselbe Bindung zweimal geht nicht
     with pytest.raises(IntegrityError), transaction.atomic():
-        WerkbankProjektbindung.objects.create(instanz=instanz, projekt=projekt)
+        WerkbankProjektbindung.objects.create(
+            instanz=instanz, projekt=projekt, arbeitsort=pbindung.arbeitsort
+        )
 
 
 def test_server_kennung_dauerhaft_und_einmalig():

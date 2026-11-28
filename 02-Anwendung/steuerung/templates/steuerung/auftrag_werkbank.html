@@ -14,7 +14,7 @@
 
   {% if w.darf_zuweisen %}
   <form method="post" action="{% url 'auftrag_zuweisen' auftrag_id=auftrag.pk %}" class="aktion">{% csrf_token %}
-    <label>Werkbank<br><select name="ziel" required>{% for t in w.ziele %}<option value="{{ t.pk }}"{% if z and z.projektbindung_id == t.pk %} selected{% endif %}>{{ t.instanz.name }}{% if t.bereit %}{% elif t.bereit_gemeldet_am %} (nicht bereit){% else %} (Bereitschaft noch nicht gemeldet){% endif %}</option>{% endfor %}</select></label>
+    <label>Werkbank<br><select name="ziel" required>{% for t in w.ziele %}<option value="{{ t.pk }}"{% if z and z.projektbindung_id == t.pk %} selected{% elif not z and w.vorschlag == t.pk %} selected{% endif %}>{{ t.instanz.name }}{% if t.ortname %} · {{ t.ortname }}{% endif %}{% if t.bereit %}{% elif t.bereit_gemeldet_am %} (nicht bereit){% else %} (Bereitschaft noch nicht gemeldet){% endif %}</option>{% endfor %}</select></label>
     <div class="knopfzeile">
       {% if auftrag.zustand == "ENTWURF" %}<button type="submit" name="freigeben" value="1" class="knopf">Freigeben und Werkbank zuweisen</button>
       <button type="submit" class="knopf zweit">{% if z %}Ziel wechseln{% else %}Nur zuweisen{% endif %}</button>

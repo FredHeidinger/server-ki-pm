@@ -1383,7 +1383,12 @@ class WerkbankInstanz(models.Model):
 
 
 class WerkbankProjektbindung(models.Model):
-    """B. Projekt und bestätigter Arbeitsort einer Instanz samt gemeldeter Bereitschaft."""
+    """B. Projekt und bestätigter Arbeitsort einer Instanz samt gemeldeter Bereitschaft.
+
+    Eine Bindung je Arbeitsort (WB06, Mehr-Repository-Verbund): ein Projekt mit mehreren
+    Repositories hat je Repository eine eigene Bindung derselben Werkbank. Eine Bindung ohne
+    Arbeitsort (angelegt, bevor das Projekt einen bestätigten hatte) gilt wie bisher für den
+    ersten bestätigten Arbeitsort des Projekts und bleibt die einzige ohne Ort."""
 
     instanz = models.ForeignKey(WerkbankInstanz, on_delete=models.CASCADE, related_name="projekte")
     projekt = models.ForeignKey(Projekt, on_delete=models.PROTECT, related_name="werkbankbindungen")
@@ -1400,8 +1405,15 @@ class WerkbankProjektbindung(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["instanz", "projekt"], name="werkbankbindung_projekt_je_instanz"
-            )
+                fields=["instanz", "arbeitsort"],
+                condition=models.Q(arbeitsort__isnull=False),
+                name="werkbankbindung_ort_je_instanz",
+            ),
+            models.UniqueConstraint(
+                fields=["instanz", "projekt"],
+                condition=models.Q(arbeitsort__isnull=True),
+                name="werkbankbindung_ohne_ort_je_instanz",
+            ),
         ]
 
 

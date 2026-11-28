@@ -35,7 +35,7 @@
         <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='konflikte' %}" class="inline">{% csrf_token %}<label class="klein"><input type="checkbox" name="bestaetigt" value="1" required> Ich habe den Stand geprüft</label> <button type="submit" class="knopf zweit klein">Als geklärt markieren</button></form></div>
       {% endif %}
       {% for b in w.bindungen %}
-      <div class="eintragtext">{{ b.projekt.name }}: {% if b.projekt.pk not in w.erlaubt_ids %}<span class="status warn">pausiert</span> <span class="gedaempft klein">KI-PM weist die Werkbank hier ab</span>{% if not w.gesperrt %} <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='fortsetzen' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ b.projekt.pk }}"><button type="submit" class="knopf zweit klein">Fortsetzen</button></form>{% endif %}{% else %}{% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nicht gemeldet</span> <span class="gedaempft klein">meldet sie bei der ersten Übernahme</span>{% endif %}
+      <div class="eintragtext">{{ b.projekt.name }}: {% if b.ort %}<span class="gedaempft klein">Ort {{ b.ort.name }}</span> {% endif %}{% if b.projekt.pk not in w.erlaubt_ids %}<span class="status warn">pausiert</span> <span class="gedaempft klein">KI-PM weist die Werkbank hier ab</span>{% if not w.gesperrt %} <form method="post" action="{% url 'werkbank_pflegen' instanz_id=w.pk wahl='fortsetzen' %}" class="inline">{% csrf_token %}<input type="hidden" name="projekt" value="{{ b.projekt.pk }}"><button type="submit" class="knopf zweit klein">Fortsetzen</button></form>{% endif %}{% else %}{% if b.bereit %}<span class="status ok">bereit</span>{% elif b.bereit_gemeldet_am %}<span class="status warn">nicht bereit</span>{% else %}<span class="status aus">noch nicht gemeldet</span> <span class="gedaempft klein">meldet sie bei der ersten Übernahme</span>{% endif %}
         {% if b.bereit_gemeldet_am %}<span class="gedaempft klein">gemeldet {{ b.bereit_gemeldet_am|date:"d.m. H:i" }}</span>{% endif %}
         {% for g in b.bereit_gruende %}<br><span class="gedaempft klein">Grund: {{ g }}</span>{% endfor %}
         <br><span class="klein">{{ b.vollmacht.satz }}</span>{% if b.vollmacht.start.auftrag or b.vollmacht.uebernahme.auftrag %} <span class="gedaempft klein">So hat KI-PM es am letzten Lauf beobachtet ({% if b.vollmacht.uebernahme.auftrag %}{{ b.vollmacht.uebernahme.auftrag }}{% else %}{{ b.vollmacht.start.auftrag }}{% endif %}); die Werkbank meldet ihre Einstellung nicht, sie kann sich ändern.</span>{% endif %}
@@ -56,13 +56,13 @@
         </table></div>
         {% for b in w.bindungen %}
         <div class="box">
-          <p class="klein"><strong>Kopplungscode für dieses Projekt ({{ b.projekt.name }})</strong>: In der Werkbank im Bereich „KI-PM-Kopplung“ in das Feld „Kopplungscode“ einfügen, dann „Kopplung speichern“. Der Code enthält keinen Schlüssel; die Werkbank behält ihren Zugang.</p>
+          <p class="klein"><strong>Kopplungscode für dieses Projekt ({{ b.projekt.name }}{% if b.ort %} · {{ b.ort.name }}{% endif %})</strong>: In der Werkbank im Bereich „KI-PM-Kopplung“ in das Feld „Kopplungscode“ einfügen, dann „Kopplung speichern“. Der Code enthält keinen Schlüssel; die Werkbank behält ihren Zugang.</p>
           <pre id="code-{{ w.pk }}-bindung-{{ b.pk }}">{{ b.code }}</pre>
           <p><button type="button" class="knopf zweit klein" data-kopieren="code-{{ w.pk }}-bindung-{{ b.pk }}">Kopplungscode kopieren</button></p>
           <p class="gedaempft klein">Meldet die Werkbank „schluessel fehlt“, kennt sie Codes ohne Schlüssel noch nicht; dann die Werte darunter einzeln übernehmen.</p>
         </div>
         <div class="tabellenrahmen"><table class="klein einrichtungswerte">
-          <caption>Für das Projekt {{ b.projekt.name }}</caption>
+          <caption>Für das Projekt {{ b.projekt.name }}{% if b.ort %} · {{ b.ort.name }}{% endif %}</caption>
           <thead><tr><th scope="col">Feld in der Werkbank</th><th scope="col">Wert</th><th scope="col">Wofür</th></tr></thead>
           <tbody>
             <tr><th scope="row">Kennung der Projektbindung</th><td><code id="wert-{{ w.pk }}-bindung-{{ b.pk }}-nummer">{{ b.pk }}</code> <button type="button" class="knopf zweit klein" data-kopieren="wert-{{ w.pk }}-bindung-{{ b.pk }}-nummer">Kopieren</button></td><td>Verbindet dieses Projekt mit dieser Werkbank.</td></tr>

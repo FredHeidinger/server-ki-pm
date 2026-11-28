@@ -95,13 +95,16 @@ def verwaltung(request: HttpRequest) -> dict:
         i.keine_antwort = i.zugang["art"] in ("gueltig", "bald") and werkbank.nicht_erreichbar(i)
         i.erlaubt_ids = {p.pk for p in i.erlaubte_projekte.all()}
         i.offene_konflikte = list(i.konflikte.filter(geklaert_am__isnull=True).order_by("pk"))
-        i.bindungen = list(i.projekte.select_related("projekt").order_by("projekt__name"))
+        i.bindungen = list(
+            i.projekte.select_related("projekt", "arbeitsort").order_by("projekt__name", "id")
+        )
         for b in i.bindungen:
-            # Der Arbeitsort steht beim Anlegen nur vorläufig an der Bindung; gezeigt wird immer der
-            # aktuelle Stand des Projekts (später bestätigt oder geändert).
-            orte = b.projekt.arbeitsorte.filter(aktiv=True)
-            b.ort = orte.filter(bestaetigt=True).order_by("id").first()
-            b.ort_unbestaetigt = None if b.ort else orte.order_by("id").first()
+            # WB06: je Arbeitsort eine Bindung; eine alte Bindung ohne Ort zeigt den aktuellen
+            # ersten bestätigten Ort des Projekts (später bestätigt oder geändert).
+            b.ort = werkbank.bindungsort(b)
+            b.ort_unbestaetigt = (
+                None if b.ort else b.projekt.arbeitsorte.filter(aktiv=True).order_by("id").first()
+            )
             b.code = werkbank.kopplungscode(i, None, _adresse(request), bindung=b)
             b.vollmacht = werkbank._teilmodule()[0].vollmacht(b)
         instanzen.append(i)
@@ -211,14 +214,21 @@ def auftrag_daten(auftrag: Auftrag) -> dict | None:
         .first()
     )
     ziele = list(
-        WerkbankProjektbindung.objects.select_related("instanz")
+        WerkbankProjektbindung.objects.select_related("instanz", "projekt", "arbeitsort")
         .filter(
             projekt=auftrag.projekt,
             instanz__aktiv=True,
             instanz__erlaubte_projekte=auftrag.projekt,
         )
-        .order_by("instanz__name")
+        .order_by("instanz__name", "id")
     )
+    geplant = auftrag.aktuelle_revision.arbeitsort_id if auftrag.revision_nr else None
+    vorschlag = None
+    for t in ziele:  # WB06: bei mehreren Arbeitsorten nennt die Wahl den Ort
+        ort = werkbank.bindungsort(t)
+        t.ortname = ort.name if ort else ""
+        if vorschlag is None and ort is not None and ort.pk == geplant:
+            vorschlag = t.pk  # Gegenprüfung WB06 (R1): der geplante Arbeitsort ist vorgewählt
     ausf = auftrag.ausfuehrungen.order_by("-id").first()
     if zuweisung is None and (not ziele or auftrag.ist_endzustand):
         return None
@@ -226,6 +236,7 @@ def auftrag_daten(auftrag: Auftrag) -> dict | None:
     daten: dict = {
         "zuweisung": zuweisung,
         "ziele": ziele,
+        "vorschlag": vorschlag,
         "darf_zuweisen": (
             auftrag.zustand in (Auftrag.ENTWURF, Auftrag.FREIGEGEBEN)
             and not aktiv
